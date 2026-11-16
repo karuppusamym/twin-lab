@@ -38,6 +38,10 @@ QTT and Synapse are left aside on purpose; everything else from Prod Echo is bui
 - **E-04.** [08-evidence-ablation.md](08-evidence-ablation.md) measures what each kind of
   evidence finds against the source.
 
+## 2026-11-16 — Public repository, required checks
+The repository is public. `main` accepts a pull request only when `guard` and `test` have passed.
+`test` now runs on every pull request; before, a change outside the code paths skipped it.
+
 ## 2026-11-16 — Round 4: the open gaps closed
 PR 4 was merged. Round 4 builds what round 3 left open, and each piece was tried on the
 running labs.
