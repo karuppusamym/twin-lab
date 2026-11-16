@@ -1,0 +1,12 @@
+{"seq": 1, "ts": "2026-11-16T03:37:38.565663Z", "url": "http://localhost:8720/login", "action": "goto", "selector": null, "dom": "dom/0001.html"}
+{"seq": 2, "ts": "2026-11-16T03:37:39.259526Z", "url": "http://localhost:8720/login", "action": "type", "selector": "input#username", "dom": "dom/0002.html", "value": "demo.user"}
+{"seq": 3, "ts": "2026-11-16T03:37:39.446850Z", "url": "http://localhost:8720/login", "action": "type", "selector": "input#password", "dom": "dom/0003.html"}
+{"seq": 4, "ts": "2026-11-16T03:37:39.624589Z", "url": "http://localhost:8720/cases", "action": "click", "selector": "button#btnLogin", "dom": "dom/0004.html"}
+{"seq": 5, "ts": "2026-11-16T03:37:39.824970Z", "url": "http://localhost:8720/cases", "action": "goto", "selector": null, "dom": "dom/0005.html"}
+{"seq": 6, "ts": "2026-11-16T03:37:40.507693Z", "url": "http://localhost:8720/cases", "action": "type", "selector": "input#caseNo", "dom": "dom/0006.html", "value": "C-1005"}
+{"seq": 7, "ts": "2026-11-16T03:37:40.691321Z", "url": "http://localhost:8720/cases", "action": "click", "selector": "button#btnSearch", "dom": "dom/0007.html"}
+{"seq": 8, "ts": "2026-11-16T03:37:40.944792Z", "url": "http://localhost:8720/cases/C-1005", "action": "goto", "selector": null, "dom": "dom/0008.html"}
+{"seq": 9, "ts": "2026-11-16T03:37:41.695502Z", "url": "http://localhost:8720/cases/C-1005", "action": "select", "selector": "select#category", "dom": "dom/0009.html", "value": "Online access"}
+{"seq": 10, "ts": "2026-11-16T03:37:41.890010Z", "url": "http://localhost:8720/cases/C-1005", "action": "select", "selector": "select#subcategory", "dom": "dom/0010.html", "value": "Locked out"}
+{"seq": 11, "ts": "2026-11-16T03:37:42.071084Z", "url": "http://localhost:8720/cases/C-1005", "action": "select", "selector": "select#caseStatus", "dom": "dom/0011.html", "value": "ESCALATED"}
+{"seq": 12, "ts": "2026-11-16T03:37:42.252826Z", "url": "http://localhost:8720/cases/C-1005", "action": "click", "selector": "button#btnSave", "dom": "dom/0012.html"}

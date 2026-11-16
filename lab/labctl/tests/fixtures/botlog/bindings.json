@@ -1,0 +1,9 @@
+{
+  "apps": {
+    "showcase": {
+      "web": "http://localhost:8720",
+      "api": "http://localhost:8720",
+      "credentials": {"username": "demo.user", "password": "workbench-demo"}
+    }
+  }
+}
