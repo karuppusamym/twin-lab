@@ -27,9 +27,14 @@ def make_repo(root: Path, app: str = "demo", brief_text: str = "# Build brief: d
     (a / "app.yaml").write_text(
         "id: demo\ncopies:\n  ref: sha256:0123456789abcdef\n"
         "run:\n  api:\n    port: 8000\n    health: /api/health\n  env:\n    database_url: DATABASE_URL\n"
-        "built_for:\n- uipath-demo\n- python-demo\n",
+        "built_for:\n- uipath-demo\n- python-demo\n- requested-flow\n",
         encoding="utf-8",
     )
+    for automation in ("uipath-demo", "python-demo"):  # registered; requested-flow is only a flow
+        (root / "automations" / automation).mkdir()
+        (root / "automations" / automation / "automation.yaml").write_text(
+            f"id: {automation}\n", encoding="utf-8"
+        )
     (a / "pages" / "1.html").write_text("<html></html>", encoding="utf-8")
     (a / "pages" / "notes.txt").write_text("not a page", encoding="utf-8")
     (a / ".env").write_text("SECRET=x", encoding="utf-8")
@@ -154,6 +159,7 @@ def test_prompt_names_repo_branch_app_and_every_step(tmp_path):
         "/api/health",
         "python -m labctl conformance uipath-demo",
         "python -m labctl conformance python-demo",
+        "python -m labctl lab up demo",
         "apps/demo/BUILD-NOTES.md",
         "exactly ONE pull request",
         "demo: demo app from brief sha256:0123456789abcdef",
@@ -161,6 +167,19 @@ def test_prompt_names_repo_branch_app_and_every_step(tmp_path):
         "Report failures exactly as they are",
     ]:
         assert needle in text, needle
+    assert "conformance requested-flow" not in text  # a flow has nothing to replay
+
+
+def test_prompt_without_run_settings_uses_the_lab_conventions(tmp_path):
+    root = make_repo(tmp_path)
+    app_yaml = root / "apps" / "demo" / "app.yaml"
+    app_yaml.write_text(
+        "id: demo\ncopies:\n  ref: sha256:0123456789abcdef\nrun: {}\n", encoding="utf-8"
+    )
+    text = pkg.prompt(root, "demo", "example/twin-lab")
+    assert "`DATABASE_URL`" in text and "`/api/health`" in text
+    assert "the brief names" not in text and "the brief states" not in text
+    assert "apps/demo/pages/*.html" in text and "behaviours.json" in text
 
 
 def test_prompt_is_the_task_file_in_the_package(tmp_path):

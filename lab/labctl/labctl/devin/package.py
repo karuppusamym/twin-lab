@@ -144,12 +144,16 @@ def prompt(repo_root: Path, app_id: str, repo: str | None) -> str:
     _check_inputs(repo_root, app_id)
     conf = _app_yaml(repo_root, app_id)
     digest = brief_digest(repo_root, app_id)
-    built_for = [str(a) for a in conf.get("built_for") or []]
+    # Only registered automations can be replayed; requested flows have nothing to run.
+    built_for = [
+        str(a) for a in conf.get("built_for") or []
+        if (repo_root / "automations" / str(a) / "automation.yaml").is_file()
+    ]  # fmt: skip
     engine = ((conf.get("stack") or {}).get("db") or {}).get("engine") or "postgres"
     db_var, port, health = _run_env(conf)
-    db_var = db_var or "the database variable the brief names"
+    db_var = db_var or "DATABASE_URL"  # the lab's convention when the evidence names none
     port_text = str(port) if port else "<container port>"
-    health_text = f"`{health}`" if health else "the health path the brief states"
+    health_text = f"`{health}`" if health else "`/api/health`"
     app = f"apps/{app_id}"
     if repo:
         repo_line = (
@@ -166,9 +170,14 @@ def prompt(repo_root: Path, app_id: str, repo: str | None) -> str:
         conformance = "\n".join(f"   python -m labctl conformance {a}" for a in built_for)
         conformance_step = (
             "6. Conformance, one run per automation the app is built for. First run "
-            "`python -m labctl --help`; if it lists a `conformance` command, run:\n\n"
-            f"   ```bash\n{conformance}\n   ```\n\n"
-            '   If the command does not exist yet, do not write one; record "conformance: not '
+            "`python -m labctl --help`; if it lists `lab` and `conformance` commands, start the "
+            "app in the lab (it needs the ports under `lab:` in `app.yaml` to be free), check, "
+            "and stop it:\n\n"
+            f"   ```bash\n   python -m labctl lab up {app_id}\n{conformance}\n"
+            f"   python -m labctl lab down {app_id} --wipe\n   ```\n\n"
+            "   Every automation must report READY. A BLOCKED report names each missing selector, "
+            "route or table: fix the app, never the automation or the check.\n"
+            '   If the commands do not exist yet, do not write them; record "conformance: not '
             'available in this repository" in BUILD-NOTES.md and the pull request.'
         )
     else:
@@ -197,12 +206,16 @@ inputs at their repository paths. `MANIFEST.json` in the package lists every fil
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml` and `{app}/pages/*.html` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json` and `{app}/pages/*.html` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
    - If the repository already has a `{app}/BRIEF.md` that differs from the package, stop and
      ask which one to build from.
-3. Read the source files the brief lists, and only what they import. Files under
+3. Read what the brief builds from. If it lists source files, read them and only what they
+   import. Otherwise (no source code, the usual case) read `{app}/pages/*.html`: value-free
+   snapshots of each recorded screen, with the real element ids, classes, labels and layout;
+   `{app}/behaviours.json` and the brief's "Behaviour seen in the recordings": what each screen
+   does; and `{app}/model.yaml`: request and response shapes, codes and timings. Files under
    `evidence/{app_id}/screenshots/` in the package show how screens look; use them for
    reference only and do not commit them (`evidence/` is Git-ignored on purpose).
 
