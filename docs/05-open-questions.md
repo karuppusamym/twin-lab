@@ -6,11 +6,16 @@ Milestone 1 needs none of these answered. Each is listed with the item it blocks
 
 1. **What is QTT's stack?** Frontend framework and version, backend language and framework,
    database engine. This decides whether T-05 needs a second stack analyser.
-2. **May an AI coding agent read QTT's source repository?** Which one (Devin, Copilot, Claude Code),
-   under which approval, and may the repository leave the network it lives on? If not, the fallback
-   is a brief written by a person from screens, API documentation and DDL.
-3. **Which automations touch QTT today?** How many, which are UiPath, which already have an agentic
-   or Python version, and who owns each.
+2. **Answered 2026-11-15: no source access.** QTT is built from other evidence
+   ([06-evidence.md](06-evidence.md)). New question: **what evidence can we get for QTT?**
+   - HAR recordings of each flow: who records them, in which environment (production holds
+     customer data; UAT may differ from production), and where are they stored?
+   - The UiPath projects themselves, or only descriptions of what they do?
+   - Database schema (DDL) for the tables the flows use; any API description?
+   - Screenshots or screen recordings of each screen?
+3. **Which automations touch QTT today, and will their code be shared?** How many, which are
+   UiPath, which already have an agentic or Python version, and who owns each. Where code is not
+   shared, someone writes the flow down (`flows/`), and the demo is labelled accordingly.
 4. **What else do those automations touch?** If a QTT process reads a key from another application
    first, that application needs a demo copy too, or the automation stays BLOCKED.
 5. **Are robot logs for the QTT automations obtainable?** They are the only measured source for
@@ -41,7 +46,10 @@ Milestone 1 needs none of these answered. Each is listed with the item it blocks
 |---|---|---|
 | The AI-built app looks right but its selectors differ from the real app | T-07, T-25 | Conformance check uses the automations' real selectors; pin the same UI library version |
 | The agent reproduces rules wrongly and nobody notices | T-25 | Rules listed in `app.yaml` as `hypothesis`; owner review; trust guard |
-| Source access is refused | T-24 | Fallback brief from screens, API docs and DDL; slower, lower fidelity |
+| No source access (now the expected case) | E-01 onward | Evidence-driven factory; every item labelled with its basis; HAR recordings are the strongest substitute |
+| A HAR or database export with customer data reaches the repository | E-02 | Evidence store outside Git; parser drops credentials and keeps shapes only; a test asserts no recorded value survives into the model |
+| A sample or skeleton app is presented as a copy | E-03, T-15 | Mode label on every app and in every session report |
+| Recording and bot disagree on a selector | E-02 | Never resolved silently; listed as an open question for a person |
 | Demo app scope creeps to "all of QTT" | T-24 | Brief is generated from the demand report; anything else needs a registered automation |
 | Slowness numbers are guesses presented as measurements | T-26 | Profile carries its `calibration` source; sessions show injected delay separately |
 | The real app changes and the demo drifts | after T-25 | `app.yaml` records the source commit; a periodic check reports how far behind it is |

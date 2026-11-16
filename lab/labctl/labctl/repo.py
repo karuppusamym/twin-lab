@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
+from labctl import appmodel  # noqa: F401  (registers the model and flow contracts)
 from labctl.models import KINDS, Contract
 
 ROOT_MARKERS = ("automations", "apps", "lab")
@@ -37,6 +38,8 @@ def kind_of(path: Path) -> str | None:
         return None
     if path.parent.name == "conditions":
         return "condition"
+    if path.parent.name == "flows":
+        return "flow"
     stem = path.name.split(".")[0]
     return stem if stem in KINDS else None
 
@@ -76,6 +79,8 @@ def contract_files(root: Path) -> list[Path]:
     patterns = (
         "automations/*/automation.yaml",
         "apps/*/app.yaml",
+        "apps/*/model.yaml",
+        "flows/*.yaml",
         "data-packs/*/pack.yaml",
         "conditions/*.yaml",
         "specs/*.example.yaml",

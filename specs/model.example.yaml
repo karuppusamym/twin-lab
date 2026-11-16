@@ -1,0 +1,58 @@
+app: showcase
+evidence:
+  - {id: "source:reference/case-workbench", kind: source, ref: "sha256:3adecca8a37e027b", complete: [screens, routes, tables]}
+  - {id: "automation:uipath-case-update", kind: automation, ref: "uipath-analyser@0.1.0"}
+  - {id: "flow:case-update", kind: flow, ref: demo team}
+stack:
+  frontend: {framework: react, version: "18.3.1", ui_library: null}
+  backend: {framework: fastapi, version: ">=0.110", language: python}
+  db: {engine: sqlite}
+  pinned: {react: "18.3.1", react-router-dom: "6.26.2"}
+  env: [DATABASE_URL]
+  from: ["source:reference/case-workbench"]
+screens:
+  - name: cases
+    aliases: [Find a case]
+    path: /cases
+    basis: observed
+    from: ["source:reference/case-workbench", "automation:uipath-case-update", "flow:case-update"]
+    component: SearchPage
+    at: {file: reference/case-workbench/frontend/src/main.tsx, line: 56}
+    files: [reference/case-workbench/frontend/src/pages/Search.tsx]
+    ids: [btnSearch, caseNo, results]
+    classes: [status]
+    elements:
+      - {selector: "input#caseNo", actions: [type], basis: observed, from: ["automation:uipath-case-update", "source:reference/case-workbench"]}
+      - {label: Case number, basis: described, from: ["flow:case-update"]}
+    calls:
+      - {method: GET, path: /api/cases/search, at: {file: reference/case-workbench/frontend/src/pages/Search.tsx, line: 21}}
+routes:
+  - method: GET
+    path: /api/cases/search
+    basis: observed
+    from: ["source:reference/case-workbench"]
+    handler: search
+    at: {file: reference/case-workbench/backend/app/main.py, line: 161}
+    query: [caseNo, customer, status]
+    tables: [cases, customer]
+tables:
+  - name: cases
+    basis: observed
+    from: ["source:reference/case-workbench", "automation:uipath-case-update"]
+    model: Case
+    at: {file: reference/case-workbench/backend/app/models.py, line: 55}
+    columns:
+      - {name: id, type: INTEGER, nullable: false, primary_key: true, autoincrement: true}
+      - {name: case_no, type: VARCHAR(12), nullable: false, unique: true}
+rules:
+  - {text: "Resolving needs at least one note", where: [Case], basis: described, from: ["flow:case-update"]}
+  - text: "422 NOTE_REQUIRED when not notes: Add a note before resolving the case"
+    where: ["PUT /api/cases/{case_no}"]
+    basis: observed
+    status: 422
+    code: NOTE_REQUIRED
+    from: ["source:reference/case-workbench"]
+flows: [case-update]
+conflicts:
+  - what: "selector button#go on /cases: #go not in this screen's source"
+    evidence: ["automation:uipath-case-update", "source:reference/case-workbench"]

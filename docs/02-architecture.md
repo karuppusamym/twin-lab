@@ -4,7 +4,7 @@
  KNOW                        BUILD                              RUN
  ----                        -----                              ---
  Automation registry         App factory                        Twin Lab portal
-   automation.yaml             build brief  <── real source       apps · data · conditions · sessions
+   automation.yaml             build brief  <── evidence       apps · data · conditions · sessions
    analysers:                  AI coding agent ──► pull request          │ controls
      UiPath XAML               apps/<app>/ in the monorepo               ▼
      Python / agent code       per-app pipeline ──► container     lab agent ── demo app ── DB link ── DB
@@ -44,34 +44,38 @@ scope of the demo app.
 
 ## 2. App factory
 
-Turns a demand report plus the real application's source into a demo app.
+Turns whatever evidence exists for an application into a demo app. Source code is usually not
+available; the full design is in [06-evidence.md](06-evidence.md).
 
-1. **Source analysis.** From the real repository:
-   - backend entities, migrations and SQL in data-access code → `db/schema.sql`
-   - controllers, DTOs and route tables → the API surface
-   - frontend routes, components and templates → screens, with the framework and UI library versions
-   - validation and business rules on the paths in the demand report → a rule list, each `hypothesis`
-2. **Build brief** (`apps/<app>/BRIEF.md`): the demand report, the analysis, the stack to pin, and
-   the acceptance checks. A person reviews it. It contains no production hostnames or data.
-3. **Build.** An AI coding agent (Devin, Copilot agent or Claude Code) implements the brief on a
-   branch and opens a pull request. The playbook and trust rules from
-   `ApplicationTwinStudio/docs/devin-playbook.md` carry over: the agent reports results as they are,
-   and cannot approve its own rules.
-4. **Conformance check.** Run in the pipeline against the built app:
+1. **Collect evidence** into the evidence store: automation code, HAR recordings, database schema,
+   API descriptions, screenshots, flow descriptions, and source code when there is any. Raw
+   evidence never enters the repository.
+2. **Analyse** each piece into one app model, `apps/<app>/model.yaml`: screens and elements,
+   flows, routes with request and response shapes, tables, rules, stack. Every item records the
+   evidence it came from and its basis: `observed`, `declared`, `inferred`, `described` or
+   `assumed`. Conflicts between kinds of evidence become open questions.
+3. **Scope** the model to the demand: what registered automations touch, or the flows a person
+   requested in `flows/`.
+4. **Build brief** (`apps/<app>/BRIEF.md`) and `db/schema.sql` from the scoped model. It says
+   which mode each part is built in (copy, reconstruction, skeleton, backend only, sample) and
+   what was assumed. A person reviews it.
+5. **Build.** An AI coding agent (Devin, Copilot agent or Claude Code) implements the brief under
+   [factory-playbook.md](factory-playbook.md) and opens a pull request. Screenshots are given to
+   it directly. It reports results as they are and cannot approve its own rules.
+6. **Conformance check.** Run in the pipeline against the built app:
    - every selector in every mapped `automation.yaml` resolves on its screen (headless browser)
    - every route exists with the declared method
    - every table and column exists in the schema
-   - result per automation: `READY`, or `BLOCKED` with each gap named
-
-Whether the agent may read the real source repository is an approval question, listed in
-`05-open-questions.md`. If it may not, the fallback is a brief written from screenshots, API
-documentation and DDL, with selectors taken from the automations themselves.
+   - result per automation: `READY`, or `BLOCKED` with each gap named, and how much of what was
+     checked is `observed` rather than `assumed`
 
 ## 3. Monorepo and pipelines
 
 ```
 twin-lab/
   automations/<id>/          automation.yaml, source or pointer
+  flows/<id>.yaml            flows a person asked for, when there is no automation code
+  evidence/                  raw HAR files, exports, screenshots; ignored by Git, never committed
   apps/<app>/                app.yaml, BRIEF.md, frontend/, backend/, db/schema.sql, Dockerfile
   lab/
     portal/                  the Twin Lab UI and its API

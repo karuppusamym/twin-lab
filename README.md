@@ -35,13 +35,18 @@ pytest -q
 | [docs/03-contracts.md](docs/03-contracts.md) | The files everything agrees on: `automation.yaml`, `app.yaml`, data pack, condition profile, session. |
 | [docs/04-plan.md](docs/04-plan.md) | Ordered build items with a Definition of Done each. |
 | [docs/05-open-questions.md](docs/05-open-questions.md) | What must be answered before specific items, starting with QTT. |
+| [docs/06-evidence.md](docs/06-evidence.md) | Building apps without source code: kinds of evidence, the app model, build modes, privacy. |
 
 ## The idea in six lines
 
-1. **Register the automations first.** No demo app is built until an automation that needs it is known.
-2. **Analyse** each automation: which apps, screens, selectors, APIs and tables it touches.
-3. **Build a real demo app** per application, in that application's own framework, with an AI coding
-   agent working from the real source repository. Scope is what the automations touch, nothing more.
+1. **Start from need.** A demo app is built for registered automations, or for flows a person asks
+   for when there is no automation code. Nothing beyond that is built.
+2. **Gather evidence**: automation code, HAR recordings, database schema, API descriptions,
+   screenshots, a description of the flow, source code when there is any. Real source is usually
+   not available.
+3. **Build a demo app** per application with an AI coding agent, from one app model that records
+   where every screen, element, route and table came from. Each app says how close it is: copy,
+   reconstruction, skeleton, backend only, or sample.
 4. **One Git repository, one pipeline per app.** Each app is its own container with its own database.
 5. **Map** each automation to the built apps and check it mechanically: every selector, route and
    table it needs must exist.

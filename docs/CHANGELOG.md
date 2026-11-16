@@ -2,6 +2,20 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-15 — E-01 App model with provenance (done)
+Everything known about an application now goes into one model, `apps/<app>/model.yaml`, and the
+brief, schema and `app.yaml` are generated from it alone. Builders exist for three kinds of
+evidence: source code (`observed`, and complete for screens, routes and tables), automations
+(`declared`) and requested flows in `flows/<id>.yaml` (`described`). `merge` keeps the strongest
+basis and every source of each item, never merges paths that only look alike (`/cases/search` and
+`/cases/{id}` stay separate), and turns disagreements into conflicts: a selector the source does
+not show, a route, screen, table or column that complete evidence lacks. A declared item is not a
+conflict when nothing complete covers its area, which is what makes automation-only and
+flow-only briefs possible. `labctl brief` takes `--source` optionally and reads flows; a requested
+flow brings its screen, routes and tables into scope. Paths in the model are never absolute. For
+the showcase the scope, rules and schema are unchanged from T-05. Not yet: HAR (E-02), DDL and API
+descriptions and mode labels (E-03).
+
 ## 2026-11-15 — Git repository
 `twin-lab` is a Git repository. `main` holds the platform (T-00 to T-05); the showcase demo app
 from T-06 is on branch `app/showcase`, which stands in for the pull request T-06 could not open.
