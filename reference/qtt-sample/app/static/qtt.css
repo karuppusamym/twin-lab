@@ -1,0 +1,73 @@
+/* QTT sample styles. Plain CSS, no framework. */
+:root {
+  --ink: #1f2933;
+  --muted: #616e7c;
+  --line: #d9e2ec;
+  --bg: #f5f7fa;
+  --brand: #1d4e89;
+  --ok: #1e7b4d;
+  --bad: #b42318;
+  --warn: #a15c07;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 "Segoe UI", Arial, sans-serif; color: var(--ink); background: var(--bg); }
+a { color: var(--brand); }
+.app-header { display: flex; align-items: center; gap: 24px; padding: 10px 20px; background: var(--brand); color: #fff; }
+.app-header a { color: #fff; text-decoration: none; }
+.app-title { font-weight: 700; font-size: 18px; }
+.app-sub { font-weight: 400; font-size: 12px; opacity: .8; margin-left: 6px; }
+.main-nav { display: flex; gap: 16px; flex: 1; }
+.main-nav a:hover { text-decoration: underline; }
+.user-box { display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.content { max-width: 1180px; margin: 0 auto; padding: 16px 20px 40px; }
+.app-footer { text-align: center; color: var(--muted); font-size: 12px; padding: 16px; }
+h1 { font-size: 22px; margin: 8px 0 14px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
+.login-card { max-width: 360px; margin: 60px auto; }
+.login-card label, .login-card input, .login-card button { display: block; width: 100%; }
+.login-card input { margin: 4px 0 12px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 4px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.filters input[type=text], .filters select { padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; }
+.check { display: inline-flex; gap: 4px; align-items: center; }
+.btn { padding: 6px 12px; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; font: inherit; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn-danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn-link { border: none; background: none; color: var(--brand); text-decoration: underline; }
+.btn-small { padding: 3px 9px; font-size: 13px; }
+.grid { width: 100%; border-collapse: collapse; background: #fff; }
+.grid th, .grid td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.grid thead th { background: #eef2f7; font-weight: 600; }
+.category-row th { background: #f0f4f8; color: var(--brand); }
+.count, .hint { color: var(--muted); }
+.empty { color: var(--muted); font-style: italic; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e4e7eb; }
+.status-open { background: #e0ecff; color: #1d4e89; }
+.status-in_progress { background: #fff4d6; color: var(--warn); }
+.status-submitted { background: #ede4ff; color: #5b2a9e; }
+.status-returned { background: #fde4e1; color: var(--bad); }
+.status-approved { background: #dcf5e7; color: var(--ok); }
+.title-row { display: flex; align-items: center; gap: 14px; }
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.summary dl { display: grid; grid-template-columns: 120px 1fr; gap: 4px 10px; margin: 0; }
+.summary dt { color: var(--muted); }
+.summary dd { margin: 0; }
+.checklist select, .checklist input[type=text] { width: 100%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; }
+.checklist .comment-input.required { border-color: var(--bad); background: #fff8f7; }
+.guidance { color: var(--muted); font-size: 12px; }
+.item-status { font-size: 12px; margin-left: 6px; }
+.item-status.ok { color: var(--ok); }
+.item-status.error { color: var(--bad); }
+.msg { margin: 8px 0; padding: 0; }
+.msg:empty { display: none; }
+.msg-ok { padding: 8px 12px; background: #dcf5e7; border: 1px solid #a6e0bf; border-radius: 4px; }
+.msg-error { padding: 8px 12px; background: #fde4e1; border: 1px solid #f5b5ad; border-radius: 4px; }
+.notice { padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; }
+.notice-locked { background: #dcf5e7; }
+.notice-returned { background: #fde4e1; }
+.findings { margin: 0; padding-left: 18px; }
+.actions textarea { width: 100%; margin: 6px 0 10px; padding: 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+.actions .buttons { display: flex; gap: 10px; }
+.inline-form { display: flex; gap: 8px; align-items: center; }
+.inline-form input[type=text] { flex: 1; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; }

@@ -1,0 +1,265 @@
+id: uipath-qtt-qc-review
+name: QTT QC review (UiPath)
+type: uipath
+surface: combo
+trigger: manual
+owner: unassigned
+source:
+  path: ./project
+  entry: Main.xaml
+touches:
+- app: qtt
+  via: web
+  screens:
+  - name: login
+    path: /login
+    uses:
+    - action: type
+      selector: input#username
+      field: in_User
+      raw: <webctrl id='username' tag='INPUT' />
+    - action: type
+      selector: input#password
+      field: in_Password
+      raw: <webctrl id='password' tag='INPUT' />
+    - action: click
+      selector: button#btnLogin
+      raw: <webctrl id='btnLogin' tag='BUTTON' />
+  - name: queue
+    path: /queue
+    uses:
+    - action: select
+      selector: select#statusFilter
+      raw: <webctrl id='statusFilter' tag='SELECT' />
+    - action: type
+      selector: input#reviewSearch
+      field: in_ReviewNo
+      raw: <webctrl id='reviewSearch' tag='INPUT' />
+    - action: click
+      selector: button#btnFilter
+      raw: <webctrl id='btnFilter' tag='BUTTON' />
+    - action: wait
+      selector: table#queueTable tr.review-row
+      field: found
+      raw: <webctrl id='queueTable' tag='TABLE' /><webctrl tag='TR' class='review-row' />
+    - action: read
+      selector: table#queueTable td.status
+      field: queueStatus
+      raw: <webctrl id='queueTable' tag='TABLE' /><webctrl tag='TD' class='status' />
+  - name: reviews-item
+    path: /reviews/{in_ReviewNo}
+    uses:
+    - action: read
+      selector: dd#loanNo
+      field: loanNo
+      raw: <webctrl id='loanNo' tag='DD' />
+    - action: type
+      selector: input#comment-CRD-01
+      field: in_PassComment
+      raw: <webctrl id='comment-CRD-01' tag='INPUT' />
+    - action: select
+      selector: select#result-CRD-01
+      raw: <webctrl id='result-CRD-01' tag='SELECT' />
+    - action: click
+      selector: button#save-CRD-01
+      raw: <webctrl id='save-CRD-01' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-CRD-01.item-status.ok
+      raw: <webctrl id='itemStatus-CRD-01' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-CRD-02
+      field: in_PassComment
+      raw: <webctrl id='comment-CRD-02' tag='INPUT' />
+    - action: select
+      selector: select#result-CRD-02
+      raw: <webctrl id='result-CRD-02' tag='SELECT' />
+    - action: click
+      selector: button#save-CRD-02
+      raw: <webctrl id='save-CRD-02' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-CRD-02.item-status.ok
+      raw: <webctrl id='itemStatus-CRD-02' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-CRD-03
+      field: in_PassComment
+      raw: <webctrl id='comment-CRD-03' tag='INPUT' />
+    - action: select
+      selector: select#result-CRD-03
+      raw: <webctrl id='result-CRD-03' tag='SELECT' />
+    - action: click
+      selector: button#save-CRD-03
+      raw: <webctrl id='save-CRD-03' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-CRD-03.item-status.ok
+      raw: <webctrl id='itemStatus-CRD-03' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-INC-01
+      field: in_FailComment
+      raw: <webctrl id='comment-INC-01' tag='INPUT' />
+    - action: select
+      selector: select#result-INC-01
+      raw: <webctrl id='result-INC-01' tag='SELECT' />
+    - action: click
+      selector: button#save-INC-01
+      raw: <webctrl id='save-INC-01' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-INC-01.item-status.ok
+      raw: <webctrl id='itemStatus-INC-01' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-INC-02
+      field: in_PassComment
+      raw: <webctrl id='comment-INC-02' tag='INPUT' />
+    - action: select
+      selector: select#result-INC-02
+      raw: <webctrl id='result-INC-02' tag='SELECT' />
+    - action: click
+      selector: button#save-INC-02
+      raw: <webctrl id='save-INC-02' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-INC-02.item-status.ok
+      raw: <webctrl id='itemStatus-INC-02' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-INC-03
+      field: in_PassComment
+      raw: <webctrl id='comment-INC-03' tag='INPUT' />
+    - action: select
+      selector: select#result-INC-03
+      raw: <webctrl id='result-INC-03' tag='SELECT' />
+    - action: click
+      selector: button#save-INC-03
+      raw: <webctrl id='save-INC-03' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-INC-03.item-status.ok
+      raw: <webctrl id='itemStatus-INC-03' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-COL-01
+      field: in_PassComment
+      raw: <webctrl id='comment-COL-01' tag='INPUT' />
+    - action: select
+      selector: select#result-COL-01
+      raw: <webctrl id='result-COL-01' tag='SELECT' />
+    - action: click
+      selector: button#save-COL-01
+      raw: <webctrl id='save-COL-01' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-COL-01.item-status.ok
+      raw: <webctrl id='itemStatus-COL-01' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-COL-02
+      field: in_PassComment
+      raw: <webctrl id='comment-COL-02' tag='INPUT' />
+    - action: select
+      selector: select#result-COL-02
+      raw: <webctrl id='result-COL-02' tag='SELECT' />
+    - action: click
+      selector: button#save-COL-02
+      raw: <webctrl id='save-COL-02' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-COL-02.item-status.ok
+      raw: <webctrl id='itemStatus-COL-02' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-COL-03
+      field: in_PassComment
+      raw: <webctrl id='comment-COL-03' tag='INPUT' />
+    - action: select
+      selector: select#result-COL-03
+      raw: <webctrl id='result-COL-03' tag='SELECT' />
+    - action: click
+      selector: button#save-COL-03
+      raw: <webctrl id='save-COL-03' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-COL-03.item-status.ok
+      raw: <webctrl id='itemStatus-COL-03' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-CMP-01
+      field: in_PassComment
+      raw: <webctrl id='comment-CMP-01' tag='INPUT' />
+    - action: select
+      selector: select#result-CMP-01
+      raw: <webctrl id='result-CMP-01' tag='SELECT' />
+    - action: click
+      selector: button#save-CMP-01
+      raw: <webctrl id='save-CMP-01' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-CMP-01.item-status.ok
+      raw: <webctrl id='itemStatus-CMP-01' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-CMP-02
+      field: in_PassComment
+      raw: <webctrl id='comment-CMP-02' tag='INPUT' />
+    - action: select
+      selector: select#result-CMP-02
+      raw: <webctrl id='result-CMP-02' tag='SELECT' />
+    - action: click
+      selector: button#save-CMP-02
+      raw: <webctrl id='save-CMP-02' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-CMP-02.item-status.ok
+      raw: <webctrl id='itemStatus-CMP-02' tag='SPAN' class='item-status ok' />
+    - action: type
+      selector: input#comment-CMP-03
+      field: in_PassComment
+      raw: <webctrl id='comment-CMP-03' tag='INPUT' />
+    - action: select
+      selector: select#result-CMP-03
+      raw: <webctrl id='result-CMP-03' tag='SELECT' />
+    - action: click
+      selector: button#save-CMP-03
+      raw: <webctrl id='save-CMP-03' tag='BUTTON' />
+    - action: wait
+      selector: span#itemStatus-CMP-03.item-status.ok
+      raw: <webctrl id='itemStatus-CMP-03' tag='SPAN' class='item-status ok' />
+    - action: click
+      selector: button#btnSubmit
+      raw: <webctrl id='btnSubmit' tag='BUTTON' />
+    - action: wait
+      selector: div#message
+      raw: <webctrl id='message' tag='DIV' />
+    - action: read
+      selector: div#message
+      field: out_Message
+      raw: <webctrl id='message' tag='DIV' />
+    - action: read
+      selector: span#reviewStatus
+      field: out_Status
+      raw: <webctrl id='reviewStatus' tag='SPAN' />
+- app: qtt
+  via: api
+  routes:
+  - method: POST
+    path: /api/login
+  - method: GET
+    path: /api/reviews/{in_ReviewNo}
+- app: qtt
+  via: db
+  tables:
+  - table: review_audit
+    columns:
+    - event
+    - from_status
+    - to_status
+    - actor
+    - created_at
+    - review_id
+    access: read
+  - table: qc_reviews
+    columns:
+    - review_id
+    - review_no
+    access: read
+bindings:
+  in_QttUrl: '{{qtt.web}}'
+  in_QttApi: '{{qtt.api}}'
+  in_Db: '{{qtt.db}}'
+  in_User: '{{qtt.credentials.username}}'
+  in_Password: '{{qtt.credentials.password}}'
+analysis:
+  by: uipath-analyser@0.1.0
+  gaps: []
+  notes:
+  - where: 'Main.xaml: Click ''Click Apply'''
+    what: elements used after this click are listed under screen '/queue'; if the click opens another
+      screen, move them there
+  - where: 'FillChecklist.xaml: Click ''Click Save CRD-01'''
+    what: elements used after this click are listed under screen '/reviews/{in_ReviewNo}'; if the click
+      opens another screen, move them there

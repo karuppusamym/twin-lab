@@ -1,0 +1,189 @@
+<Activity mc:Ignorable="sap sap2010" x:Class="FillChecklist"
+  xmlns="http://schemas.microsoft.com/netfx/2009/xaml/activities"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:sap="http://schemas.microsoft.com/netfx/2009/xaml/activities/presentation"
+  xmlns:sap2010="http://schemas.microsoft.com/netfx/2010/xaml/activities/presentation"
+  xmlns:ui="http://schemas.uipath.com/workflow/activities"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Hand-authored sample that follows the UiPath Studio XAML layout (classic activities).
+       Answers the 12 QTT checklist items on the open review page: every item Pass with the
+       standard comment, except INC-01 (Income documentation), which is Fail with in_FailComment.
+       Runs inside the browser opened by Main.xaml. Synthetic process, synthetic data. -->
+  <x:Members>
+    <x:Property Name="in_PassComment" Type="InArgument(x:String)" />
+    <x:Property Name="in_FailComment" Type="InArgument(x:String)" />
+  </x:Members>
+  <Sequence DisplayName="Fill the QC checklist">
+    <ui:LogMessage DisplayName="Log start" Level="Info" Message="[&quot;Answering 12 checklist items&quot;]" />
+    <Sequence DisplayName="Checklist items">
+      <Sequence DisplayName="CRD-01 (Credit) Pass">
+        <ui:TypeInto DisplayName="Type comment CRD-01" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-CRD-01' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result CRD-01" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-CRD-01' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save CRD-01">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-CRD-01' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until CRD-01 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-CRD-01' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="CRD-02 (Credit) Pass">
+        <ui:TypeInto DisplayName="Type comment CRD-02" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-CRD-02' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result CRD-02" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-CRD-02' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save CRD-02">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-CRD-02' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until CRD-02 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-CRD-02' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="CRD-03 (Credit) Pass">
+        <ui:TypeInto DisplayName="Type comment CRD-03" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-CRD-03' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result CRD-03" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-CRD-03' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save CRD-03">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-CRD-03' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until CRD-03 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-CRD-03' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="INC-01 (Income) Fail">
+        <ui:TypeInto DisplayName="Type comment INC-01" Text="[in_FailComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-INC-01' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result INC-01" Item="Fail">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-INC-01' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save INC-01">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-INC-01' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until INC-01 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-INC-01' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="INC-02 (Income) Pass">
+        <ui:TypeInto DisplayName="Type comment INC-02" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-INC-02' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result INC-02" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-INC-02' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save INC-02">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-INC-02' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until INC-02 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-INC-02' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="INC-03 (Income) Pass">
+        <ui:TypeInto DisplayName="Type comment INC-03" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-INC-03' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result INC-03" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-INC-03' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save INC-03">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-INC-03' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until INC-03 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-INC-03' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="COL-01 (Collateral) Pass">
+        <ui:TypeInto DisplayName="Type comment COL-01" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-COL-01' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result COL-01" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-COL-01' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save COL-01">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-COL-01' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until COL-01 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-COL-01' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="COL-02 (Collateral) Pass">
+        <ui:TypeInto DisplayName="Type comment COL-02" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-COL-02' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result COL-02" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-COL-02' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save COL-02">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-COL-02' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until COL-02 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-COL-02' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="COL-03 (Collateral) Pass">
+        <ui:TypeInto DisplayName="Type comment COL-03" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-COL-03' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result COL-03" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-COL-03' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save COL-03">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-COL-03' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until COL-03 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-COL-03' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="CMP-01 (Compliance) Pass">
+        <ui:TypeInto DisplayName="Type comment CMP-01" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-CMP-01' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result CMP-01" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-CMP-01' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save CMP-01">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-CMP-01' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until CMP-01 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-CMP-01' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="CMP-02 (Compliance) Pass">
+        <ui:TypeInto DisplayName="Type comment CMP-02" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-CMP-02' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result CMP-02" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-CMP-02' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save CMP-02">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-CMP-02' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until CMP-02 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-CMP-02' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+      <Sequence DisplayName="CMP-03 (Compliance) Pass">
+        <ui:TypeInto DisplayName="Type comment CMP-03" Text="[in_PassComment]" EmptyField="True">
+          <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='comment-CMP-03' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+        </ui:TypeInto>
+        <ui:SelectItem DisplayName="Select result CMP-03" Item="Pass">
+          <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='result-CMP-03' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+        </ui:SelectItem>
+        <ui:Click DisplayName="Click Save CMP-03">
+          <ui:Click.Target><ui:Target Selector="&lt;webctrl id='save-CMP-03' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+        </ui:Click>
+        <ui:WaitUiElementAppear DisplayName="Wait until CMP-03 is saved" Timeout="10000">
+          <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='itemStatus-CMP-03' tag='SPAN' class='item-status ok' /&gt;" /></ui:WaitUiElementAppear.Target>
+        </ui:WaitUiElementAppear>
+      </Sequence>
+    </Sequence>
+  </Sequence>
+</Activity>

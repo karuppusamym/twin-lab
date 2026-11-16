@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Checklist templates{% endblock %}
+{% block body_class %}page-admin{% endblock %}
+{% block content %}
+<h1>Checklist templates</h1>
+<p class="hint">Changes apply to reviews created from now on. Existing reviews keep their items.</p>
+{% if saved %}<div id="adminMessage" class="msg msg-ok">Saved {{ saved }}.</div>{% endif %}
+{% if error %}<div id="adminMessage" class="msg msg-error">{{ error }}</div>{% endif %}
+<table id="templateTable" class="grid">
+  <thead><tr><th>Code</th><th>Category</th><th>Description</th><th>Active</th><th></th></tr></thead>
+  <tbody>
+    {% for i in items %}
+    <tr class="template-row" data-item-code="{{ i.item_code }}">
+      <td class="item-code">{{ i.item_code }}</td>
+      <td class="category">{{ i.category }}</td>
+      <td colspan="3">
+        <form id="tplForm-{{ i.item_code }}" class="inline-form" method="post" action="/admin/checklist/{{ i.item_code }}">
+          <input id="tplDesc-{{ i.item_code }}" name="description" type="text" value="{{ i.description }}" maxlength="200">
+          <label class="check"><input id="tplActive-{{ i.item_code }}" name="is_active" type="checkbox" value="1" {% if i.is_active %}checked{% endif %}> Active</label>
+          <button id="tplSave-{{ i.item_code }}" type="submit" class="btn btn-small">Save</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

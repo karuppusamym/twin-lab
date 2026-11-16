@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Loan {{ loan.loan_no }}{% endblock %}
+{% block body_class %}page-loan{% endblock %}
+{% block content %}
+<div class="title-row">
+  <h1>Loan <span id="loanNo">{{ loan.loan_no }}</span></h1>
+  <a id="backToSearch" href="/loans" class="btn btn-link">Back to loan search</a>
+</div>
+<section id="loanDetail" class="card summary">
+  <dl>
+    <dt>Borrower</dt><dd id="borrowerName">{{ loan.borrower_name }}</dd>
+    <dt>Co-borrower</dt><dd id="coBorrowerName">{{ loan.co_borrower_name or '-' }}</dd>
+    <dt>Product</dt><dd id="product">{{ loan.product }}</dd>
+    <dt>Amount</dt><dd id="loanAmount">{{ "${:,.2f}".format(loan.loan_amount) }}</dd>
+    <dt>Interest rate</dt><dd id="interestRate">{{ "%.3f"|format(loan.interest_rate) }}%</dd>
+    <dt>Closing date</dt><dd id="closingDate">{{ loan.closing_date }}</dd>
+    <dt>Branch</dt><dd id="branch">{{ loan.branch_code }} {{ loan.branch_name }}</dd>
+    <dt>Loan officer</dt><dd id="loanOfficer">{{ loan.loan_officer }}</dd>
+    <dt>Property state</dt><dd id="propertyState">{{ loan.property_state }}</dd>
+  </dl>
+</section>
+<section class="card">
+  <h2>QC reviews</h2>
+  <table id="loanReviews" class="grid">
+    <thead><tr><th>Review no</th><th>Type</th><th>Status</th><th>Due date</th><th>Assignee</th></tr></thead>
+    <tbody>
+      {% for r in loan.reviews %}
+      <tr class="review-row"><td class="review-no"><a href="/reviews/{{ r.review_no }}">{{ r.review_no }}</a></td><td>{{ r.review_type }}</td><td class="status">{{ r.status }}</td><td>{{ r.due_date }}</td><td>{{ r.assignee or '' }}</td></tr>
+      {% else %}
+      <tr id="noLoanReviews"><td colspan="5" class="empty">This loan has not been selected for QC.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

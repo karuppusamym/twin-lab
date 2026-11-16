@@ -1,0 +1,134 @@
+<Activity mc:Ignorable="sap sap2010" x:Class="Main"
+  xmlns="http://schemas.microsoft.com/netfx/2009/xaml/activities"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:sap="http://schemas.microsoft.com/netfx/2009/xaml/activities/presentation"
+  xmlns:sap2010="http://schemas.microsoft.com/netfx/2010/xaml/activities/presentation"
+  xmlns:sd="clr-namespace:System.Data;assembly=System.Data"
+  xmlns:ui="http://schemas.uipath.com/workflow/activities"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Hand-authored sample that follows the UiPath Studio XAML layout (classic activities).
+       QTT QC review: an analyst bot signs in, finds the OPEN review in the work queue, answers
+       every checklist item (one Fail with a comment), submits it, reads the result, confirms the
+       status through the API and reads the audit trail from the database.
+       Synthetic process, synthetic data. Element ids are those of reference/qtt-sample. -->
+  <x:Members>
+    <x:Property Name="in_QttUrl" Type="InArgument(x:String)" />
+    <x:Property Name="in_QttApi" Type="InArgument(x:String)" />
+    <x:Property Name="in_Db" Type="InArgument(x:String)" />
+    <x:Property Name="in_User" Type="InArgument(x:String)" />
+    <x:Property Name="in_Password" Type="InArgument(x:String)" />
+    <x:Property Name="in_ReviewNo" Type="InArgument(x:String)" />
+    <x:Property Name="in_PassComment" Type="InArgument(x:String)" />
+    <x:Property Name="in_FailComment" Type="InArgument(x:String)" />
+    <x:Property Name="out_Status" Type="OutArgument(x:String)" />
+    <x:Property Name="out_Message" Type="OutArgument(x:String)" />
+    <x:Property Name="out_ApiStatus" Type="OutArgument(x:String)" />
+    <x:Property Name="out_AuditEvents" Type="OutArgument(x:Int32)" />
+  </x:Members>
+  <Sequence DisplayName="QTT QC review">
+    <Sequence.Variables>
+      <Variable x:TypeArguments="x:Boolean" Name="found" />
+      <Variable x:TypeArguments="x:String" Name="queueStatus" />
+      <Variable x:TypeArguments="x:String" Name="loanNo" />
+      <Variable x:TypeArguments="x:String" Name="reviewUrl" />
+      <Variable x:TypeArguments="sd:DataTable" Name="auditRows" />
+    </Sequence.Variables>
+    <ui:OpenBrowser BrowserType="Chrome" DisplayName="Open QTT" Url="[in_QttUrl + &quot;/login&quot;]">
+      <ui:OpenBrowser.Body>
+        <ActivityAction x:TypeArguments="x:Object">
+          <Sequence DisplayName="In QTT">
+            <ui:TypeInto DisplayName="Type user id" Text="[in_User]" EmptyField="True">
+              <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='username' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+            </ui:TypeInto>
+            <ui:TypeInto DisplayName="Type password" Text="[in_Password]" EmptyField="True">
+              <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='password' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+            </ui:TypeInto>
+            <ui:Click DisplayName="Click Sign in">
+              <ui:Click.Target><ui:Target Selector="&lt;webctrl id='btnLogin' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+            </ui:Click>
+
+            <ui:NavigateTo DisplayName="Open the work queue" Url="[in_QttUrl + &quot;/queue&quot;]" />
+            <ui:SelectItem DisplayName="Filter status OPEN" Item="OPEN">
+              <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='statusFilter' tag='SELECT' /&gt;" WaitForReady="COMPLETE" /></ui:SelectItem.Target>
+            </ui:SelectItem>
+            <ui:TypeInto DisplayName="Type review number" Text="[in_ReviewNo]" EmptyField="True">
+              <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='reviewSearch' tag='INPUT' /&gt;" WaitForReady="COMPLETE" /></ui:TypeInto.Target>
+            </ui:TypeInto>
+            <ui:Click DisplayName="Click Apply">
+              <ui:Click.Target><ui:Target Selector="&lt;webctrl id='btnFilter' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+            </ui:Click>
+            <ui:UiElementExists DisplayName="Review in the queue?" Exists="[found]">
+              <ui:UiElementExists.Target><ui:Target Selector="&lt;webctrl id='queueTable' tag='TABLE' /&gt;&lt;webctrl tag='TR' class='review-row' /&gt;" /></ui:UiElementExists.Target>
+            </ui:UiElementExists>
+
+            <If DisplayName="Review found?" Condition="[Not found]">
+              <If.Then>
+                <Assign DisplayName="Status NOT_FOUND">
+                  <Assign.To><OutArgument x:TypeArguments="x:String">[out_Status]</OutArgument></Assign.To>
+                  <Assign.Value><InArgument x:TypeArguments="x:String">["NOT_FOUND"]</InArgument></Assign.Value>
+                </Assign>
+              </If.Then>
+              <If.Else>
+                <Sequence DisplayName="Do the review">
+                  <ui:GetText DisplayName="Read status in the queue" Value="[queueStatus]">
+                    <ui:GetText.Target><ui:Target Selector="&lt;webctrl id='queueTable' tag='TABLE' /&gt;&lt;webctrl tag='TD' class='status' /&gt;" /></ui:GetText.Target>
+                  </ui:GetText>
+                  <ui:LogMessage DisplayName="Log queue status" Level="Info" Message="[in_ReviewNo + &quot; is &quot; + queueStatus]" />
+
+                  <Assign DisplayName="Build review address">
+                    <Assign.To><OutArgument x:TypeArguments="x:String">[reviewUrl]</OutArgument></Assign.To>
+                    <Assign.Value><InArgument x:TypeArguments="x:String">[in_QttUrl + "/reviews/" + in_ReviewNo]</InArgument></Assign.Value>
+                  </Assign>
+                  <ui:NavigateTo DisplayName="Open the review" Url="[reviewUrl]" />
+                  <ui:GetText DisplayName="Read loan number" Value="[loanNo]">
+                    <ui:GetText.Target><ui:Target Selector="&lt;webctrl id='loanNo' tag='DD' /&gt;" /></ui:GetText.Target>
+                  </ui:GetText>
+
+                  <ui:InvokeWorkflowFile DisplayName="Fill the checklist" WorkflowFileName="FillChecklist.xaml">
+                    <ui:InvokeWorkflowFile.Arguments>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_PassComment">[in_PassComment]</InArgument>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_FailComment">[in_FailComment]</InArgument>
+                    </ui:InvokeWorkflowFile.Arguments>
+                  </ui:InvokeWorkflowFile>
+
+                  <ui:Click DisplayName="Click Submit for approval">
+                    <ui:Click.Target><ui:Target Selector="&lt;webctrl id='btnSubmit' tag='BUTTON' /&gt;" WaitForReady="COMPLETE" /></ui:Click.Target>
+                  </ui:Click>
+                  <ui:WaitUiElementAppear DisplayName="Wait for the result message" Timeout="10000">
+                    <ui:WaitUiElementAppear.Target><ui:Target Selector="&lt;webctrl id='message' tag='DIV' /&gt;" /></ui:WaitUiElementAppear.Target>
+                  </ui:WaitUiElementAppear>
+                  <ui:GetText DisplayName="Read result message" Value="[out_Message]">
+                    <ui:GetText.Target><ui:Target Selector="&lt;webctrl id='message' tag='DIV' /&gt;" /></ui:GetText.Target>
+                  </ui:GetText>
+                  <ui:GetText DisplayName="Read review status" Value="[out_Status]">
+                    <ui:GetText.Target><ui:Target Selector="&lt;webctrl id='reviewStatus' tag='SPAN' /&gt;" /></ui:GetText.Target>
+                  </ui:GetText>
+
+                  <ui:InvokeWorkflowFile DisplayName="Confirm the status through the API" WorkflowFileName="CheckReviewViaApi.xaml">
+                    <ui:InvokeWorkflowFile.Arguments>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_Api">[in_QttApi]</InArgument>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_User">[in_User]</InArgument>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_Password">[in_Password]</InArgument>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_ReviewNo">[in_ReviewNo]</InArgument>
+                      <OutArgument x:TypeArguments="x:String" x:Key="out_Status">[out_ApiStatus]</OutArgument>
+                    </ui:InvokeWorkflowFile.Arguments>
+                  </ui:InvokeWorkflowFile>
+
+                  <ui:ExecuteQuery DisplayName="Read audit trail" ConnectionString="[in_Db]" ProviderName="System.Data.SqlClient" DataTable="[auditRows]" Sql="SELECT a.event, a.from_status, a.to_status, a.actor, a.created_at FROM review_audit a JOIN qc_reviews r ON r.review_id = a.review_id WHERE r.review_no = @reviewNo ORDER BY a.created_at">
+                    <ui:ExecuteQuery.Parameters>
+                      <InArgument x:TypeArguments="x:String" x:Key="reviewNo">[in_ReviewNo]</InArgument>
+                    </ui:ExecuteQuery.Parameters>
+                  </ui:ExecuteQuery>
+                  <Assign DisplayName="Count audit events">
+                    <Assign.To><OutArgument x:TypeArguments="x:Int32">[out_AuditEvents]</OutArgument></Assign.To>
+                    <Assign.Value><InArgument x:TypeArguments="x:Int32">[auditRows.Rows.Count]</InArgument></Assign.Value>
+                  </Assign>
+                </Sequence>
+              </If.Else>
+            </If>
+          </Sequence>
+        </ActivityAction>
+      </ui:OpenBrowser.Body>
+    </ui:OpenBrowser>
+  </Sequence>
+</Activity>
