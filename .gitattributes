@@ -1,0 +1,5 @@
+# Unix line endings everywhere: Dockerfiles and scripts run in Linux containers.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.xlsx binary

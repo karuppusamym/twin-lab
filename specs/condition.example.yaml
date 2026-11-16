@@ -1,0 +1,14 @@
+id: peak-hour
+description: Search and submit slow, database under load.
+calibration: estimate
+calibrated_from: "illustrative numbers, not measured"
+seed: 7
+targets:
+  - app: showcase
+    http:
+      - {match: "GET /api/cases/search*", latency_ms: {p50: 4000, p95: 15000}}
+      - {match: "POST /api/cases/*", latency_ms: {p50: 2500, p95: 9000}}
+      - {match: "*", latency_ms: {p50: 400, p95: 1200}}
+    db: {latency_ms: 150, jitter_ms: 80}
+    faults:
+      - {match: "POST /api/cases/*/notes", status: 503, rate: 0.05}

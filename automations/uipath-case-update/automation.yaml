@@ -1,0 +1,104 @@
+id: uipath-case-update
+name: Case update (UiPath original)
+type: uipath
+surface: combo
+trigger: manual
+owner: unassigned
+source:
+  path: ./project
+  entry: Main.xaml
+touches:
+- app: showcase
+  via: web
+  screens:
+  - name: login
+    path: /login
+    uses:
+    - action: type
+      selector: input#username
+      field: in_User
+      raw: <webctrl id='username' tag='INPUT' />
+    - action: type
+      selector: input#password
+      field: in_Password
+      raw: <webctrl id='password' tag='INPUT' />
+    - action: click
+      selector: button#btnLogin
+      raw: <webctrl id='btnLogin' tag='BUTTON' />
+  - name: cases
+    path: /cases
+    uses:
+    - action: type
+      selector: input#caseNo
+      field: in_CaseNo
+      raw: <webctrl id='caseNo' tag='INPUT' />
+    - action: click
+      selector: button#btnSearch
+      raw: <webctrl id='btnSearch' tag='BUTTON' />
+    - action: wait
+      selector: table#results
+      field: found
+      raw: <webctrl id='results' tag='TABLE' />
+    - action: read
+      selector: table#results td.status
+      field: currentStatus
+      raw: <webctrl id='results' tag='TABLE' /><webctrl tag='TD' class='status' />
+  - name: cases-item
+    path: /cases/{in_CaseNo}
+    uses:
+    - action: select
+      selector: select#category
+      field: in_Category
+      raw: <webctrl id='category' tag='SELECT' />
+    - action: select
+      selector: select#subcategory
+      field: in_Subcategory
+      raw: <webctrl id='subcategory' tag='SELECT' />
+    - action: select
+      selector: select#caseStatus
+      raw: <webctrl id='caseStatus' tag='SELECT' />
+    - action: click
+      selector: button#btnSave
+      raw: <webctrl id='btnSave' tag='BUTTON' />
+    - action: read
+      selector: '#message'
+      field: out_Message
+      raw: <webctrl id='message' />
+- app: showcase
+  via: api
+  routes:
+  - method: POST
+    path: /api/login
+  - method: POST
+    path: /api/cases/{in_CaseNo}/notes
+- app: showcase
+  via: db
+  tables:
+  - table: case_audit
+    columns:
+    - event
+    - actor
+    - created_ts
+    - case_id
+    access: read
+  - table: cases
+    columns:
+    - id
+    - case_no
+    access: read
+bindings:
+  in_AppUrl: '{{showcase.web}}'
+  in_AppApi: '{{showcase.api}}'
+  in_Db: '{{showcase.db}}'
+  in_User: '{{showcase.credentials.username}}'
+  in_Password: '{{showcase.credentials.password}}'
+analysis:
+  by: uipath-analyser@0.1.0
+  gaps: []
+  notes:
+  - where: 'Main.xaml: Click ''Click Search'''
+    what: elements used after this click are listed under screen '/cases'; if the click opens another
+      screen, move them there
+  - where: 'Main.xaml: Click ''Click Save'''
+    what: elements used after this click are listed under screen '/cases/{in_CaseNo}'; if the click opens
+      another screen, move them there

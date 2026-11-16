@@ -1,0 +1,19 @@
+id: showcase
+name: Case workbench (demo copy)
+copies: {system: Showcase reference app, source: reference, ref: null, analysed: 2026-11-15}
+stack:
+  frontend: {framework: angular, version: "14.2", ui_library: "material 14"}
+  backend: {framework: spring-boot, version: "2.7", language: java11}
+  db: {engine: postgres, version: "15"}
+run:
+  web: {port: 4200}
+  api: {port: 8080, health: /actuator/health}
+  env: {database_url: DATABASE_URL}
+db:
+  schema: db/schema.sql
+  derived_from: [backend entities, migrations]
+built_for: [uipath-case-update, agentic-case-update]
+rules:
+  - {id: R1, where: "POST /api/cases/{id}/notes", rule: "note text max 500", verification: hypothesis}
+links:
+  - {entity: customer, column: CASE.CUST_ID, to: crm.CUSTOMER.ID, via: equal}

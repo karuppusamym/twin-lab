@@ -1,0 +1,103 @@
+<Activity mc:Ignorable="sap sap2010" x:Class="Main"
+  xmlns="http://schemas.microsoft.com/netfx/2009/xaml/activities"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:sap="http://schemas.microsoft.com/netfx/2009/xaml/activities/presentation"
+  xmlns:sap2010="http://schemas.microsoft.com/netfx/2010/xaml/activities/presentation"
+  xmlns:sd="clr-namespace:System.Data;assembly=System.Data"
+  xmlns:ui="http://schemas.uipath.com/workflow/activities"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Hand-authored sample that follows the UiPath Studio XAML layout (classic activities).
+       Synthetic process, synthetic data. Element ids are those of reference/case-workbench. -->
+  <x:Members>
+    <x:Property Name="in_AppUrl" Type="InArgument(x:String)" />
+    <x:Property Name="in_AppApi" Type="InArgument(x:String)" />
+    <x:Property Name="in_Db" Type="InArgument(x:String)" />
+    <x:Property Name="in_User" Type="InArgument(x:String)" />
+    <x:Property Name="in_Password" Type="InArgument(x:String)" />
+    <x:Property Name="in_CaseNo" Type="InArgument(x:String)" />
+    <x:Property Name="in_Category" Type="InArgument(x:String)" />
+    <x:Property Name="in_Subcategory" Type="InArgument(x:String)" />
+    <x:Property Name="in_NoteText" Type="InArgument(x:String)" />
+    <x:Property Name="out_Status" Type="OutArgument(x:String)" />
+    <x:Property Name="out_Message" Type="OutArgument(x:String)" />
+  </x:Members>
+  <Sequence DisplayName="Case update">
+    <Sequence.Variables>
+      <Variable x:TypeArguments="x:Boolean" Name="found" />
+      <Variable x:TypeArguments="x:String" Name="currentStatus" />
+      <Variable x:TypeArguments="sd:DataTable" Name="auditRows" />
+    </Sequence.Variables>
+    <ui:OpenBrowser BrowserType="Chrome" DisplayName="Open Case Workbench" Url="[in_AppUrl + &quot;/login&quot;]">
+      <ui:OpenBrowser.Body>
+        <ActivityAction x:TypeArguments="x:Object">
+          <Sequence DisplayName="In Case Workbench">
+            <ui:TypeInto DisplayName="Type user id" Text="[in_User]">
+              <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='username' tag='INPUT' /&gt;" /></ui:TypeInto.Target>
+            </ui:TypeInto>
+            <ui:TypeInto DisplayName="Type password" Text="[in_Password]">
+              <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='password' tag='INPUT' /&gt;" /></ui:TypeInto.Target>
+            </ui:TypeInto>
+            <ui:Click DisplayName="Click Sign in">
+              <ui:Click.Target><ui:Target Selector="&lt;webctrl id='btnLogin' tag='BUTTON' /&gt;" /></ui:Click.Target>
+            </ui:Click>
+            <ui:NavigateTo DisplayName="Open case search" Url="[in_AppUrl + &quot;/cases&quot;]" />
+            <ui:TypeInto DisplayName="Type case number" Text="[in_CaseNo]">
+              <ui:TypeInto.Target><ui:Target Selector="&lt;webctrl id='caseNo' tag='INPUT' /&gt;" /></ui:TypeInto.Target>
+            </ui:TypeInto>
+            <ui:Click DisplayName="Click Search">
+              <ui:Click.Target><ui:Target Selector="&lt;webctrl id='btnSearch' tag='BUTTON' /&gt;" /></ui:Click.Target>
+            </ui:Click>
+            <ui:UiElementExists DisplayName="Results shown?" Exists="[found]">
+              <ui:UiElementExists.Target><ui:Target Selector="&lt;webctrl id='results' tag='TABLE' /&gt;" /></ui:UiElementExists.Target>
+            </ui:UiElementExists>
+            <If DisplayName="Case found?" Condition="[Not found]">
+              <If.Then>
+                <Assign DisplayName="Status NOT_FOUND">
+                  <Assign.To><OutArgument x:TypeArguments="x:String">[out_Status]</OutArgument></Assign.To>
+                  <Assign.Value><InArgument x:TypeArguments="x:String">["NOT_FOUND"]</InArgument></Assign.Value>
+                </Assign>
+              </If.Then>
+              <If.Else>
+                <Sequence DisplayName="Update the case">
+                  <ui:GetText DisplayName="Read status from results" Value="[currentStatus]">
+                    <ui:GetText.Target><ui:Target Selector="&lt;webctrl id='results' tag='TABLE' /&gt;&lt;webctrl tag='TD' class='status' /&gt;" /></ui:GetText.Target>
+                  </ui:GetText>
+                  <ui:NavigateTo DisplayName="Open the case" Url="[in_AppUrl + &quot;/cases/&quot; + in_CaseNo]" />
+                  <ui:SelectItem DisplayName="Select category" Item="[in_Category]">
+                    <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='category' tag='SELECT' /&gt;" /></ui:SelectItem.Target>
+                  </ui:SelectItem>
+                  <ui:SelectItem DisplayName="Select sub-category" Item="[in_Subcategory]">
+                    <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='subcategory' tag='SELECT' /&gt;" /></ui:SelectItem.Target>
+                  </ui:SelectItem>
+                  <ui:InvokeWorkflowFile DisplayName="Add note through the API" WorkflowFileName="AddNoteViaApi.xaml">
+                    <ui:InvokeWorkflowFile.Arguments>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_Api">[in_AppApi]</InArgument>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_User">[in_User]</InArgument>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_Password">[in_Password]</InArgument>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_CaseNo">[in_CaseNo]</InArgument>
+                      <InArgument x:TypeArguments="x:String" x:Key="in_Text">[in_NoteText]</InArgument>
+                    </ui:InvokeWorkflowFile.Arguments>
+                  </ui:InvokeWorkflowFile>
+                  <ui:SelectItem DisplayName="Select status RESOLVED" Item="RESOLVED">
+                    <ui:SelectItem.Target><ui:Target Selector="&lt;webctrl id='caseStatus' tag='SELECT' /&gt;" /></ui:SelectItem.Target>
+                  </ui:SelectItem>
+                  <ui:Click DisplayName="Click Save">
+                    <ui:Click.Target><ui:Target Selector="&lt;webctrl id='btnSave' tag='BUTTON' /&gt;" /></ui:Click.Target>
+                  </ui:Click>
+                  <ui:GetText DisplayName="Read result message" Value="[out_Message]">
+                    <ui:GetText.Target><ui:Target Selector="&lt;webctrl id='message' /&gt;" /></ui:GetText.Target>
+                  </ui:GetText>
+                  <ui:ExecuteQuery DisplayName="Read audit trail" ConnectionString="[in_Db]" ProviderName="Npgsql" DataTable="[auditRows]" Sql="SELECT a.event, a.actor, a.created_ts FROM case_audit a JOIN cases c ON c.id = a.case_id WHERE c.case_no = @caseNo" />
+                  <Assign DisplayName="Status DONE">
+                    <Assign.To><OutArgument x:TypeArguments="x:String">[out_Status]</OutArgument></Assign.To>
+                    <Assign.Value><InArgument x:TypeArguments="x:String">["DONE"]</InArgument></Assign.Value>
+                  </Assign>
+                </Sequence>
+              </If.Else>
+            </If>
+          </Sequence>
+        </ActivityAction>
+      </ui:OpenBrowser.Body>
+    </ui:OpenBrowser>
+  </Sequence>
+</Activity>

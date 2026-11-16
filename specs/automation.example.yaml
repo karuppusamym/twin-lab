@@ -1,0 +1,37 @@
+id: uipath-case-update
+name: Case update (UiPath original)
+type: uipath
+surface: combo
+trigger: manual
+owner: unassigned
+source: {path: ./project, entry: Main.xaml}
+replaced_by: agentic-case-update
+
+touches:
+  - app: showcase
+    via: web
+    screens:
+      - name: search
+        path: /cases/search
+        uses:
+          - {action: type, selector: "#caseNo", field: case_no}
+          - {action: click, selector: "#btnSearch"}
+          - {action: read, selector: "td.status", field: status}
+  - app: showcase
+    via: api
+    routes:
+      - {method: POST, path: "/api/cases/{id}/notes"}
+  - app: showcase
+    via: db
+    tables:
+      - {table: CASE_AUDIT, columns: [CASE_ID, EVENT, CREATED_TS], access: read}
+
+bindings:
+  in_AppUrl: "{{showcase.web}}"
+  in_AppApi: "{{showcase.api}}"
+  in_User: "{{showcase.credentials.username}}"
+
+analysis:
+  by: uipath-analyser@0.1.0
+  gaps: []
+  reviewed_by: null

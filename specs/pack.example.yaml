@@ -1,0 +1,8 @@
+id: showcase-basic
+apps: [showcase]
+kind: synthetic
+generator: {seed: 20261115, rows: {CASE: 200, CUSTOMER: 150}}
+workbook: showcase-basic.xlsx
+derived_from_real_data: false
+masked: false
+schema_ref: {showcase: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}

@@ -1,0 +1,17 @@
+{
+  "session_id": "ses_20261120T101500Z_a41c9e",
+  "automation": "uipath-case-update",
+  "apps": [
+    {"app": "showcase", "version": "0.3.1", "data_pack": "showcase-basic", "condition": "peak-hour"}
+  ],
+  "started": "2026-11-20T10:15:00Z",
+  "ended": "2026-11-20T10:19:42Z",
+  "requests": [
+    {"ts": "2026-11-20T10:15:08.120Z", "app": "showcase", "method": "GET",
+     "path": "/api/cases/search", "status": 200, "app_ms": 38, "injected_ms": 6120}
+  ],
+  "changes": [
+    {"app": "showcase", "table": "CASE_NOTE", "op": "insert", "key": "N-0201"}
+  ],
+  "summary": {"requests": 41, "wall_s": 282, "waiting_on_app_s": 197, "errors": 2}
+}

@@ -1,0 +1,11 @@
+{
+  "apps": {
+    "showcase": {
+      "web": "http://localhost:4200",
+      "api": "http://localhost:8080",
+      "db": "postgresql://lab:GENERATED@localhost:5432/showcase",
+      "credentials": {"username": "demo.user", "password": "GENERATED"}
+    }
+  },
+  "inputs": {"case_no": "C-1001"}
+}

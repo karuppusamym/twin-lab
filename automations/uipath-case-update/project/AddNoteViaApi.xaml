@@ -1,0 +1,35 @@
+<Activity mc:Ignorable="sap sap2010" x:Class="AddNoteViaApi"
+  xmlns="http://schemas.microsoft.com/netfx/2009/xaml/activities"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:sap="http://schemas.microsoft.com/netfx/2009/xaml/activities/presentation"
+  xmlns:sap2010="http://schemas.microsoft.com/netfx/2010/xaml/activities/presentation"
+  xmlns:ui="http://schemas.uipath.com/workflow/activities"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Hand-authored sample that follows the UiPath Studio XAML layout. Synthetic. -->
+  <x:Members>
+    <x:Property Name="in_Api" Type="InArgument(x:String)" />
+    <x:Property Name="in_User" Type="InArgument(x:String)" />
+    <x:Property Name="in_Password" Type="InArgument(x:String)" />
+    <x:Property Name="in_CaseNo" Type="InArgument(x:String)" />
+    <x:Property Name="in_Text" Type="InArgument(x:String)" />
+  </x:Members>
+  <Sequence DisplayName="Add note through the API">
+    <Sequence.Variables>
+      <Variable x:TypeArguments="x:String" Name="loginJson" />
+      <Variable x:TypeArguments="x:String" Name="token" />
+      <Variable x:TypeArguments="x:String" Name="notesUrl" />
+      <Variable x:TypeArguments="x:String" Name="noteJson" />
+      <Variable x:TypeArguments="x:Int32" Name="noteStatus" />
+    </Sequence.Variables>
+    <ui:HttpClient DisplayName="Sign in to the API" Method="POST" EndPoint="[in_Api + &quot;/api/login&quot;]" BodyFormat="application/json" Body="[&quot;{&quot;&quot;username&quot;&quot;:&quot;&quot;&quot; + in_User + &quot;&quot;&quot;,&quot;&quot;password&quot;&quot;:&quot;&quot;&quot; + in_Password + &quot;&quot;&quot;}&quot;]" Result="[loginJson]" />
+    <Assign DisplayName="Take the token">
+      <Assign.To><OutArgument x:TypeArguments="x:String">[token]</OutArgument></Assign.To>
+      <Assign.Value><InArgument x:TypeArguments="x:String">[Newtonsoft.Json.Linq.JObject.Parse(loginJson)("token").ToString]</InArgument></Assign.Value>
+    </Assign>
+    <Assign DisplayName="Build notes address">
+      <Assign.To><OutArgument x:TypeArguments="x:String">[notesUrl]</OutArgument></Assign.To>
+      <Assign.Value><InArgument x:TypeArguments="x:String">[in_Api + "/api/cases/" + in_CaseNo + "/notes"]</InArgument></Assign.Value>
+    </Assign>
+    <ui:HttpClient DisplayName="Post the note" Method="POST" EndPoint="[notesUrl]" BodyFormat="application/json" Body="[&quot;{&quot;&quot;text&quot;&quot;:&quot;&quot;&quot; + in_Text + &quot;&quot;&quot;}&quot;]" Result="[noteJson]" StatusCode="[noteStatus]" />
+  </Sequence>
+</Activity>
