@@ -11,6 +11,7 @@ import yaml
 from pydantic import ValidationError
 
 from labctl import appmodel  # noqa: F401  (registers the model and flow contracts)
+from labctl.botlog import models as _botlog_models  # noqa: F401  (robot-trace, bot-trace)
 from labctl.models import KINDS, Contract
 
 ROOT_MARKERS = ("automations", "apps", "lab")

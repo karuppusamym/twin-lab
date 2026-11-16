@@ -15,5 +15,7 @@ build/
 # Raw evidence (HAR files, database exports, screenshots) may hold customer data.
 evidence/
 *.har
+# Synthetic recordings made by tools/harness_bot.py against the demo app, used by the tests.
+!lab/labctl/tests/fixtures/**/recording.har
 twinlab.local.yaml
 .lab-state/
