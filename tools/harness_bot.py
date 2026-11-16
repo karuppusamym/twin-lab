@@ -240,12 +240,41 @@ def scrub_har(path: Path) -> None:
 # --- the run -----------------------------------------------------------------------------------
 
 
+INFLIGHT = "_tl_inflight"
+SETTLE_MAX_MS = 30000  # UiPath's default activity timeout
+
+
+def track_requests(page) -> None:
+    """Count the page's requests in flight, so `settle` can wait for an app's own calls (a
+    login's POST) that start after the page reached network idle."""
+    setattr(page, INFLIGHT, 0)
+
+    def start(_request):
+        setattr(page, INFLIGHT, getattr(page, INFLIGHT, 0) + 1)
+
+    def end(_request):
+        setattr(page, INFLIGHT, max(0, getattr(page, INFLIGHT, 0) - 1))
+
+    page.on("request", start)
+    page.on("requestfinished", end)
+    page.on("requestfailed", end)
+
+
 def settle(page, settle_ms: int) -> None:
+    """Wait until nothing has been in flight for `settle_ms` (at most SETTLE_MAX_MS).
+    `wait_for_load_state("networkidle")` alone returns at once on a page that was idle once."""
     try:
         page.wait_for_load_state("networkidle", timeout=5000)
     except Exception:  # noqa: BLE001 - a page that never goes idle is still recorded
         pass
-    page.wait_for_timeout(settle_ms)
+    if not hasattr(page, INFLIGHT):
+        page.wait_for_timeout(settle_ms)
+        return
+    quiet, waited, tick = 0, 0, 50
+    while quiet < settle_ms and waited < SETTLE_MAX_MS:
+        page.wait_for_timeout(tick)
+        waited += tick
+        quiet = quiet + tick if getattr(page, INFLIGHT, 0) == 0 else 0
 
 
 def web_screens(automation: dict) -> list[tuple[str, dict]]:
@@ -283,6 +312,7 @@ def run_once(
         rec_dir = None
     context = browser.new_context(**context_args)
     page = context.new_page()
+    track_requests(page)
     recorder = Recorder(rec_dir, page)
     auto_bindings = automation.get("bindings") or {}
     state = "Successful"

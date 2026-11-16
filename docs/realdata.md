@@ -34,10 +34,27 @@ labctl realdata inventory QTT_REPLICA --out inventory.json
 
 ## 2. Say which records, and take them with what they need
 
-Copy `lab/labctl/labctl/realdata/specs/subset.example.yaml` and change it. The **seeds** are the
-records the bot works on: give either key values, or a `where:` condition with `:params`.
-A `where:` must be one condition: no literal strings, no `;`, no comments. The closure adds every
-parent row and a bounded number of child rows.
+Draft a spec from the inventory, then change it. The **seeds** are the records the bot works
+on: give either key values, or a `where:` condition with `:params`. A `where:` must be one
+condition: no literal strings, no `;`, no comments. The closure adds every parent row and a
+bounded number of child rows.
+
+```bash
+labctl realdata draft-spec --url-env QTT_REPLICA --table QC_REVIEW_HDR --value 10045 --value 10046 --out subset.yaml
+```
+
+The draft limits each child table to 20 rows per parent (`--limit`) and leaves out tables that
+look like history (audit, log, history, archive, journal, event). Read it before extracting.
+
+**Which tables does the bot's screen read?** Record a lab session of the bot, then compare its
+"Tables used" with the spec. This is meaningful when the lab schema keeps the real names (it was
+built from the DBA's DDL):
+
+```bash
+labctl realdata trace-diff --url-env QTT_REPLICA --spec subset.yaml --observed-session qtt/<session id>
+```
+
+Each table the closure would miss is listed with candidate associations to add.
 
 ```bash
 labctl realdata draft-manifest --url-env QTT_REPLICA --out mask.yaml
@@ -55,6 +72,27 @@ labctl realdata extract --url-env QTT_REPLICA --spec subset.yaml --manifest mask
 With `--manifest`, rows are masked before anything is written. Twin Lab then checks the result:
 no original value may survive in a masked column, and no two values may collapse into one. Next
 to `masked.json` it writes `masked.json.mask-receipt.json`, which records what masked the file.
+
+### When a data platform does the extraction (Synapse)
+
+If Twin Lab may not read the replica row by row, a data platform can run the extraction instead.
+Twin Lab works out which rows are needed and writes the job; the platform runs it and drops files.
+
+```bash
+labctl realdata synapse-job --url-env QTT_REPLICA --spec subset.yaml --job job/
+```
+
+`job/` holds one `<table>.sql` per table (rows selected by key, in portable SQL) and `job.json`.
+The platform writes `<output>/<table>.json`, a JSON list of row objects, for each table. Then:
+
+```bash
+labctl realdata synapse-read --job job/ --output out/ --manifest mask.yaml --url-env QTT_REPLICA --out masked.json
+```
+
+It refuses output with missing tables, missing rows or rows the job did not ask for, then
+masks and writes `masked.json` with its receipt. The job SQL holds key values of real rows:
+keep `job/` on this machine. The file format is a first proposal to agree with the platform's
+owner.
 
 ## 3. Load it into the lab
 

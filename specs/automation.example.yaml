@@ -31,6 +31,12 @@ bindings:
   in_AppApi: "{{showcase.api}}"
   in_User: "{{showcase.credentials.username}}"
 
+# Row changes a run may make; anything else fails the session's verdict. Leave it out until a
+# checked session is accepted (portal session page, or `labctl session accept`).
+expects:
+  - {table: cases, ops: [update], columns: [status, updated_at]}
+  - {table: case_audit, ops: [insert], max_rows: 5}
+
 analysis:
   by: uipath-analyser@0.1.0
   gaps: []

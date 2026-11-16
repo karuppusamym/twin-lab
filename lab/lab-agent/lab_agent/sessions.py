@@ -49,6 +49,9 @@ class Active:
     condition: str | None
     data_pack: str | None
     requests: list[dict[str, Any]] = field(default_factory=list)
+    # table -> {"read": bool, "write": bool}, from statements seen on the database link. Kept in
+    # memory only: a session resumed after an agent restart lists what it saw since.
+    tables: dict[str, dict[str, bool]] = field(default_factory=dict)
 
 
 class SessionStore:
@@ -116,6 +119,17 @@ class SessionStore:
         self.active = active
         return active
 
+    def note_tables(self, found: list[dict[str, Any]]) -> None:
+        """Tables the database link saw statements on (from `analyse.sql.tables`)."""
+        if self.active is None:
+            return
+        for t in found:
+            entry = self.active.tables.setdefault(t["table"], {"read": False, "write": False})
+            if t["access"] in ("read", "read_write"):
+                entry["read"] = True
+            if t["access"] in ("write", "read_write"):
+                entry["write"] = True
+
     def record(self, request: dict[str, Any]) -> None:
         if self.active is None:
             return
@@ -157,7 +171,13 @@ class SessionStore:
                 for r in reqs
             ],
             changes=[
-                {"app": self.app_id, "table": c["table"], "op": c["op"], "key": c["key"]}
+                {
+                    "app": self.app_id,
+                    "table": c["table"],
+                    "op": c["op"],
+                    "key": c["key"],
+                    "columns": c.get("columns", []),
+                }
                 for c in changes
             ],
             summary={
@@ -175,6 +195,7 @@ class SessionStore:
                 "label": active.label,
                 "changes": [{"app": self.app_id, **c} for c in changes],
                 "faults": [r for r in reqs if r.get("fault")],
+                "tables_used": [{"table": t, **use} for t, use in sorted(active.tables.items())],
             },
         )
         write_json(self.dir / f"{active.session_id}.json", data)

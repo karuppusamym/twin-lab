@@ -313,3 +313,106 @@ def analyse(files: list[Path]) -> dict[Key, Fields]:
 def shape(path: str) -> str:
     """`/api/reviews/{in_ReviewNo}` and `/api/reviews/{no}` compare equal."""
     return re.sub(r"\{[^}]*\}", "{}", path.rstrip("/") or "/")
+
+
+# --- SQL and selectors (T-16) --------------------------------------------------------------------
+
+SQL_START = re.compile(r"^\s*(SELECT|INSERT|UPDATE|DELETE|WITH|MERGE)\b", re.I)
+# Playwright page / locator methods -> the action a screen touch records.
+PW_ACTIONS = {
+    "click": "click", "dblclick": "click", "check": "click", "uncheck": "click", "tap": "click",
+    "fill": "type", "type": "type", "press": "type", "press_sequentially": "type",
+    "select_option": "select", "hover": "hover", "wait_for_selector": "wait",
+    "text_content": "read", "inner_text": "read", "inner_html": "read", "input_value": "read",
+    "get_attribute": "read", "is_visible": "read", "is_enabled": "read", "query_selector": "read",
+    "query_selector_all": "read", "locator": "read", "wait_for": "wait",
+}  # fmt: skip
+BY_CSS = {"CSS_SELECTOR": "{}", "ID": "#{}", "CLASS_NAME": ".{}", "NAME": '[name="{}"]',
+          "TAG_NAME": "{}"}  # fmt: skip
+
+
+@dataclass
+class Scan:
+    tables: dict[str, dict] = field(default_factory=dict)  # name -> {columns, access}
+    selectors: list[dict] = field(default_factory=list)  # {action, selector, where}
+    problems: list[str] = field(default_factory=list)
+
+
+def _text(node: ast.AST) -> str | None:
+    """A string constant, or an f-string with its holes as `?` (good enough for SQL text)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(v.value if isinstance(v, ast.Constant) else "?" for v in node.values)
+    return None
+
+
+def _selector_call(call: ast.Call) -> tuple[str, str] | None:
+    """(action, css) for `page.click("#x")`, `page.locator("#x").click()`, Selenium
+    `driver.find_element(By.ID, "x")`."""
+    func = call.func
+    if not isinstance(func, ast.Attribute):
+        return None
+    name = func.attr
+    if name in ("find_element", "find_elements") and len(call.args) >= 2:
+        by, value = call.args[0], _text(call.args[1])
+        kind = by.attr if isinstance(by, ast.Attribute) else None
+        if kind in BY_CSS and value:
+            return "read", BY_CSS[kind].format(value)
+        return None
+    if name.startswith("find_element_by_") and call.args and _text(call.args[0]):
+        kind = name.removeprefix("find_element_by_").upper()
+        kind = "CSS_SELECTOR" if kind == "CSS_SELECTOR" else kind
+        if kind in BY_CSS:
+            return "read", BY_CSS[kind].format(_text(call.args[0]))
+    if name not in PW_ACTIONS:
+        return None
+    # page.locator("#x").click(): the selector is on the inner call
+    inner = func.value
+    if (not call.args or _text(call.args[0]) is None) and isinstance(inner, ast.Call):
+        found = _selector_call(inner)
+        if found and isinstance(inner.func, ast.Attribute) and inner.func.attr == "locator":
+            return PW_ACTIONS[name], found[1]
+        return None
+    if call.args and (sel := _text(call.args[0])):
+        if name in ("press", "type") and isinstance(inner, ast.Call):
+            return None  # locator(...).press("Enter"): the argument is a key, not a selector
+        if sel.startswith(("http://", "https://", "/")):
+            return None  # page.goto-like calls never get here, but keep addresses out
+        return PW_ACTIONS[name], sel
+    return None
+
+
+def scan(files: list[Path]) -> Scan:
+    """Tables named in SQL strings and selectors used with Playwright or Selenium."""
+    from labctl.analyse import sql as sqlscan
+
+    out = Scan()
+    for path in files:
+        try:
+            tree = ast.parse(Path(path).read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        where = Path(path).name
+        for node in ast.walk(tree):
+            text = _text(node) if isinstance(node, ast.Constant | ast.JoinedStr) else None
+            if text and SQL_START.match(text):
+                found, problem = sqlscan.tables(text)
+                if problem:
+                    out.problems.append(f"{where}: {problem}")
+                for t in found:
+                    have = out.tables.setdefault(t["table"], {"columns": [], "access": t["access"]})
+                    have["columns"] += [c for c in t["columns"] if c not in have["columns"]]
+                    if have["access"] != t["access"]:
+                        have["access"] = "read_write"
+            if isinstance(node, ast.Call) and (hit := _selector_call(node)):
+                entry = {"action": hit[0], "selector": hit[1], "where": where}
+                if entry not in out.selectors:
+                    out.selectors.append(entry)
+    # locator("#x") alone and locator("#x").click() both match; keep the stronger action
+    best: dict[str, dict] = {}
+    for s in out.selectors:
+        if s["selector"] not in best or best[s["selector"]]["action"] == "read":
+            best[s["selector"]] = s
+    out.selectors = list(best.values())
+    return out

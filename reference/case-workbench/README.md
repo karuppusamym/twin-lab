@@ -1,4 +1,4 @@
-# Case Workbench (reference application)
+﻿# Case Workbench (reference application)
 
 A small case-management application that stands in for "the real application's source". The Twin
 Lab factory will read this folder the way it will later read a real repository, and build a demo
@@ -55,6 +55,10 @@ Client side:
 - **Conditional field.** `#escalationReason` exists only while status is `ESCALATED`.
 - **Disabled until valid.** Save needs a category and sub-category; Add note needs text.
 - **Search runs on the button**, not as you type. Results replace the previous ones.
+- **Input mask.** The case number field formats as you type: `c1003` becomes `C-1003`.
+- **Fixed loading delay.** `#loading` ("Searching…") shows for at least 600 ms on every search, however quick the answer.
+  The showcase demo app was built before these two were added, so a fidelity replay of a new
+  recording of this app against it reports them: that is the gap the replay is there to find.
 
 Server side (each returns `{"detail": {"code", "message"}}`):
 

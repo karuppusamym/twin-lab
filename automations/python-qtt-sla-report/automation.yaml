@@ -51,6 +51,7 @@ bindings:
   qtt_user: '{{qtt.credentials.username}}'
   qtt_password: '{{qtt.credentials.password}}'
 test_inputs: {}
+expects: []
 analysis:
   by: python-fields/1
   gaps: []

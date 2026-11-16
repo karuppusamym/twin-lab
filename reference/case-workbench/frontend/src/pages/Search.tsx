@@ -3,6 +3,18 @@ import { Link } from "react-router-dom";
 import { api, CaseRow } from "../api";
 
 const STATUSES = ["OPEN", "IN_PROGRESS", "ESCALATED", "RESOLVED", "CLOSED"];
+// The list shows "Searching…" for at least this long, even when the answer is quicker.
+export const MIN_LOADING_MS = 600;
+
+/** Input mask for case numbers: "c1003" or "C 1003" becomes "C-1003" as it is typed. */
+export function formatCaseNo(raw: string): string {
+  const s = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const m = /^([A-Z])(\d{0,6})/.exec(s);
+  if (!m) return s.slice(0, 8);
+  return m[2] ? `${m[1]}-${m[2]}` : m[1];
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function SearchPage() {
   const [caseNo, setCaseNo] = useState("");
@@ -18,7 +30,10 @@ export default function SearchPage() {
     setError("");
     try {
       const q = new URLSearchParams({ caseNo, customer, status });
-      const r = await api<{ items: CaseRow[] }>("GET", `/api/cases/search?${q}`);
+      const [r] = await Promise.all([
+        api<{ items: CaseRow[] }>("GET", `/api/cases/search?${q}`),
+        pause(MIN_LOADING_MS),
+      ]);
       setRows(r.items);
     } catch (err) {
       setError((err as Error).message);
@@ -33,7 +48,9 @@ export default function SearchPage() {
       <form className="card filters" onSubmit={search} id="searchForm">
         <div>
           <label htmlFor="caseNo">Case number</label>
-          <input id="caseNo" name="caseNo" value={caseNo} onChange={(e) => setCaseNo(e.target.value)} />
+          <input id="caseNo" name="caseNo" value={caseNo} onChange={(e) => setCaseNo(formatCaseNo(e.target.value))}
+            placeholder="C-1003"
+          />
         </div>
         <div>
           <label htmlFor="customerName">Customer name</label>

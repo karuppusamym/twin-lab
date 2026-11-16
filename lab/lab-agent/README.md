@@ -67,7 +67,10 @@ All replies are JSON. Errors are `{"detail": {"code": "LAB_...", "message": ...}
 | `GET /_lab/info` | | `{app, version, upstream, tables: [{name, primary_key, columns: [{name, type, nullable, max_length, default, identity, primary_key, references}]}], db_error, condition, baseline: {id, loaded_at, label, pack, kind}, session, db_proxy}` |
 | `GET /_lab/data[?tables=a,b]` | | `Rows`: `{table: [row, ...]}`, rows ordered by primary key |
 | `POST /_lab/data/load` | `{rows: Rows, label?, pack?}` | `{baseline, replaced, cleared, counts, triggers, id}`; 422 `LAB_DATA_INVALID` with `problems: [{table, row, column, message}]` (row is 1-based) |
-| `POST /_lab/data/baseline` | `{label?}` | `{baseline, counts}`: the current data becomes the baseline |
+| `POST /_lab/data/baseline` | `{label?, pack?}` | `{baseline, counts}`: the current data becomes the baseline |
+| `GET /_lab/baselines` | | every kept baseline, newest first: `[{id, loaded_at, label, pack, kind, pinned, counts, current}]` |
+| `POST /_lab/baselines/{id}/restore` | | puts that baseline's rows back and makes it current; 404 `LAB_BASELINE_NOT_FOUND`, 409 `LAB_BASELINE_MISMATCH` |
+| `POST /_lab/baselines/{id}/pin` | `{pinned: true\|false}` | a pinned baseline is never pruned (the newest 20 unpinned are kept) |
 | `POST /_lab/reset` | | `{baseline, counts, cleared}`; 409 `LAB_NO_BASELINE` |
 | `GET /_lab/condition` | | `{id, description, seed, http, db, faults, applied_at}` (`id: null` = none) |
 | `PUT /_lab/condition` | condition or profile | as GET; 422 `LAB_CONDITION_INVALID`. `{}` clears |
@@ -78,7 +81,7 @@ All replies are JSON. Errors are `{"detail": {"code": "LAB_...", "message": ...}
 | `POST /_lab/session/discard` | | drop the running session |
 | `GET /_lab/sessions` | | `[{session_id, automation, label, started, ended, summary}]`, newest first |
 | `GET /_lab/sessions/{id}` | | the stored `Session` |
-| `GET /_lab/sessions/{id}/detail` | | `{label, changes: [{app, table, op, key, columns, before, after}], faults}` |
+| `GET /_lab/sessions/{id}/detail` | | `{label, changes: [{app, table, op, key, columns, before, after}], faults, tables_used: [{table, read, write}]}` |
 | `GET /_lab/requests[?limit=100]` | | the last requests recorded (up to 5000 kept) |
 
 ### Conditions
@@ -153,6 +156,19 @@ rows; its key is `row:<hash>`. A change's `key` is the primary key value (compos
 with `,`). Summary: `requests`, `wall_s`, `waiting_on_app_s` (sum of `app_ms + injected_ms`),
 `errors` (status >= 500 or an injected fault). A running session is kept on disk under
 `STATE_DIR/active/` and resumes after a restart; finished ones are `STATE_DIR/sessions/<id>.json`.
+
+While a session runs, the DB link reads the SQL text of each statement clients send (simple
+queries and Parse messages; never parameter values, and nothing on a TLS connection). It keeps
+only the table names, with read or write, as `tables_used` in `/detail`. Tables outside the
+app's schema file and system catalogs are left out. This list is in memory, so a session resumed
+after a restart lists only what it saw since.
+
+### Baseline history
+
+Every load and every "current data becomes the baseline" is kept as
+`STATE_DIR/baselines/<id>.json`: the newest 20 unpinned ones, the current one, and every pinned
+one. Restoring one replaces the data with its rows and makes it the current baseline, so Reset
+returns to it. A current baseline written by an older agent is added to the history at startup.
 
 ## Tests
 

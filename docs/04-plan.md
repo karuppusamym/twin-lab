@@ -170,11 +170,12 @@ factory less and less evidence and measuring what is lost.
 
 ## Milestone 2: more than one kind of automation, more than one app
 
-- [ ] **T-16 Python and agentic analyser** · M
+- [x] **T-16 Python and agentic analyser** · M
   Declared `touches` plus static scan for URLs, SQL and selectors.
-  *Part done (2026-11-16): `labctl automation analyse` reads a Python bot's HTTP calls and the
-  fields it sends and reads per route (no execution); undeclared calls become notes. SQL and
-  selector scanning still to do.*
+  *Done (2026-11-16): `labctl automation analyse` reads a Python bot's HTTP calls and the
+  fields it sends and reads per route, the tables its SQL strings name, and the selectors it
+  uses with Playwright or Selenium (no execution). Undeclared calls, tables and selectors become
+  notes. `python-qtt-sla-report` (backend only: API and database) is READY.*
   DoD: an undeclared table used in the script is reported; a backend-only automation
   (`surface: backend`, API and DB, no screens) reaches READY.
 
