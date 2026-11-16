@@ -18,6 +18,7 @@ from labctl import lab as lab_mod
 from labctl import repo
 from labctl.analyse import uipath
 from labctl.bindings import BindingError
+from labctl.data import cli as data_cli
 from labctl.devin import cli as devin_cli
 from labctl.models import KINDS, Automation
 from labctl.source import UnsupportedStack
@@ -278,6 +279,9 @@ if __name__ == "__main__":
 
 lab_app = typer.Typer(no_args_is_help=True, help="Run demo apps in the lab (Docker Compose).")
 app.add_typer(lab_app, name="lab")
+data_app.registered_commands.extend(
+    data_cli.app.registered_commands
+)  # template, validate, generate
 app.add_typer(devin_cli.app, name="devin", help="Build apps with Devin: package, start, status.")
 
 

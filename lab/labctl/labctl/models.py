@@ -343,6 +343,7 @@ class Change(Contract):
     table: str
     op: Literal["insert", "update", "delete"]
     key: str
+    columns: list[str] = []  # for an update: the columns that changed
 
 
 class SessionSummary(Contract):
@@ -355,6 +356,7 @@ class SessionSummary(Contract):
 class Session(Contract):
     session_id: str = Field(pattern=r"^ses_\d{8}T\d{6}Z_[0-9a-f]{6}$")
     automation: Slug | None = None
+    label: str | None = None
     apps: list[SessionApp] = Field(min_length=1)
     started: datetime
     ended: datetime | None = None
