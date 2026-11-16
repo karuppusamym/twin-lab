@@ -1,0 +1,83 @@
+id: agentic-case-update
+name: Case triage (agentic counterpart of the UiPath case update)
+type: agentic
+surface: backend
+trigger: manual
+owner: unassigned
+source:
+  path: .
+  entry: agent.py
+replaces: uipath-case-update
+touches:
+- app: showcase
+  via: api
+  routes:
+  - method: POST
+    path: /api/login
+    sends:
+    - password
+    - username
+    reads:
+    - token
+  - method: GET
+    path: /api/cases/{case_no}
+    sends: []
+    reads:
+    - status
+    - title
+  - method: GET
+    path: /api/categories
+    sends: []
+    reads:
+    - '[].code'
+    - '[].id'
+    - '[].name'
+  - method: GET
+    path: /api/categories/{id}/subcategories
+    sends: []
+    reads:
+    - '[].code'
+    - '[].id'
+    - '[].name'
+  - method: POST
+    path: /api/cases/{case_no}/notes
+    sends:
+    - text
+    reads: []
+  - method: PUT
+    path: /api/cases/{case_no}
+    sends:
+    - category_id
+    - status
+    - subcategory_id
+    reads:
+    - category
+    - status
+    - subcategory
+bindings:
+  showcase_api: '{{showcase.api}}'
+  showcase_user: '{{showcase.credentials.username}}'
+  showcase_password: '{{showcase.credentials.password}}'
+test_inputs:
+  in_CaseNo: C-1009
+expects:
+- table: case_audit
+  ops:
+  - insert
+  columns: []
+- table: case_note
+  ops:
+  - insert
+  columns: []
+- table: cases
+  ops:
+  - update
+  columns:
+  - category_id
+  - status
+  - subcategory_id
+  - updated_at
+analysis:
+  by: python-fields/1
+  gaps: []
+  notes: []

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Start here · Twin Lab{% endblock %}
+{% block content %}
+<h1>Start here</h1>
+<p class="lead">Twin Lab builds a safe copy of a real application, so your bots can be tested on it: with your own data, when the system is slow or failing, and with a clear PASS or FAIL for every run. Nothing here touches the real application.</p>
+
+<div class="flow" aria-label="How it works">
+  <div class="flowbox"><b>1. What the bots need</b><span>Register each bot. Its code says which screens, fields, APIs and tables it uses.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>2. What the real app looks like</b><span>Record the flow once in the real app, add the database schema.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>3. A copy is built</b><span>Devin builds a demo app from the brief and opens a pull request.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>4. Test the bots</b><span>Run them in the lab: data, slowness, sessions, PASS or FAIL.</span></div>
+</div>
+
+{% if next %}
+<div class="card nextcard">
+  <div class="nexthead">Your next step</div>
+  <h2>{{ next.title }}</h2>
+  <p>{{ next.hint }}</p>
+  <a class="button" href="{{ next.href }}">Do it now</a>
+</div>
+{% else %}
+<div class="card nextcard done"><div class="nexthead">All done</div><h2>You have been through the whole path.</h2>
+  <p>Keep going on each app's page: every app shows its own next step.</p><a class="button" href="/">Go to the apps</a></div>
+{% endif %}
+
+<div class="card">
+  <h2>Your progress</h2>
+  <ol class="checklist">
+    {% for s in steps %}
+    <li class="{{ s.state }}">
+      <span class="tick" aria-hidden="true">{{ "✓" if s.state == "done" else "→" if s.state == "next" else "" }}</span>
+      <div><b><a href="{{ s.href }}">{{ s.title }}</a></b>{% if s.state == "done" %} <span class="pill ok">done</span>{% elif s.state == "next" %} <span class="pill warn">next</span>{% endif %}
+        <div class="small muted">{{ s.hint }}</div></div>
+    </li>
+    {% endfor %}
+  </ol>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Try it on the sample</h2>
+    <p class="small">The <a href="/apps/showcase">showcase</a> app is already built, with a UiPath bot that updates cases. Open it, press <b>Start</b> in its Lab, then <b>Readiness</b>. Record a session while you run the bot (or <code>labctl harness run uipath-case-update</code>), and look at its verdict.</p>
+  </div>
+  <div class="card">
+    <h2>Rules that keep you safe</h2>
+    <ul class="small">
+      <li>Evidence, robot logs and data packs stay on this machine; they are never committed.</li>
+      <li>Only synthetic or masked data goes into a lab. Real data needs a mask receipt.</li>
+      <li>Bots get a database login that can change rows only, never the database itself.</li>
+      <li>A lab someone has reserved can be looked at, not changed.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card" id="glossary">
+  <h2>Words used here</h2>
+  <dl class="glossary">
+    {% for term, meaning in glossary %}<dt>{{ term }}</dt><dd>{{ meaning }}</dd>{% endfor %}
+  </dl>
+  <p class="small muted">More: <code>docs/office-setup.md</code> (installing and daily use), <code>docs/realdata.md</code> (masked real data), <code>docs/ocp.md</code> (OpenShift).</p>
+</div>
+{% endblock %}

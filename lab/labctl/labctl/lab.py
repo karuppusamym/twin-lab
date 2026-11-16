@@ -6,6 +6,7 @@ browser / bot -> lab agent :<lab.port> -> app -> lab agent DB proxy -> Postgres
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import subprocess
@@ -323,8 +324,13 @@ def status(root: Path, app_id: str) -> Status:
 class Agent:
     """Client for one app's lab agent admin API (/_lab/*)."""
 
-    def __init__(self, base_url: str, token: str = "", timeout: float = 60):
-        headers = {"X-Lab-Token": token} if token else {}
+    def __init__(
+        self, base_url: str, token: str = "", timeout: float = 60, holder: str | None = None
+    ):
+        headers: dict[str, str | bytes] = {"X-Lab-Token": token} if token else {}
+        if holder:
+            headers["X-Lab-Holder"] = holder.strip().encode("utf-8")  # names need not be ASCII
+        self.holder = holder
         self.base = base_url.rstrip("/")
         self.http = httpx.Client(base_url=self.base, headers=headers, timeout=timeout)
 
@@ -340,6 +346,25 @@ class Agent:
                 detail = r.json()
             except ValueError:
                 detail = r.text[:500]
+            if r.status_code in (404, 405) and detail in ({"detail": "Not Found"}, "Not Found",
+                                                          {"detail": "Method Not Allowed"}):  # fmt: skip
+                raise LabError(
+                    "this lab runs an older lab agent that cannot do that yet: restart it "
+                    "(Lab > Rebuild and restart, or `labctl lab up <app>`)"
+                )
+            if isinstance(detail, dict) and isinstance(detail.get("detail"), dict):
+                inner = detail["detail"]
+                message = inner.get("message")
+                if message:  # the agent's own words, without the HTTP plumbing
+                    problems = inner.get("problems") or inner.get("errors") or []
+                    shown = "; ".join(
+                        str(p.get("message", p)) if isinstance(p, dict) else str(p)
+                        for p in problems[:10]
+                    )
+                    code = inner.get("code")
+                    raise LabError(
+                        message + (f": {shown}" if shown else "") + (f" [{code}]" if code else "")
+                    )
             raise LabError(f"{method} {path} -> {r.status_code}: {detail}")
         return r.json()
 
@@ -395,6 +420,39 @@ class Agent:
     def session_detail(self, session_id: str):
         return self._call("GET", f"/_lab/sessions/{session_id}/detail")
 
+    def lease(self):
+        return self._call("GET", "/_lab/lease").get("lease")
+
+    def take_lease(self, holder: str, minutes: int = 60, purpose: str | None = None):
+        body = {"holder": holder, "minutes": minutes, "purpose": purpose}
+        return self._call("POST", "/_lab/lease", json=body)["lease"]
+
+    def release_lease(self, force: bool = False):
+        return self._call("DELETE", "/_lab/lease", json={"force": force})
+
+    def quarantine_baseline(self, baseline_id: str, reason: str | None, release: bool = False):
+        body = {"release": True} if release else {"reason": reason}
+        return self._call("POST", f"/_lab/baselines/{baseline_id}/quarantine", json=body)
+
+
+# Who is making admin calls, for a lab someone has reserved (lease). The portal sets it per
+# request from the name a person gave; the command line uses TWINLAB_HOLDER, else the login name.
+current_holder: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_holder", default=None
+)
+
+
+def holder() -> str | None:
+    name = current_holder.get() or os.environ.get("TWINLAB_HOLDER")
+    if name:
+        return name
+    try:
+        import getpass
+
+        return getpass.getuser()
+    except (OSError, KeyError, ImportError):
+        return None
+
 
 def agent(root: Path, app_id: str, host: str | None = None) -> Agent:
     app = load_app(root, app_id)
@@ -403,4 +461,4 @@ def agent(root: Path, app_id: str, host: str | None = None) -> Agent:
     # Admin calls come from this machine, so they go to 127.0.0.1 whatever TWINLAB_HOST says (that
     # name is for the addresses handed to bots elsewhere, and need not be bound or resolve to IPv4).
     host = host or "127.0.0.1"
-    return Agent(f"http://{host}:{app.lab.port}", lab_token(root))
+    return Agent(f"http://{host}:{app.lab.port}", lab_token(root), holder=holder())

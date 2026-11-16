@@ -75,3 +75,23 @@ def fidelity(
     typer.echo(report.markdown())
     if report.status == "fail":
         raise typer.Exit(1)
+
+
+@app.command()
+def compare(
+    a: list[Path] = typer.Option(..., "--a", exists=True, help="recordings of place A (repeat)"),
+    b: list[Path] = typer.Option(..., "--b", exists=True, help="recordings of place B (repeat)"),
+    name_a: str = typer.Option("UAT", "--name-a"),
+    name_b: str = typer.Option("production", "--name-b"),
+    md_out: Path | None = typer.Option(None, "--md", help="write the report as Markdown"),
+) -> None:
+    """Does the app behave the same in two places (UAT and production)? Exit 1 when not."""
+    from labctl.behaviour import compare as compare_mod
+
+    result = compare_mod.compare_recordings(_recordings(a), _recordings(b), name_a, name_b)
+    text = result.markdown()
+    if md_out:
+        md_out.write_text(text, encoding="utf-8")
+    typer.echo(text)
+    if result.status != "same":
+        raise typer.Exit(1)

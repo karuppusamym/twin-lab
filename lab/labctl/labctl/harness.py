@@ -27,7 +27,7 @@ from typing import Any
 
 from labctl import bindings as bindings_mod
 from labctl import lab as lab_mod
-from labctl import repo
+from labctl import provenance, repo
 from labctl import verdict as verdict_mod
 from labctl.botlog import runs as botruns
 from labctl.models import Automation, Condition
@@ -51,6 +51,7 @@ class ChainResult:
     notes: list[str] = field(default_factory=list)
     wall_s: float | None = None
     change_kinds: list[str] = field(default_factory=list)  # what kind of rows changed, per table
+    provenance: dict | None = None  # written columns: typed / selected / derived counts
 
     def to_dict(self) -> dict[str, Any]:
         return {k: (str(v) if isinstance(v, Path) else v) for k, v in self.__dict__.items()}
@@ -204,19 +205,32 @@ def _chain(root, automation, automation_id, app_id, agent, inputs, condition, go
                 )
             except botruns.RunsError as exc:
                 result.notes.append(f"parity skipped: {exc}")
+    provenance_md = None
+    if result.upload:
+        try:
+            traces = botruns.traces(lab_mod.state_dir(root), automation_id, result.upload)
+            detail = agent.session_detail(result.session_id) or {}
+            prov = provenance.bind(provenance.combined(traces), detail.get("changes") or [],
+                                   agent.data())  # fmt: skip
+            result.provenance = prov.counts()
+            provenance_md = prov.markdown()
+        except (botruns.RunsError, lab_mod.LabError) as exc:
+            result.notes.append(f"provenance skipped: {exc}")
     ok_runs = bool(result.runs) and all(r.get("state") == "Successful" for r in result.runs)
     if not ok_runs:
         result.notes.append("a bot run did not succeed")
     failed = not ok_runs or v.status == verdict_mod.FAIL or (result.parity or "").lower() == "fail"
     result.status = "FAIL" if failed else "PASS"
     (out / "report.md").write_text(
-        render(result, session, parity_md), encoding="utf-8", newline="\n"
+        render(result, session, parity_md, provenance_md), encoding="utf-8", newline="\n"
     )
     (out / "result.json").write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
     return result
 
 
-def render(result: ChainResult, session: dict, parity_md: str | None) -> str:
+def render(
+    result: ChainResult, session: dict, parity_md: str | None, provenance_md: str | None = None
+) -> str:
     sm = session.get("summary") or {}
     v = result.verdict or {}
     lines = [
@@ -244,6 +258,8 @@ def render(result: ChainResult, session: dict, parity_md: str | None) -> str:
         lines.append(f"- `{c['table']}` {c['op']} `{c['key']}`: {c['why']}")
     if result.upload:
         lines += ["", f"Robot log imported as harness upload `{result.upload}` (Robot runs)."]
+    if provenance_md:
+        lines += ["", provenance_md.strip()]
     if parity_md:
         lines += [
             "",

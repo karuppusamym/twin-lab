@@ -42,7 +42,10 @@ def analyse(folder: Path, model: Automation) -> Outcome:
         data["touches"] = result.touches
         out = Outcome(data, result.files, result.gaps, result.notes)
         by = uipath.VERSION
-    elif kind == "python":
+    elif kind == "python" or (
+        kind == "agentic" and any((folder / (model.source.path or ".")).resolve().rglob("*.py"))
+    ):
+        # An agent written in Python is read like any Python bot: its calls, fields, SQL, selectors.
         out = _python(folder, model, data)
         by = PYTHON_VERSION
     else:

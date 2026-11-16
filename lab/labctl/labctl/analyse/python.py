@@ -131,6 +131,7 @@ class _Module:
             self.expr(child, env)
         if isinstance(node, ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp):
             inner = dict(env)
+            source = None
             for gen in node.generators:
                 source = self.expr(gen.iter, inner)
                 self.bind(gen.target, self.item(source), inner)
@@ -139,6 +140,15 @@ class _Module:
             parts = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
             for part in parts:
                 self.expr(part, inner)
+            gen = node.generators[0] if len(node.generators) == 1 else None
+            if (
+                gen is not None
+                and not isinstance(node, ast.DictComp)
+                and isinstance(node.elt, ast.Name)
+                and isinstance(gen.target, ast.Name)
+                and node.elt.id == gen.target.id
+            ):
+                return source  # (c for c in items if ...): a filter keeps the list's shape
         if isinstance(node, ast.IfExp):
             return self.expr(node.body, env) or self.expr(node.orelse, env)
         if isinstance(node, ast.BoolOp):
@@ -189,6 +199,8 @@ class _Module:
                 return source
             if func.id == "enumerate" and args:
                 return args[0]
+            if func.id == "next" and args and args[0] is not None:
+                return self.item(args[0])  # next(c for c in items if ...): one of the items
             target = self.functions.get(func.id)
             if target is not None:
                 names = [a.arg for a in target.args.args]
