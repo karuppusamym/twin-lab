@@ -2,6 +2,13 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-15 — Git repository
+`twin-lab` is a Git repository. `main` holds the platform (T-00 to T-05); the showcase demo app
+from T-06 is on branch `app/showcase`, which stands in for the pull request T-06 could not open.
+`.gitattributes` keeps Unix line endings, which the Linux image builds need. A fresh clone showed
+that an unpinned ruff gives different lint results in a new environment, so ruff is now pinned.
+No remote yet.
+
 ## 2026-11-15 — T-06 Factory playbook and first build (done)
 `docs/factory-playbook.md` and `AGENTS.md`, adapted from Application Twin Studio, tell a coding
 agent how to build a demo app from a brief. A fresh agent given only those files, the brief and the

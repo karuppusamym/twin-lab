@@ -15,8 +15,8 @@ it, slows it down and records a run. Uses a showcase app, not QTT.
   Folder layout from `02-architecture.md`, `labctl` CLI with empty command groups, lint and test
   pipeline for `lab/`.
   DoD: `labctl --help` lists the groups; tests pass on a fresh clone; pipeline green.
-  *Open: built and passing locally (2026-11-15). Not ticked because the folder is not yet a Git
-  repository, so the fresh-clone and pipeline lines have not been shown.*
+  *Open: fresh clone checked 2026-11-15 (new venv, `pip install -e ".[dev]"`, lint, 90 tests,
+  `labctl validate`). Not ticked: the CI workflow has never run, because there is no GitHub remote yet.*
 
 - [x] **T-01 Contracts** · S
   Pydantic models and `specs/` examples for `automation.yaml`, `app.yaml`, data pack, condition
