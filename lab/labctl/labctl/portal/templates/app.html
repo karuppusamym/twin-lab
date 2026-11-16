@@ -92,10 +92,10 @@
   <h3>Builds</h3>
   <div class="scroll"><table class="small"><thead><tr><th>Started</th><th>How</th><th>State</th><th>Session</th><th>Pull request</th><th></th></tr></thead><tbody>
   {% for j in devin_jobs %}
-    {% set jd = j if j is mapping else j.__dict__ %}
+    {% set jd = j %}
     <tr>
-      <td>{{ jd.created_at or jd.created or "" }}</td>
-      <td>{{ jd.mode or "api" }}</td>
+      <td>{{ (jd.created_at or "")[:16] }}</td>
+      <td>{{ "by hand" if jd.mode == "manual" else "Devin API" }}</td>
       <td><span class="pill {{ 'ok' if jd.state == 'finished' else 'err' if jd.state in ('failed', 'cancelled') else 'warn' }}">{{ jd.state }}</span>
         {% if jd.status_detail %}<span class="muted">{{ jd.status_detail }}</span>{% endif %}
         {% if jd.last_error %}<br><span class="muted">{{ jd.last_error }}</span>{% endif %}</td>

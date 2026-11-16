@@ -45,6 +45,10 @@
       <div><label for="asurface">Touches</label>
         <select id="asurface" name="surface"><option value="combo">Screens and API or database</option><option value="frontend">Screens only</option><option value="backend">API or database only</option></select></div>
     </div>
+    <div class="row">
+      <div><label for="aapp">Runs against app (id)</label><input id="aapp" type="text" name="app_id" placeholder="qtt" pattern="[a-z0-9][a-z0-9-]*"></div>
+    </div>
+    <p class="small muted">With an app id, the arguments the bot uses as addresses, and its user and password arguments, are mapped to that app's lab automatically. Review them on the next page.</p>
     <label for="aproject">UiPath project (zip of the project folder: project.json and the .xaml files)</label>
     <input id="aproject" type="file" name="project" accept=".zip">
     <details>

@@ -78,9 +78,11 @@ def create_app(root: Path) -> FastAPI:
     def back(url: str, msg: str, kind: str = "ok") -> RedirectResponse:
         from urllib.parse import urlencode
 
-        sep = "&" if "?" in url else "?"
+        path, _, fragment = url.partition("#")  # the message must come before the #fragment
+        sep = "&" if "?" in path else "?"
+        query = urlencode({"msg": msg, "kind": kind})
         return RedirectResponse(
-            f"{url}{sep}{urlencode({'msg': msg, 'kind': kind})}", status_code=303
+            f"{path}{sep}{query}" + (f"#{fragment}" if fragment else ""), status_code=303
         )
 
     def slug(value: str, what: str) -> str:
@@ -165,15 +167,27 @@ def create_app(root: Path) -> FastAPI:
 
         return devin_config.load_config(root)
 
-    def devin_jobs():
-        from labctl.devin import jobs as devin_jobs_mod
-        from labctl.devin.client import DevinClient
+    builds: dict = {}
 
-        cfg = devin()
-        store = devin_jobs_mod.JobStore(Path(cfg.state_dir))
-        return devin_jobs_mod.BuildJobs(
-            store, lambda: DevinClient(cfg.api_key, cfg.org_id, cfg.base_url), root
-        )
+    def devin_jobs():
+        """One build tracker for the portal's lifetime; unfinished builds resume polling."""
+        if "jobs" not in builds:
+            from labctl.devin import jobs as devin_jobs_mod
+            from labctl.devin.client import DevinClient
+
+            def client():
+                cfg = devin()  # read each time, so a key added later is picked up
+                return DevinClient(cfg.api_key, cfg.org_id, cfg.base_url)
+
+            cfg = devin()
+            tracker = devin_jobs_mod.BuildJobs(
+                devin_jobs_mod.JobStore(Path(cfg.state_dir)), client, root,
+                packages_dir=state / "packages",
+            )  # fmt: skip
+            if cfg.configured:
+                tracker.resume_unfinished()
+            builds["jobs"] = tracker
+        return builds["jobs"]
 
     # --- overview --------------------------------------------------------------------------------
 
@@ -216,6 +230,7 @@ def create_app(root: Path) -> FastAPI:
         surface: str = Form(...),
         project: UploadFile | None = File(None),
         touches: str = Form(""),
+        app_id: str = Form(""),
     ):
         automation_id = slug(automation_id, "automation id")
         folder = root / "automations" / automation_id
@@ -243,6 +258,16 @@ def create_app(root: Path) -> FastAPI:
                 return back("/automations", str(exc), "error")
         save_automation(model)
         if kind == "uipath":
+            if app_id.strip():
+                try:
+                    model.bindings = uipath.suggest_bindings(
+                        folder / "project", slug(app_id, "app id")
+                    )
+                except uipath.AnalysisError as exc:
+                    return back(
+                        f"/automations/{automation_id}", f"Analysis refused: {exc}", "error"
+                    )
+                save_automation(model)
             return _analyse(automation_id)
         return back(f"/automations/{automation_id}", "Automation registered")
 
@@ -400,7 +425,7 @@ def create_app(root: Path) -> FastAPI:
             cfg = devin()
             devin_ok, devin_list = (
                 cfg.configured,
-                [j for j in devin_jobs().list() if _job_app(j) == app_id],
+                [j.to_dict() for j in devin_jobs().list(app_id)],
             )
         except Exception as exc:  # noqa: BLE001 - the page must render even if Devin config is broken
             cfg, devin_ok, devin_list = None, False, []
@@ -856,19 +881,19 @@ def create_app(root: Path) -> FastAPI:
                 jobs.submit("conformance", f"Conformance: {m.id}", job, m.id)
         return back("/mapping", "Conformance runs started; refresh in a minute")
 
-    @portal.get("/jobs/{job_id}", response_class=HTMLResponse)
-    def job_page(request: Request, job_id: str):
-        job = jobs.get(job_id)
-        if job is None:
-            raise HTTPException(404, "no such job")
-        return page(request, "job.html", job=job)
-
     @portal.get("/jobs/{job_id}.json")
     def job_json(job_id: str):
         job = jobs.get(job_id)
         if job is None:
             raise HTTPException(404, "no such job")
         return JSONResponse(job)
+
+    @portal.get("/jobs/{job_id}", response_class=HTMLResponse)
+    def job_page(request: Request, job_id: str):
+        job = jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "no such job")
+        return page(request, "job.html", job=job)
 
     @portal.get("/settings", response_class=HTMLResponse)
     def settings(request: Request):
@@ -892,7 +917,7 @@ def create_app(root: Path) -> FastAPI:
                 )
             client = DevinClient(cfg.api_key, cfg.org_id, cfg.base_url)
             print(f"Calling {cfg.base_url} for organization {cfg.org_id} ...")
-            result = client.check() if hasattr(client, "check") else client.list_sessions(first=1)
+            result = client.list_sessions(first=1)
             print("Devin answered: the key and organization work.")
             return {"ok": True, "detail": str(result)[:200]}
 
@@ -934,12 +959,6 @@ def create_app(root: Path) -> FastAPI:
     return portal
 
 
-def _job_app(job) -> str | None:
-    if isinstance(job, dict):
-        return job.get("app_id")
-    return getattr(job, "app_id", None)
-
-
 def _counts(reply) -> str:
     if isinstance(reply, dict):
         counts = reply.get("counts", reply)
@@ -966,6 +985,10 @@ def _unzip(data: bytes, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     base = target.resolve()
     names = [i for i in archive.infolist() if not i.is_dir()]
+    for info in archive.infolist():
+        name = info.filename.replace("\\", "/")
+        if name.startswith("/") or ".." in name.split("/") or ":" in name.split("/")[0]:
+            raise ValueError(f"Unsafe path in archive: {info.filename}")
     # a zip of a folder: drop the single top folder so files land directly in the target
     tops = {Path(i.filename).parts[0] for i in names if Path(i.filename).parts}
     strip = len(tops) == 1 and all(len(Path(i.filename).parts) > 1 for i in names)

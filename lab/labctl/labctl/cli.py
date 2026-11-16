@@ -18,6 +18,7 @@ from labctl import lab as lab_mod
 from labctl import repo
 from labctl.analyse import uipath
 from labctl.bindings import BindingError
+from labctl.devin import cli as devin_cli
 from labctl.models import KINDS, Automation
 from labctl.source import UnsupportedStack
 from labctl.source import sqlalchemy_models as sam
@@ -277,6 +278,7 @@ if __name__ == "__main__":
 
 lab_app = typer.Typer(no_args_is_help=True, help="Run demo apps in the lab (Docker Compose).")
 app.add_typer(lab_app, name="lab")
+app.add_typer(devin_cli.app, name="devin", help="Build apps with Devin: package, start, status.")
 
 
 def _automation(automation_id: str) -> Automation:
