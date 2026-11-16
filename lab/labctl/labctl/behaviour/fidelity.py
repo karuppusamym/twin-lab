@@ -71,6 +71,38 @@ class FidelityReport(BaseModel):
         return "\n".join(lines) + "\n"
 
 
+def reports_dir(root: Path, app_id: str) -> Path:
+    from labctl import lab
+
+    return lab.state_dir(root) / "fidelity" / app_id
+
+
+def save(root: Path, app_id: str, report: FidelityReport) -> str:
+    """Keep a replay's report where the portal shows it and readiness reads it. Returns its name
+    (`<recording>--<UTC stamp>`)."""
+    from datetime import UTC, datetime
+
+    out = reports_dir(root, app_id)
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    name = f"{Path(report.recording).name}--{stamp}"
+    (out / f"{name}.md").write_text(report.markdown(), encoding="utf-8", newline="\n")
+    (out / f"{name}.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    return name
+
+
+def latest(root: Path, app_id: str) -> tuple[str, FidelityReport] | None:
+    """The newest replay report kept for the app, or None."""
+    folder = reports_dir(root, app_id)
+    found = sorted(folder.glob("*--*.json"), key=lambda p: p.stem.rsplit("--", 1)[-1])
+    for path in reversed(found):
+        try:
+            return path.stem, FidelityReport.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+    return None
+
+
 def compare_dom(expected_html: str, actual_html: str, step: int = 0) -> list[Difference]:
     """Differences between a recorded after-snapshot and a live one, each naming the element."""
     exp, act = domlib.snapshot(expected_html), domlib.snapshot(actual_html)

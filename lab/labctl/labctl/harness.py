@@ -52,6 +52,7 @@ class ChainResult:
     wall_s: float | None = None
     change_kinds: list[str] = field(default_factory=list)  # what kind of rows changed, per table
     provenance: dict | None = None  # written columns: typed / selected / derived counts
+    lab: str | None = None  # the copy it ran on, when it ran on one
 
     def to_dict(self) -> dict[str, Any]:
         return {k: (str(v) if isinstance(v, Path) else v) for k, v in self.__dict__.items()}
@@ -117,7 +118,13 @@ def run_chain(
     golden: str | None = None,
     out: Path | None = None,
     headless: bool = True,
+    copy: bool = False,
+    keep_copy: bool = False,
+    on: str | None = None,
 ) -> ChainResult:
+    """With `copy`, the chain runs on a copy of the app's lab made for this run (labctl lab copy),
+    started from the app lab's baseline and dropped afterwards unless `keep_copy`: nobody else's
+    run can disturb it, and it disturbs nobody."""
     path = root / "automations" / automation_id / "automation.yaml"
     automation, problems = repo.load(path, "automation")
     if not isinstance(automation, Automation):
@@ -127,7 +134,44 @@ def run_chain(
     out = Path(out or lab_mod.state_dir(root) / "harness" / automation_id / stamp)
     out.mkdir(parents=True, exist_ok=True)
     result = ChainResult("FAIL", automation_id, app_id, out)
-    agent = lab_mod.agent(root, app_id)
+    lab_id = app_id
+    if on:  # a copy made beforehand (labctl lab copy), kept afterwards
+        if bindings_mod.split_lab_id(on)[0] != app_id:
+            raise HarnessError(f"{on} is not a copy of {app_id}")
+        lab_id = result.lab = on
+    elif copy:
+        from labctl import copies
+
+        try:
+            rec = copies.create(root, app_id, build=False)
+        except copies.CopyError as exc:
+            raise HarnessError(str(exc)) from exc
+        lab_id = rec["lab"]
+        result.lab = lab_id
+        result.notes.append(f"ran on its own copy {lab_id} (data: {rec['data']})")
+    try:
+        return _run(root, automation, automation_id, app_id, lab_id, inputs, condition, reset,
+                    golden, out, stamp, result, headless)  # fmt: skip
+    finally:
+        if copy and not keep_copy:
+            from labctl import copies
+
+            try:
+                copies.drop(root, lab_id)
+            except Exception as exc:  # noqa: BLE001 - the run's result still stands
+                result.notes.append(f"the copy {lab_id} could not be dropped: {exc}")
+            _rewrite(out, result)
+
+
+def _rewrite(out: Path, result: ChainResult) -> None:
+    path = out / "result.json"
+    if path.exists():
+        path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+
+
+def _run(root, automation, automation_id, app_id, lab_id, inputs, condition, reset, golden, out,
+         stamp, result, headless) -> ChainResult:  # fmt: skip
+    agent = lab_mod.agent(root, lab_id)
     agent.health()  # unreachable lab -> LabError before anything changes
 
     # 1. data and condition; the condition the lab had is put back at the end
@@ -138,7 +182,7 @@ def run_chain(
     agent.set_condition(condition_body(root, condition, app_id) if condition else None)
     try:
         return _chain(root, automation, automation_id, app_id, agent, inputs, condition, golden,
-                      out, stamp, result, headless)  # fmt: skip
+                      out, stamp, result, headless, lab_id)  # fmt: skip
     finally:
         try:
             agent.set_condition(before)
@@ -147,9 +191,11 @@ def run_chain(
 
 
 def _chain(root, automation, automation_id, app_id, agent, inputs, condition, golden, out, stamp,
-           result, headless) -> ChainResult:  # fmt: skip
+           result, headless, lab_id=None) -> ChainResult:  # fmt: skip
     # 2-4. session around the bot
-    b = bindings_mod.for_automation(root, automation, host="127.0.0.1")
+    lab_id = lab_id or app_id
+    labs = {app_id: lab_id} if lab_id != app_id else None
+    b = bindings_mod.for_automation(root, automation, host="127.0.0.1", labs=labs)
     bindings = json.loads(b.model_dump_json(exclude_none=True))
     runs = inputs or [dict(automation.test_inputs)]
     log = out / "robot.log.jsonl"
@@ -190,7 +236,7 @@ def _chain(root, automation, automation_id, app_id, agent, inputs, condition, go
         result.notes.append(f"the robot log could not be imported: {exc}")
 
     # 6. verdict and parity
-    v, _, _ = verdict_mod.for_session(root, app_id, result.session_id, automation_id)
+    v, _, _ = verdict_mod.for_session(root, lab_id, result.session_id, automation_id)
     result.verdict = v.to_dict()
     parity_md = None
     if golden:

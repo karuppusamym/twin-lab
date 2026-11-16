@@ -1,0 +1,4 @@
+[
+  {"in_CaseNo": "C-1013", "in_Category": "Payments", "in_Subcategory": "Delayed",
+   "in_NoteText": "Checked by the e2e run", "select#caseStatus": "IN_PROGRESS"}
+]

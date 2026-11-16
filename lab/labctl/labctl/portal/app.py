@@ -28,6 +28,7 @@ from pydantic import ValidationError
 
 from labctl import bindings as bnd
 from labctl import conformance as conf
+from labctl import copies as copies_mod
 from labctl import factory, repo
 from labctl import lab as lab_mod
 from labctl import packs as packs_mod
@@ -694,6 +695,7 @@ def create_app(root: Path) -> FastAPI:
             db_choices=db_choices,
             db_current=db_current,
             db_label=dict(db_choices).get(db_current, f"{db_current} (not configured)"),
+            lab_copies=copies_mod.listing(root, app_id),
             lease=lease,
             lease_mine=bool(
                 lease
@@ -1027,6 +1029,37 @@ def create_app(root: Path) -> FastAPI:
         job_id = jobs.submit("lab", f"{title} {app_id}", job, app_id)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
+    # copies of a lab, one per run
+
+    @portal.post("/apps/{app_id}/copies")
+    def copy_start(app_id: str, data: str = Form("baseline")):
+        app_id = slug(app_id, "app id")
+        if data not in ("baseline", "current", "app"):
+            data = slug(data, "data pack")
+
+        def job(log):
+            print(f"Starting a copy of {app_id}'s lab (data: {data}) ...")
+            rec = copies_mod.create(root, app_id, data=data, build=False)
+            print(f"{rec['lab']}: running on http://127.0.0.1:{rec['port']}, database port "
+                  f"{rec['db_port']}, data: {rec['data']}")  # fmt: skip
+            print(f"Bindings for a bot: labctl bindings <automation> --on {rec['lab']}")
+            return rec
+
+        job_id = jobs.submit("lab", f"Copy of {app_id}", job, app_id)
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @portal.post("/apps/{app_id}/copies/{name}/drop")
+    def copy_drop(app_id: str, name: str):
+        app_id, name = slug(app_id, "app id"), slug(name, "copy name")
+
+        def job(log):
+            copies_mod.drop(root, f"{app_id}.{name}")
+            print(f"{app_id}.{name}: dropped")
+            return {"dropped": f"{app_id}.{name}"}
+
+        job_id = jobs.submit("lab", f"Drop {app_id}.{name}", job, app_id)
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
     # fidelity replay: a recording of the real application, replayed against the demo app
 
     def fidelity_dir(app_id: str) -> Path:
@@ -1052,8 +1085,6 @@ def create_app(root: Path) -> FastAPI:
         base_url = f"http://127.0.0.1:{model.lab.port}"
 
         def job(log):
-            from datetime import UTC, datetime
-
             from labctl.behaviour import fidelity
 
             given = dict(typed)
@@ -1062,12 +1093,7 @@ def create_app(root: Path) -> FastAPI:
                     given.setdefault(sel, creds["password"])
             print(f"Replaying {folder.name} against {base_url} ...")
             report = fidelity.replay(folder, base_url, given)
-            out = fidelity_dir(app_id)
-            out.mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-            name = f"{folder.name}--{stamp}"
-            (out / f"{name}.md").write_text(report.markdown(), encoding="utf-8", newline="\n")
-            (out / f"{name}.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
+            name = fidelity.save(root, app_id, report)
             failed = sum(1 for s in report.steps if s.status == "fail")
             print(f"Result: {report.status.upper()} ({len(report.steps)} steps, {failed} failed)")
             print(f"Report: /apps/{app_id}/fidelity/{name}")

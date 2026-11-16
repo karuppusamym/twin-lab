@@ -310,17 +310,81 @@ def lab_status(app_id: str) -> None:
         typer.echo(f"  {state.error}")
 
 
+@lab_app.command("copy")
+def lab_copy(
+    app_id: str,
+    name: str = typer.Option(None, "--name", help="Copy name (default run-1, run-2, ...)."),
+    data: str = typer.Option(
+        "baseline", "--data", help="baseline (the app lab's), current, app, or a data pack name."
+    ),
+    no_build: bool = typer.Option(False, "--no-build", help="Use the images already built."),
+) -> None:
+    """Start a copy of an app's lab for one run, on free ports, with its own database."""
+    from labctl import copies
+
+    try:
+        rec = copies.create(_root(), app_id, name, data, build=not no_build)
+    except (copies.CopyError, lab_mod.LabError, BindingError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{rec['lab']}: running on http://127.0.0.1:{rec['port']} "
+               f"(database port {rec['db_port']}), data: {rec['data']}")  # fmt: skip
+    typer.echo(f"  bindings: labctl bindings <automation> --on {rec['lab']}")
+    typer.echo(f"  drop it:  labctl lab drop {rec['lab']}")
+
+
+@lab_app.command("copies")
+def lab_copies(app_id: str = typer.Argument(None)) -> None:
+    """Copies running now (of one app, or all)."""
+    from labctl import copies
+
+    rows = copies.listing(_root(), app_id)
+    for r in rows:
+        typer.echo(f"{r['lab']}  port {r['port']}  db {r['db_port']}  data {r['data']}  "
+                   f"since {r['created']}")  # fmt: skip
+    if not rows:
+        typer.echo("no copies")
+
+
+@lab_app.command("drop")
+def lab_drop(lab_id: str) -> None:
+    """Stop a copy and delete it with its data."""
+    from labctl import copies
+
+    try:
+        copies.drop(_root(), lab_id)
+    except (copies.CopyError, lab_mod.LabError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{lab_id}: dropped")
+
+
+def _labs(on: list[str]) -> dict[str, str]:
+    """`--on showcase.run-1` -> {"showcase": "showcase.run-1"}."""
+    out = {}
+    for lab_id in on:
+        base, copy = bindings_mod.split_lab_id(lab_id)
+        if not copy:
+            raise typer.BadParameter(f"{lab_id} is not a copy (app.copy, see labctl lab copies)")
+        out[base] = lab_id
+    return out
+
+
+ON_HELP = "Use this copy of an app's lab (app.copy); repeat for several apps."
+
+
 @app.command()
 def bindings(
     automation_id: str,
     form: str = typer.Option(
         "json", help="json (ATS_BINDINGS), env, uipath (input arguments) or yaml."
     ),
+    on: list[str] = typer.Option([], "--on", help=ON_HELP),
 ) -> None:
     """What an automation needs to run against the lab: addresses, test sign-in, inputs."""
     auto = _automation(automation_id)
     try:
-        b = bindings_mod.for_automation(_root(), auto)
+        b = bindings_mod.for_automation(_root(), auto, labs=_labs(on))
         typer.echo(bindings_mod.render(auto, b, form))
     except BindingError as exc:
         typer.echo(str(exc), err=True)
@@ -331,13 +395,49 @@ def bindings(
 def conformance(
     automation_id: str,
     as_json: bool = typer.Option(False, "--json", help="Print the report as JSON."),
+    on: list[str] = typer.Option([], "--on", help=ON_HELP),
+    require_fidelity: bool = typer.Option(
+        False,
+        "--require-fidelity",
+        help="BLOCKED unless a fidelity replay of every app the bot uses on screen has passed.",
+    ),  # fmt: skip
 ) -> None:
     """Check an automation against the running demo apps: READY or BLOCKED."""
-    report = conformance_mod.check(_root(), _automation(automation_id))
+    report = conformance_mod.check(_root(), _automation(automation_id), labs=_labs(on),
+                                   require_fidelity=require_fidelity)  # fmt: skip
     typer.echo(
         json.dumps(report.to_dict(), indent=2) if as_json else conformance_mod.render(report)
     )
     if report.verdict != "READY":
+        raise typer.Exit(1)
+
+
+@app.command()
+def e2e(
+    automation_id: str,
+    condition: str = typer.Option(None, "--condition", help="Condition for the bot run."),
+    golden: str = typer.Option(None, "--golden", help="Production run for parity: <upload>/<run>."),
+    no_build: bool = typer.Option(False, "--no-build", help="Use the images already built."),
+    keep: bool = typer.Option(False, "--keep", help="Keep the lab copy afterwards."),
+    out: Path = typer.Option(None, "--out", help="Folder for the report."),
+    headed: bool = typer.Option(False, "--headed", help="Show the browser."),
+    inputs: Path = typer.Option(
+        None, "--inputs", help="Bot runs, JSON object or list (default: e2e-inputs.json)."
+    ),
+) -> None:
+    """End to end on a lab copy: contracts, lab, copy, readiness, bot run (session, verdict,
+    parity), fidelity replay, cleanup. Writes report.md; exit 1 unless every stage passed."""
+    from labctl import e2e as e2e_mod
+
+    runs = None
+    if inputs is not None:
+        data = json.loads(inputs.read_text(encoding="utf-8-sig"))
+        runs = data if isinstance(data, list) else [data]
+    result = e2e_mod.run(_root(), automation_id, condition, golden, not no_build, keep, out,
+                         not headed, say=lambda m: typer.echo(m, err=True), inputs=runs)  # fmt: skip
+    typer.echo(Path(result.out, "report.md").read_text(encoding="utf-8"))
+    typer.echo(f"report: {Path(result.out, 'report.md')}")
+    if result.status != "PASS":
         raise typer.Exit(1)
 
 
@@ -476,6 +576,10 @@ def harness_run(
     out: Path = typer.Option(None, "--out", help="Folder for the log, recordings and report."),
     headed: bool = typer.Option(False, "--headed", help="Show the browser."),
     repeat: int = typer.Option(1, "--repeat", min=1, max=20, help="Run the chain N times."),
+    copy: bool = typer.Option(
+        False, "--copy", help="Run on a copy of the lab made for the run, dropped afterwards."
+    ),
+    keep_copy: bool = typer.Option(False, "--keep-copy", help="With --copy: keep the copy."),
 ) -> None:
     """Reset, apply a condition, record a session around the harness bot, import its robot log,
     judge the row changes and (with --golden) check parity. With --repeat, also check that
@@ -491,7 +595,8 @@ def harness_run(
         for n in range(repeat):
             where = (out / f"run-{n + 1}") if (out and repeat > 1) else out
             results.append(harness.run_chain(_root(), automation_id, runs, condition,
-                                             not no_reset, golden, where, not headed))  # fmt: skip
+                                             not no_reset, golden, where, not headed,
+                                             copy, keep_copy))  # fmt: skip
     except (harness.HarnessError, lab_mod.LabError, BindingError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc

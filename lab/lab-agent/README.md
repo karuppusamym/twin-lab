@@ -72,6 +72,7 @@ All replies are JSON. Errors are `{"detail": {"code": "LAB_...", "message": ...}
 | `GET /_lab/data[?tables=a,b]` | | `Rows`: `{table: [row, ...]}`, rows ordered by primary key |
 | `POST /_lab/data/load` | `{rows: Rows, label?, pack?}` | `{baseline, replaced, cleared, counts, triggers, id}`; 422 `LAB_DATA_INVALID` with `problems: [{table, row, column, message}]` (row is 1-based) |
 | `POST /_lab/data/baseline` | `{label?, pack?}` | `{baseline, counts}`: the current data becomes the baseline |
+| `GET /_lab/data/baseline` | | `{baseline, tables}`: the rows Reset puts back (`tables` null without a baseline); a lab copy starts from them |
 | `GET /_lab/baselines` | | every kept baseline, newest first: `[{id, loaded_at, label, pack, kind, pinned, counts, current}]` |
 | `POST /_lab/baselines/{id}/restore` | | puts that baseline's rows back and makes it current; 404 `LAB_BASELINE_NOT_FOUND`, 409 `LAB_BASELINE_MISMATCH` |
 | `POST /_lab/baselines/{id}/pin` | `{pinned: true\|false}` | a pinned baseline is never pruned (the newest 20 unpinned are kept) |

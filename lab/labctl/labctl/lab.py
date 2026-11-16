@@ -28,7 +28,8 @@ class LabError(Exception):
 
 
 def project(app_id: str) -> str:
-    return f"twinlab-{app_id}"
+    """The Compose project of a lab: `twinlab-showcase`, or `twinlab-showcase_run-3` for a copy."""
+    return f"twinlab-{app_id.replace('.', '_')}"
 
 
 def state_dir(root: Path) -> Path:
@@ -103,7 +104,8 @@ def bind_address(root: Path) -> str:
 
 def compose(root: Path, app_id: str) -> dict:
     """The Compose document for one app. Ports come from `lab:` in app.yaml."""
-    app = load_app(root, app_id)
+    app = load_app(root, app_id)  # a copy (`showcase.run-3`) has its own ports
+    lab_id, app_id = app_id, app.id
     if app.lab is None:
         raise LabError(f"apps/{app_id}/app.yaml has no `lab:` section (port, db_port)")
     if app.run.web is None and app.run.api is None:
@@ -116,9 +118,10 @@ def compose(root: Path, app_id: str) -> dict:
     pw = db_password(root)  # not "lab": the DB port can be reachable from the network
     choice = dbservers.choice(app.lab.database)
     if choice != "postgres":
-        return _compose_other(root, app_id, app, choice, app_port, db_env, schema, token, bind)
+        doc = _compose_other(root, app_id, app, choice, app_port, db_env, schema, token, bind)
+        return {**doc, "name": project(lab_id)}
     return {
-        "name": project(app_id),
+        "name": project(lab_id),
         "services": {
             "db": {
                 "image": POSTGRES_IMAGE,
@@ -352,9 +355,11 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
     if build and "TWINLAB_AGENT_IMAGE" not in os.environ:
         build_agent_image(root)
     file = compose_file(root, app_id)
-    choice = dbservers.choice(load_app(root, app_id).lab.database)
+    lab_id, app = app_id, load_app(root, app_id)
+    app_id = app.id  # the database inside the lab is named after the app, also in a copy
+    choice = dbservers.choice(app.lab.database)
     if choice != "postgres":
-        return _up_other(root, app_id, file, choice, build)
+        return _up_other(root, lab_id, file, choice, build)
     # 1. The database alone, so its logins match this machine's passwords before the app and the
     #    agent connect with them (a volume made earlier keeps the password it was created with).
     first = _docker(
@@ -375,7 +380,7 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
     _psql(file, app_id, _grants_sql())  # tables the app created on start
     # The first time, the app's own starting data becomes the baseline, so Reset works at once.
     try:
-        lab_agent = agent(root, app_id)
+        lab_agent = agent(root, lab_id)
         if not (lab_agent.info() or {}).get("baseline"):
             lab_agent.baseline()
     except LabError:
@@ -429,6 +434,7 @@ def _up_other(root: Path, app_id: str, file: Path, choice: str, build: bool) -> 
     from labctl import dbsetup
 
     app = load_app(root, app_id)
+    lab_id, app_id = app_id, app.id
     schema_file = root / "apps" / app_id / "db" / "schema.sql"
     server = lab_server(root, app_id, choice)
     if choice == "sqlserver":
@@ -468,7 +474,7 @@ def _up_other(root: Path, app_id: str, file: Path, choice: str, build: bool) -> 
             f"`docker compose up` failed for {app_id}:\n{(out.stderr or out.stdout)[-3000:]}"
         )
     try:
-        lab_agent = agent(root, app_id)
+        lab_agent = agent(root, lab_id)
         if not (lab_agent.info() or {}).get("baseline"):
             lab_agent.baseline()
     except LabError:
@@ -589,6 +595,10 @@ class Agent:
 
     def baselines(self):
         return self._call("GET", "/_lab/baselines")
+
+    def baseline_rows(self) -> dict | None:
+        """The rows of the current baseline ({table: rows}), or None when there is none."""
+        return self._call("GET", "/_lab/data/baseline").get("tables")
 
     def restore_baseline(self, baseline_id: str):
         return self._call("POST", f"/_lab/baselines/{baseline_id}/restore")

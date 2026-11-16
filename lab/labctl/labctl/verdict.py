@@ -132,7 +132,8 @@ def for_session(root, app_id: str, session_id: str, automation_id: str | None = 
         reason = f"automation {automation_id} cannot be read: " + "; ".join(map(str, problems))
         return Verdict(NOT_DECLARED, len(changes), reasons=[reason]), session, automation_id
     expects = model.expects
-    mine = [c for c in changes if c.get("app") in (None, app_id)]
+    base = app_id.partition(".")[0]  # a copy's agent names its app, not the copy
+    mine = [c for c in changes if c.get("app") in (None, base)]
     return judge(mine, expects), session, automation_id
 
 

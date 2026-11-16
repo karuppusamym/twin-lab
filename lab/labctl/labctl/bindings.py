@@ -24,11 +24,23 @@ class BindingError(Exception):
     pass
 
 
+def split_lab_id(lab_id: str) -> tuple[str, str | None]:
+    """`showcase` is the app's own lab; `showcase.run-3` a copy of it (labctl lab copy)."""
+    base, _, copy = lab_id.partition(".")
+    return base, copy or None
+
+
 def load_app(root: Path, app_id: str) -> App:
-    path = root / "apps" / app_id / "app.yaml"
+    """The app, by app id or lab id. For a copy the `lab:` ports are the copy's own."""
+    base, copy = split_lab_id(app_id)
+    path = root / "apps" / base / "app.yaml"
     model, problems = repo.load(path, "app")
     if model is None:
-        raise BindingError(f"apps/{app_id}/app.yaml: " + "; ".join(str(p) for p in problems))
+        raise BindingError(f"apps/{base}/app.yaml: " + "; ".join(str(p) for p in problems))
+    if copy:
+        from labctl import copies
+
+        model = copies.apply(root, model, copy)
     return model
 
 
@@ -45,6 +57,7 @@ def app_binding(
         return AppBinding(
             web=base,
             api=base,
+            http=base,
             db=server.url(bot=True, host=host, port=app.lab.db_port),
             db_engine=server.engine,
             db_connection_string=server.connection_string(
@@ -55,6 +68,7 @@ def app_binding(
     return AppBinding(
         web=base,
         api=base,
+        http=base,
         db=f"postgresql://bot:{db_password}@{host}:{app.lab.db_port}/{app.id}",
         db_engine="postgresql",
         db_connection_string=(
@@ -65,15 +79,19 @@ def app_binding(
     )
 
 
-def for_automation(root: Path, automation: Automation, host: str | None = None) -> Bindings:
+def for_automation(
+    root: Path, automation: Automation, host: str | None = None, labs: dict | None = None
+) -> Bindings:
     """Bindings for a bot. `host` defaults to the remembered TWINLAB_HOST (for bots on other
-    machines), else 127.0.0.1."""
+    machines), else 127.0.0.1. `labs` maps an app to the lab to use instead of its own (a copy:
+    `{"showcase": "showcase.run-3"}`); the bindings keep the app's name."""
     from labctl import dbservers, lab
 
     host = host or lab.setting(root, "host")
+    labs = labs or {}
     apps = {}
     for app_id in automation.apps():
-        app = load_app(root, app_id)
+        app = load_app(root, labs.get(app_id, app_id))
         choice = dbservers.choice(app.lab.database if app.lab else None)
         server = None
         if choice != "postgres":
@@ -82,7 +100,12 @@ def for_automation(root: Path, automation: Automation, host: str | None = None) 
             except lab.LabError as exc:
                 raise BindingError(str(exc)) from exc
         apps[app_id] = app_binding(app, host, lab.bot_password(root), server)
-    return Bindings(apps=apps, inputs=dict(automation.test_inputs))
+    out = Bindings(apps=apps, inputs=dict(automation.test_inputs), output_path="result.json")
+    try:  # resolved here too, for ATS-style automations that read `arguments` from the file
+        out.arguments = arguments(automation, out)
+    except BindingError:
+        pass  # an unknown reference is reported where the arguments are used
+    return out
 
 
 def resolve(text: str, bindings: Bindings) -> str:
