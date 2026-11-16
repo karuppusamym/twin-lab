@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Automations · Twin Lab{% endblock %}
+{% block content %}
+<h1>Automations</h1>
+<p class="lead">Every bot, agent or script that will run against a demo app. What each one touches decides what gets built.</p>
+
+<div class="card scroll">
+  <table>
+    <thead><tr><th>Automation</th><th>Type</th><th>Apps</th><th>Analysis</th><th>Readiness</th></tr></thead>
+    <tbody>
+    {% for path, a, problems in automations %}
+      {% if a %}
+      <tr>
+        <td><a href="/automations/{{ a.id }}"><b>{{ a.id }}</b></a><br><span class="small muted">{{ a.name }}</span></td>
+        <td>{{ a.type.value }} <span class="small muted">({{ a.surface.value }})</span></td>
+        <td>{{ a.apps() | join(", ") or "-" }}</td>
+        <td>
+          {% if a.analysis.gaps %}<span class="pill err">{{ a.analysis.gaps | length }} gap(s)</span>
+          {% elif a.touches %}<span class="pill ok">complete</span>{% else %}<span class="pill">nothing yet</span>{% endif %}
+          {% if a.analysis.reviewed_by %}<span class="pill ok">reviewed</span>{% endif %}
+        </td>
+        <td>
+          {% set v = verdicts.get(a.id) %}
+          {% if v %}<span class="pill {{ 'ok' if v.verdict == 'READY' else 'err' }}">{{ v.verdict }}</span>{% else %}<span class="pill">not checked</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5"><span class="pill err">invalid</span> {{ path }}: {{ problems | map('string') | join('; ') }}</td></tr>
+      {% endif %}
+    {% else %}
+      <tr><td colspan="5" class="muted">No automation registered yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Register an automation</h2>
+  <form method="post" action="/automations" enctype="multipart/form-data">
+    <div class="row">
+      <div><label for="aid">Id</label><input id="aid" type="text" name="automation_id" placeholder="uipath-loan-review" required pattern="[a-z0-9][a-z0-9-]*"></div>
+      <div><label for="aname">Name</label><input id="aname" type="text" name="name" placeholder="Loan review (UiPath)" required></div>
+      <div><label for="akind">Type</label>
+        <select id="akind" name="kind"><option value="uipath">UiPath</option><option value="agentic">Agent</option><option value="python">Python</option><option value="other">Other</option></select></div>
+      <div><label for="asurface">Touches</label>
+        <select id="asurface" name="surface"><option value="combo">Screens and API or database</option><option value="frontend">Screens only</option><option value="backend">API or database only</option></select></div>
+    </div>
+    <label for="aproject">UiPath project (zip of the project folder: project.json and the .xaml files)</label>
+    <input id="aproject" type="file" name="project" accept=".zip">
+    <details>
+      <summary>Not UiPath: say what it touches</summary>
+      <p class="small muted">The touches list from <code>docs/03-contracts.md</code>. Example:</p>
+<pre>- app: qtt
+  via: api
+  routes:
+    - {method: GET, path: /api/reviews}
+- app: qtt
+  via: db
+  tables:
+    - {table: review_audit, columns: [review_no, event], access: read}</pre>
+      <textarea name="touches" placeholder="touches as YAML"></textarea>
+    </details>
+    <button type="submit" data-busy="Analysing…">Register</button>
+  </form>
+</div>
+{% endblock %}

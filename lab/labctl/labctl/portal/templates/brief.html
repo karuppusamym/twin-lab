@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Brief: {{ app_id }} · Twin Lab{% endblock %}
+{% block content %}
+<p class="small"><a href="/apps/{{ app_id }}#brief">← {{ app_id }}</a></p>
+<div class="card brief scroll">{{ html | safe }}</div>
+{% endblock %}

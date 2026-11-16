@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Compare sessions · Twin Lab{% endblock %}
+{% block content %}
+<p class="small"><a href="/apps/{{ app_id }}#sessions">← {{ app_id }}</a></p>
+<h1>Compare two sessions</h1>
+<div class="card scroll">
+  <table>
+    <thead><tr><th></th><th>A: <a href="/apps/{{ app_id }}/sessions/{{ a.session_id }}">{{ a.label or a.session_id }}</a></th><th>B: <a href="/apps/{{ app_id }}/sessions/{{ b.session_id }}">{{ b.label or b.session_id }}</a></th></tr></thead>
+    <tbody>
+      <tr><td>Automation</td><td>{{ a.automation or "" }}</td><td>{{ b.automation or "" }}</td></tr>
+      <tr><td>Condition</td><td>{{ (a.apps[0].condition if a.apps else "") or "normal" }}</td><td>{{ (b.apps[0].condition if b.apps else "") or "normal" }}</td></tr>
+      {% for k, label in [("requests", "Requests"), ("wall_s", "Took (s)"), ("waiting_on_app_s", "Waiting on the app (s)"), ("errors", "Errors")] %}
+      <tr><td>{{ label }}</td><td>{{ diff.summary[k][0] }}</td><td>{{ diff.summary[k][1] }}</td></tr>
+      {% endfor %}
+      <tr><td>Rows changed by both</td><td colspan="2">{{ diff.both }}</td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="grid">
+  <div class="card"><h2>Changed only by A</h2>
+    {% if diff.only_a %}<ul class="small">{% for c in diff.only_a %}<li><code>{{ c[1] }}</code> {{ c[2] }} <code>{{ c[3] }}</code></li>{% endfor %}</ul>{% else %}<p class="muted">Nothing.</p>{% endif %}</div>
+  <div class="card"><h2>Changed only by B</h2>
+    {% if diff.only_b %}<ul class="small">{% for c in diff.only_b %}<li><code>{{ c[1] }}</code> {{ c[2] }} <code>{{ c[3] }}</code></li>{% endfor %}</ul>{% else %}<p class="muted">Nothing.</p>{% endif %}</div>
+</div>
+<p class="small muted">Rows are compared by table, change and key. Two automations that do the same work on the same reset data change the same rows.</p>
+{% endblock %}

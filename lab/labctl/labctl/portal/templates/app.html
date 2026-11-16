@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}{{ app_id }} · Twin Lab{% endblock %}
+{% block content %}
+<p class="small"><a href="/">← Apps</a></p>
+<h1>{{ app.name if app else app_id }}</h1>
+<p class="lead">
+  Needed by {{ (needed_by + flows) | join(", ") or "nothing yet" }}
+  {% if app and app.mode %} · built as <b>{{ app.mode }}</b>{% endif %}
+  {% if status and status.running %} · <a href="http://localhost:{{ app.lab.port }}/" target="_blank" rel="noopener">open the app ↗</a>{% endif %}
+</p>
+<nav class="sectionnav">
+  <a href="#evidence">1 Evidence</a><a href="#brief">2 Brief</a><a href="#build">3 Build</a><a href="#lab">4 Lab</a>
+  <a href="#data">5 Data</a><a href="#conditions">6 Conditions</a><a href="#sessions">7 Sessions</a>
+</nav>
+
+<section class="card" id="evidence">
+  <h2>1 · Evidence</h2>
+  <p class="small muted">Everything here stays on this machine (<code>evidence/{{ app_id }}/</code>, never committed). Recordings may contain customer data; only value-free shapes go into the brief.</p>
+  <div class="scroll"><table class="small">
+    <thead><tr><th>Kind</th><th>Item</th><th></th></tr></thead><tbody>
+    {% for kind, items in [("recording", evidence.recordings), ("DDL", evidence.ddl), ("API description", evidence.openapi), ("screenshot", evidence.screenshots)] %}
+      {% for p in items %}
+      <tr><td>{{ kind }}</td><td><code>{{ p.name }}</code></td>
+        <td><form method="post" action="/apps/{{ app_id }}/evidence/delete" class="inline" data-confirm="Remove {{ p.name }}?">
+          <input type="hidden" name="path" value="{{ ('screenshots/' if kind == 'screenshot' else '') ~ p.name }}"><button type="submit" class="secondary">Remove</button></form></td></tr>
+      {% endfor %}
+    {% endfor %}
+    {% if not evidence.kinds() %}<tr><td colspan="3" class="muted">No evidence yet. Automation code and flows count as evidence too.</td></tr>{% endif %}
+  </tbody></table></div>
+  <div class="grid">
+    <form method="post" action="/apps/{{ app_id }}/evidence" enctype="multipart/form-data">
+      <h3>Add a file</h3>
+      <label for="ekind">Kind</label>
+      <select id="ekind" name="kind">
+        <option value="recording">Recording (.har, or a zip of a recording folder)</option>
+        <option value="ddl">Database schema (.sql DDL)</option>
+        <option value="openapi">API description (OpenAPI or Postman)</option>
+        <option value="screenshot">Screenshot (image or PDF)</option>
+      </select>
+      <label for="ename">Name (optional)</label><input id="ename" type="text" name="name" placeholder="qc-review-2026-11">
+      <input type="file" name="file" required>
+      <button type="submit">Upload</button>
+    </form>
+    <form method="post" action="/apps/{{ app_id }}/record">
+      <h3>Record a flow</h3>
+      <p class="small muted">Opens a browser on this machine. Sign in and go through the flow once; close the window to finish. Pages are captured after every step.</p>
+      <label for="rurl">Start address of the real application</label><input id="rurl" type="url" name="url" required placeholder="https://qtt.uat.example/login">
+      <label for="rname">Recording name</label><input id="rname" type="text" name="name" required placeholder="qc-review" pattern="[a-z0-9][a-z0-9-]*">
+      <button type="submit">Start recording</button>
+    </form>
+  </div>
+</section>
+
+<section class="card" id="brief">
+  <h2>2 · Brief</h2>
+  <p class="small muted">Merges every piece of evidence into the app model, scopes it to what is needed, and writes the brief, the database schema and app.yaml under <code>apps/{{ app_id }}/</code>.</p>
+  {% if has_brief %}<p><a class="button secondary" href="/apps/{{ app_id }}/brief">Read the brief</a></p>{% endif %}
+  <form method="post" action="/apps/{{ app_id }}/brief">
+    <div class="row">
+      <div><label for="bsystem">Name of the real system</label><input id="bsystem" type="text" name="system" value="{{ app.copies.system if app else '' }}" placeholder="QTT"></div>
+      <div><label for="bengine">Its database engine</label>
+        <select id="bengine" name="db_engine"><option value="">as the evidence shows</option>
+          {% for e in ["postgres", "mssql", "oracle", "db2", "mysql", "sqlite"] %}<option value="{{ e }}" {{ 'selected' if app and app.stack.db and app.stack.db.engine == e }}>{{ e }}</option>{% endfor %}</select></div>
+      <div><label for="bsource">Source code folder (optional, rarely available)</label><input id="bsource" type="text" name="source" placeholder="leave empty"></div>
+    </div>
+    <button type="submit">{{ "Regenerate" if has_brief else "Generate" }} the brief</button>
+  </form>
+</section>
+
+<section class="card" id="build">
+  <h2>3 · Build</h2>
+  {% if built %}<p><span class="pill ok">built</span> <code>apps/{{ app_id }}/Dockerfile</code> exists.</p>{% endif %}
+  {% if not has_brief %}<p class="muted">Generate the brief first.</p>{% else %}
+  <div class="grid">
+    <div>
+      <h3>By hand in Devin</h3>
+      <p class="small muted">Download the package, open Devin, attach the zip and paste <code>DEVIN_TASK.md</code> as the task. Devin opens a pull request in {{ repo_name or "the repository" }}. Then record the pull request below.</p>
+      <a class="button" href="/apps/{{ app_id }}/package">Download the Devin package</a>
+    </div>
+    <div>
+      <h3>Directly through the Devin API</h3>
+      {% if devin_ok %}
+        <form method="post" action="/apps/{{ app_id }}/devin/start" data-confirm="Start a Devin session? It consumes Devin credits.">
+          <label for="acu">Credit limit (ACUs, optional)</label><input id="acu" type="number" name="max_acu" min="1" placeholder="no limit">
+          <button type="submit">Start the build in Devin</button>
+        </form>
+      {% else %}<p class="small muted">Not configured. Add the Devin key and organization in <a href="/settings">Settings</a>.</p>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% if devin_jobs %}
+  <h3>Builds</h3>
+  <div class="scroll"><table class="small"><thead><tr><th>Started</th><th>How</th><th>State</th><th>Session</th><th>Pull request</th><th></th></tr></thead><tbody>
+  {% for j in devin_jobs %}
+    {% set jd = j if j is mapping else j.__dict__ %}
+    <tr>
+      <td>{{ jd.created_at or jd.created or "" }}</td>
+      <td>{{ jd.mode or "api" }}</td>
+      <td><span class="pill {{ 'ok' if jd.state == 'finished' else 'err' if jd.state in ('failed', 'cancelled') else 'warn' }}">{{ jd.state }}</span>
+        {% if jd.status_detail %}<span class="muted">{{ jd.status_detail }}</span>{% endif %}
+        {% if jd.last_error %}<br><span class="muted">{{ jd.last_error }}</span>{% endif %}</td>
+      <td>{% if jd.session_url %}<a href="{{ jd.session_url }}" target="_blank" rel="noopener">open ↗</a>{% endif %}</td>
+      <td>{% for pr in (jd.pr_urls or []) %}<a href="{{ pr }}" target="_blank" rel="noopener">{{ pr.split('/')[-1] and ('#' ~ pr.split('/')[-1]) }}</a> {% endfor %}
+        {% if not jd.pr_urls %}<form method="post" action="/apps/{{ app_id }}/devin/{{ jd.id }}/pr" class="row"><div><input type="url" name="pr_url" placeholder="https://github.com/owner/repo/pull/12" required></div><div><button type="submit" class="secondary">Record PR</button></div></form>{% endif %}</td>
+      <td>
+        {% if jd.state in ('running', 'waiting_for_user') and jd.mode != 'manual' %}
+          <form method="post" action="/apps/{{ app_id }}/devin/{{ jd.id }}/message"><input type="text" name="text" placeholder="Message to Devin" required><button type="submit" class="secondary">Send</button></form>
+          <form method="post" action="/apps/{{ app_id }}/devin/{{ jd.id }}/cancel" data-confirm="Stop this Devin session?"><button type="submit" class="danger">Stop</button></form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody></table></div>
+  <p class="small muted">When a pull request is merged, use <a href="/settings">Settings → Get the latest from GitHub</a>, then start the app below.</p>
+  {% endif %}
+</section>
+
+<section class="card" id="lab">
+  <h2>4 · Lab</h2>
+  {% if not app %}<p class="muted">Generate the brief first.</p>
+  {% else %}
+    {% if app.lab %}
+      <p>Front door <code>http://localhost:{{ app.lab.port }}</code> · database (through the slowdown proxy) <code>localhost:{{ app.lab.db_port }}</code></p>
+      {% if status %}
+        <p>{% if status.running %}<span class="pill ok">running</span>{% else %}<span class="pill">stopped</span>{% endif %}
+          {% for svc, st in status.services.items() %}<span class="pill">{{ svc }}: {{ st }}</span> {% endfor %}
+          {% if status.health %}<span class="pill {{ 'ok' if status.health.app == 'ok' and status.health.db == 'ok' else 'err' }}">app {{ status.health.app }}, db {{ status.health.db }}</span>{% endif %}</p>
+        {% if status.error %}<p class="small muted">{{ status.error }}</p>{% endif %}
+      {% endif %}
+      {% if built %}
+      <form method="post" action="/apps/{{ app_id }}/lab/up" class="inline"><button type="submit">{{ "Rebuild and restart" if status and status.running else "Start" }}</button></form>
+      <form method="post" action="/apps/{{ app_id }}/lab/down" class="inline" data-confirm="Stop {{ app_id }}? Its data is kept."><button type="submit" class="secondary">Stop</button></form>
+      {% else %}<p class="muted">Not built yet: the app's code arrives with the build's pull request.</p>{% endif %}
+    {% endif %}
+    <details {{ 'open' if not app.lab }}><summary>Ports and test sign-in</summary>
+      <form method="post" action="/apps/{{ app_id }}/lab-settings">
+        <div class="row">
+          <div><label for="lport">Front door port</label><input id="lport" type="number" name="port" value="{{ app.lab.port if app.lab else '' }}" required></div>
+          <div><label for="dport">Database port</label><input id="dport" type="number" name="db_port" value="{{ app.lab.db_port if app.lab else '' }}" required></div>
+          <div><label for="luser">Test user</label><input id="luser" type="text" name="username" value="{{ app.lab.credentials.username if app.lab else '' }}"></div>
+          <div><label for="lpass">Test password</label><input id="lpass" type="text" name="password" value="{{ app.lab.credentials.password if app.lab else '' }}"></div>
+        </div>
+        <button type="submit" class="secondary">Save</button>
+      </form>
+    </details>
+  {% endif %}
+</section>
+
+{% set running = status and status.running %}
+<section class="card" id="data">
+  <h2>5 · Data</h2>
+  {% if not running %}<p class="muted">Start the app to load data.</p>{% else %}
+  {% if lab_info and lab_info.baseline %}<p class="small">Baseline: <b>{{ lab_info.baseline.label or lab_info.baseline.id }}</b> <span class="muted">{{ lab_info.baseline.loaded_at }}</span></p>{% endif %}
+  <div class="grid">
+    <div>
+      <h3>Your own data (Excel)</h3>
+      <p class="small muted">One sheet per table. Download the template, fill it, upload it. Only the tables in the workbook are replaced.</p>
+      <a class="button secondary" href="/apps/{{ app_id }}/data/template">Empty template</a>
+      <a class="button secondary" href="/apps/{{ app_id }}/data/template?current=true">Template with current data</a>
+      <form method="post" action="/apps/{{ app_id }}/data/upload" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".xlsx" required>
+        <input type="text" name="label" placeholder="label, e.g. month-end cases">
+        <button type="submit">Check and load</button>
+      </form>
+    </div>
+    <div>
+      <h3>Synthetic data</h3>
+      <p class="small muted">Generated from the schema; the app's own code lists (statuses, types) are reused. The same seed gives the same data.</p>
+      <form method="post" action="/apps/{{ app_id }}/data/generate">
+        <div class="row"><div><label for="seed">Seed</label><input id="seed" type="number" name="seed" value="20261115"></div></div>
+        <label for="counts">Rows per table</label>
+        <textarea id="counts" name="counts" rows="4" placeholder="customer=50&#10;cases=200">{% if lab_info and lab_info.tables %}{% for t in lab_info.tables[:3] %}{{ t.name }}=50
+{% endfor %}{% endif %}</textarea>
+        <button type="submit">Generate and load</button>
+      </form>
+    </div>
+    <div>
+      <h3>Baseline</h3>
+      <p class="small muted">Reset puts every table back exactly as the baseline. Do it before each run.</p>
+      <form method="post" action="/apps/{{ app_id }}/data/reset"><button type="submit">Reset to baseline</button></form>
+      <form method="post" action="/apps/{{ app_id }}/data/baseline" data-confirm="Make the current data the new baseline?"><button type="submit" class="secondary">Current data becomes the baseline</button></form>
+    </div>
+  </div>
+  {% if lab_info and lab_info.tables %}
+  <details><summary>Tables ({{ lab_info.tables | length }})</summary>
+    <ul class="small">{% for t in lab_info.tables %}<li><code>{{ t.name }}</code>{% if t.rows is defined %} · {{ t.rows }} row(s){% endif %}</li>{% endfor %}</ul>
+  </details>{% endif %}
+  {% endif %}
+</section>
+
+<section class="card" id="conditions">
+  <h2>6 · Conditions</h2>
+  <p class="small muted">Make the app or its database slow, or fail now and then, to see how automations cope. Applies immediately; no restart.</p>
+  {% if not running %}<p class="muted">Start the app to set conditions.</p>{% else %}
+  <p>Now: <b>{{ condition.id if condition and condition.id else "normal" }}</b></p>
+  <form method="post" action="/apps/{{ app_id }}/condition" class="row">
+    <div><label for="cond">Condition</label><select id="cond" name="condition_id"><option value="">normal (no added delay)</option>
+      {% for c in conditions %}<option value="{{ c.id }}" {{ 'selected' if condition and condition.id == c.id }}>{{ c.id }}: {{ c.description }}</option>{% endfor %}</select></div>
+    <div><button type="submit">Apply</button></div>
+  </form>
+  <p class="small muted">Profiles live in <code>conditions/</code>. One whose target app is <code>any</code> applies to every app.</p>
+  {% endif %}
+</section>
+
+<section class="card" id="sessions">
+  <h2>7 · Sessions</h2>
+  <p class="small muted">Record what an automation does: start, run the bot as you normally would, stop. You get every request with its waiting time and every row it changed.</p>
+  {% if not running %}<p class="muted">Start the app to record sessions.</p>{% else %}
+  {% if lab_info and lab_info.session_active %}
+    <p><span class="pill warn">recording</span> session <code>{{ lab_info.session_active }}</code></p>
+    <form method="post" action="/apps/{{ app_id }}/session/stop"><button type="submit">Stop and show the result</button></form>
+  {% else %}
+  <form method="post" action="/apps/{{ app_id }}/session/start" class="row">
+    <div><label for="sauto">Automation</label><select id="sauto" name="automation"><option value="">(not said)</option>{% for a in automations %}<option value="{{ a.id }}">{{ a.id }}</option>{% endfor %}</select></div>
+    <div><label for="slabel">Label</label><input id="slabel" type="text" name="label" placeholder="UiPath, peak-hour"></div>
+    <div><label><input type="checkbox" name="reset" value="1" checked> reset data first</label></div>
+    <div><button type="submit">Start recording</button></div>
+  </form>
+  {% endif %}
+  {% set listed = sessions if sessions is sequence and sessions is not string else (sessions.sessions if sessions else []) %}
+  {% if listed %}
+  <form method="get" action="/apps/{{ app_id }}/compare">
+  <div class="scroll"><table class="small"><thead><tr><th>A</th><th>B</th><th>Session</th><th>Automation</th><th>Condition</th><th>Requests</th><th>Took</th><th>Waiting on app</th><th>Errors</th></tr></thead><tbody>
+  {% for s in listed %}
+    <tr><td><input type="radio" name="a" value="{{ s.session_id }}" {{ 'checked' if loop.index == 2 }}></td><td><input type="radio" name="b" value="{{ s.session_id }}" {{ 'checked' if loop.first }}></td>
+      <td><a href="/apps/{{ app_id }}/sessions/{{ s.session_id }}">{{ s.label or s.session_id }}</a></td>
+      <td>{{ s.automation or "" }}</td><td>{{ (s.apps[0].condition if s.apps else "") or "normal" }}</td>
+      <td>{{ s.summary.requests if s.summary else "" }}</td><td>{{ s.summary.wall_s if s.summary else "" }} s</td>
+      <td>{{ s.summary.waiting_on_app_s if s.summary else "" }} s</td><td>{{ s.summary.errors if s.summary else "" }}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% if listed | length > 1 %}<button type="submit" class="secondary">Compare A and B</button>{% endif %}
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+
+{% if jobs %}
+<section class="card">
+  <h2>Recent jobs for {{ app_id }}</h2>
+  <ul class="small">{% for j in jobs %}<li><a href="/jobs/{{ j.id }}">{{ j.title }}</a> · {{ j.created }} · <span class="pill {{ 'ok' if j.status == 'done' else 'err' if j.status in ('failed', 'interrupted') else 'warn' }}">{{ j.status }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}

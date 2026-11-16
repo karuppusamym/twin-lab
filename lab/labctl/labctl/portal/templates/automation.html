@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ a.id }} · Twin Lab{% endblock %}
+{% block content %}
+<p class="small"><a href="/automations">← Automations</a></p>
+<h1>{{ a.name }}</h1>
+<p class="lead"><code>{{ a.id }}</code> · {{ a.type.value }} · touches {{ a.surface.value }} · apps:
+  {% for app in a.apps() %}<a href="/apps/{{ app }}">{{ app }}</a>{% if not loop.last %}, {% endif %}{% else %}none yet{% endfor %}</p>
+
+<div class="grid">
+  <div class="card">
+    <h2>Readiness</h2>
+    <p class="small muted">Replays the bot's screen steps in a browser against the running demo app, and checks every route and table it uses.</p>
+    {% for j in conformance %}
+      <p><a href="/jobs/{{ j.id }}">{{ j.created }}</a>
+        {% if j.result and j.result.verdict %}<span class="pill {{ 'ok' if j.result.verdict == 'READY' else 'err' }}">{{ j.result.verdict }}</span>
+        {% else %}<span class="pill {{ 'err' if j.status == 'failed' else 'warn' }}">{{ j.status }}</span>{% endif %}</p>
+    {% else %}<p class="muted">Not checked yet.</p>{% endfor %}
+    <form method="post" action="/automations/{{ a.id }}/conformance"><button type="submit">Check readiness now</button></form>
+  </div>
+  <div class="card">
+    <h2>Run it against the lab</h2>
+    {% if binding_error %}<p class="flash error">{{ binding_error }}</p>{% endif %}
+    <p class="small muted">Give the bot these values: addresses of the lab apps and their test sign-in.</p>
+    {% if args %}
+      <table class="small">{% for k, v in args.items() %}<tr><td><code>{{ k }}</code></td><td><code>{{ v }}</code></td></tr>{% endfor %}</table>
+    {% endif %}
+    <a class="button secondary" href="/automations/{{ a.id }}/bindings?form=uipath">UiPath arguments</a>
+    <a class="button secondary" href="/automations/{{ a.id }}/bindings?form=json">Bindings JSON</a>
+    <a class="button secondary" href="/automations/{{ a.id }}/bindings?form=env">.env file</a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>What it touches</h2>
+  {% if a.analysis.gaps %}
+    <p class="flash error">{{ a.analysis.gaps | length }} part(s) could not be interpreted. Until a person resolves them, this automation is BLOCKED.</p>
+    <ul>{% for g in a.analysis.gaps %}<li><b>{{ g.where }}</b>: {{ g.what }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% for t in a.touches %}
+    <h3>{{ t.app }} · {{ t.via }}</h3>
+    {% if t.via == 'web' %}
+      {% for s in t.screens %}
+        <p class="small"><b>{{ s.path or s.name }}</b></p>
+        <div class="scroll"><table class="small"><thead><tr><th>Action</th><th>Selector</th><th>Variable</th></tr></thead><tbody>
+        {% for u in s.uses %}<tr><td>{{ u.action }}</td><td><code>{{ u.selector }}</code></td><td>{{ u.field or "" }}</td></tr>{% endfor %}
+        </tbody></table></div>
+      {% endfor %}
+    {% elif t.via == 'api' %}
+      <ul class="small">{% for r in t.routes %}<li><code>{{ r.method }} {{ r.path }}</code></li>{% endfor %}</ul>
+    {% elif t.via == 'db' %}
+      <ul class="small">{% for tb in t.tables %}<li><code>{{ tb.table }}</code> {{ tb.access }}: {{ tb.columns | join(", ") }}</li>{% endfor %}</ul>
+    {% endif %}
+  {% else %}<p class="muted">Nothing recorded yet.</p>{% endfor %}
+  {% if a.analysis.notes %}<details><summary>Notes ({{ a.analysis.notes | length }})</summary><ul class="small">{% for n in a.analysis.notes %}<li><b>{{ n.where }}</b>: {{ n.what }}</li>{% endfor %}</ul></details>{% endif %}
+  <p class="small muted">Analysed by {{ a.analysis.by or "nobody" }} · reviewed by {{ a.analysis.reviewed_by or "nobody yet" }}</p>
+  <div class="row">
+    {% if a.type.value == 'uipath' %}<form method="post" action="/automations/{{ a.id }}/analyse"><button type="submit" class="secondary">Analyse again</button></form>{% endif %}
+    <form method="post" action="/automations/{{ a.id }}/review" class="row">
+      <div><label for="reviewer">Reviewed by</label><input id="reviewer" type="text" name="reviewer" value="{{ a.analysis.reviewed_by or '' }}" placeholder="your name"></div>
+      <div><button type="submit" class="secondary">Record review</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Arguments and test inputs</h2>
+  <p class="small muted"><code>bindings</code> maps the bot's arguments to the lab: <code>{% raw %}{{qtt.web}}{% endraw %}</code>, <code>{% raw %}{{qtt.api}}{% endraw %}</code>, <code>{% raw %}{{qtt.db}}{% endraw %}</code>, <code>{% raw %}{{qtt.credentials.username}}{% endraw %}</code>. <code>test_inputs</code> are the values used for the readiness check (for example the record number it opens).</p>
+  <form method="post" action="/automations/{{ a.id }}/settings">
+    <textarea name="settings" rows="12">{{ settings_yaml }}</textarea>
+    <button type="submit">Save</button>
+  </form>
+</div>
+{% endblock %}

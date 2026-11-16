@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title }} · Twin Lab{% endblock %}
+{% block content %}
+<h1>{{ job.title }}</h1>
+<p class="lead">Started {{ job.created }} · <span id="job-status" class="pill warn">{{ job.status }}</span></p>
+<div class="card" data-job="{{ job.id }}">
+  <pre id="job-log" style="max-height:520px">{{ job.log }}</pre>
+</div>
+<p id="job-done" hidden>
+  {% if job.subject and job.kind in ("brief", "lab", "record") %}<a class="button" href="/apps/{{ job.subject }}">Back to {{ job.subject }}</a>
+  {% elif job.kind == "conformance" %}<a class="button" href="/automations/{{ job.subject }}">Back to {{ job.subject }}</a> <a class="button secondary" href="/mapping">Readiness</a>
+  {% else %}<a class="button" href="/">Back</a>{% endif %}
+</p>
+{% endblock %}

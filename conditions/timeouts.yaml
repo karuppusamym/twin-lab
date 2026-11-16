@@ -1,0 +1,9 @@
+id: timeouts
+description: Some requests take longer than most bots wait (30 to 60 seconds).
+calibration: estimate
+calibrated_from: "illustrative"
+seed: 14
+targets:
+  - app: any
+    http:
+      - {match: "* /api/*", latency_ms: {p50: 2000, p95: 45000}}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Settings · Twin Lab{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<div class="grid">
+  <div class="card">
+    <h2>Devin</h2>
+    {% if cfg_error %}<p class="flash error">{{ cfg_error }}</p>{% endif %}
+    {% if cfg %}
+    <table class="small">
+      <tr><td>API</td><td><code>{{ cfg.base_url }}</code></td></tr>
+      <tr><td>Organization</td><td>{{ cfg.org_id or "not set" }}</td></tr>
+      <tr><td>Key</td><td>{{ "set" if cfg.api_key else "not set" }}</td></tr>
+      <tr><td>Repository</td><td>{{ cfg.github_repo or "not set" }}</td></tr>
+    </table>
+    {% endif %}
+    <p class="small muted">Put <code>DEVIN_API_KEY</code>, <code>DEVIN_ORG_ID</code> and <code>GITHUB_REPO</code> in <code>twinlab.local.yaml</code> next to the repository (never committed) or in the environment, then restart the portal. Step-by-step: <code>docs/devin.md</code>. Without them, use the package download on each app page.</p>
+    <form method="post" action="/settings/devin-check"><button type="submit">Check the connection</button></form>
+    {% for j in checks %}<p class="small"><a href="/jobs/{{ j.id }}">{{ j.created }}</a> <span class="pill {{ 'ok' if j.status == 'done' else 'err' }}">{{ j.status }}</span></p>{% endfor %}
+  </div>
+  <div class="card">
+    <h2>Repository</h2>
+    <pre>{{ git }}</pre>
+    <p class="small muted">After a build's pull request is merged on GitHub, bring the app's code here.</p>
+    <form method="post" action="/settings/git-pull"><button type="submit">Get the latest from GitHub</button></form>
+    {% for j in updates %}<p class="small"><a href="/jobs/{{ j.id }}">{{ j.created }}</a> <span class="pill {{ 'ok' if j.status == 'done' else 'err' }}">{{ j.status }}</span></p>{% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import typer
@@ -358,3 +359,24 @@ def conformance(
     )
     if report.verdict != "READY":
         raise typer.Exit(1)
+
+
+@app.command()
+def portal(
+    host: str = typer.Option(
+        "127.0.0.1", help="0.0.0.0 to let colleagues reach it (set a password)."
+    ),
+    port: int = typer.Option(8790),
+) -> None:
+    """Start the Twin Lab portal (web page) for this repository."""
+    import uvicorn
+
+    from labctl.portal.app import create_app
+
+    if host not in ("127.0.0.1", "localhost") and not os.environ.get("TWINLAB_PORTAL_PASSWORD"):
+        typer.echo(
+            "Refusing to listen beyond this machine without TWINLAB_PORTAL_PASSWORD set.", err=True
+        )
+        raise typer.Exit(2)
+    typer.echo(f"Twin Lab portal on http://{host}:{port}  (repository {_root()})")
+    uvicorn.run(create_app(_root()), host=host, port=port, log_level="warning")
