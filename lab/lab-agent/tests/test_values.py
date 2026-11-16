@@ -94,3 +94,37 @@ def test_round_trip():
     }
     for udt, v in values.items():
         assert from_json(to_json(v), col(udt)) == v
+
+
+INTERVALS = [
+    timedelta(0),
+    timedelta(hours=1),
+    timedelta(days=30, seconds=1),
+    timedelta(days=30, seconds=1, microseconds=1),
+    timedelta(days=12345, seconds=86399, microseconds=999999),
+    timedelta(microseconds=1),
+    timedelta(microseconds=-1),
+    timedelta(seconds=-1),
+    timedelta(days=-30, seconds=-1, microseconds=-250000),
+    timedelta(days=999999, microseconds=500000),
+]
+
+
+def test_interval_text_is_exact():
+    assert to_json(timedelta(days=30, seconds=1)) == "30 days 1 seconds"
+    assert to_json(timedelta(seconds=1.5)) == "1.5 seconds"
+    assert to_json(timedelta(microseconds=-1)) == "-0.000001 seconds"
+    assert to_json(timedelta(days=-1)) == "-1 days"
+    assert to_json(timedelta(0)) == "0 seconds"
+    # 30 days and 1 second used to come back as 2.592e+06 seconds, a second short.
+    assert to_json(timedelta(days=30, seconds=1)) != to_json(timedelta(days=30))
+
+
+@pytest.mark.parametrize("value", INTERVALS, ids=str)
+def test_interval_round_trip(value):
+    assert from_json(to_json(value), col("interval")) == value
+
+
+def test_other_interval_text_is_left_for_postgres():
+    assert from_json("1 mon 2 hours", col("interval")) == "1 mon 2 hours"
+    assert from_json("", col("interval")) == ""

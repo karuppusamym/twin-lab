@@ -29,10 +29,35 @@ from lab_agent.store import read_json, remove, write_json
 log = logging.getLogger("lab_agent")
 
 RECENT_REQUESTS = 5000
+BASELINE_ROWS = "baseline.rows.json"
+BASELINE_META = "baseline.meta.json"
+JSON_TYPE = "application/json"
 
 
 def error(status: int, code: str, message: str, **extra: Any) -> JSONResponse:
     return JSONResponse({"detail": {"code": code, "message": message, **extra}}, status_code=status)
+
+
+def _not_json(headers: list[tuple[bytes, bytes]]) -> str | None:
+    """Why an admin request is refused for its body type, or None.
+
+    A body must be JSON (`Content-Type: application/json`). A cross-site HTML form can only send
+    urlencoded, multipart or text/plain, so this keeps forms on other sites from driving the
+    lab. A request with no body is fine without a Content-Type, but one that names a type other
+    than JSON is refused even when empty: browsers always label form posts.
+    """
+    values: dict[bytes, bytes] = {}
+    for k, v in headers:
+        values[k.lower()] = v
+    ctype = values.get(b"content-type")
+    length = values.get(b"content-length", b"").strip()
+    has_body = b"transfer-encoding" in values or (length not in (b"", b"0"))
+    if ctype is None:
+        return f"a request body must be sent as {JSON_TYPE}" if has_body else None
+    media = ctype.split(b";", 1)[0].strip().lower()
+    if media != JSON_TYPE.encode():
+        return f"Content-Type must be {JSON_TYPE}, not {media.decode('latin-1')[:80]!r}"
+    return None
 
 
 class LabAgent:
@@ -86,7 +111,7 @@ class LabAgent:
                 self.condition_applied_at = stored.get("applied_at")
             except (ValidationError, KeyError, TypeError) as exc:
                 log.error("ignoring unreadable %s: %s", self.state_dir / "condition.json", exc)
-        self.baseline = read_json(self.state_dir / "baseline.meta.json")
+        self.baseline = read_json(self.state_dir / BASELINE_META)
         self.sessions = SessionStore(self.state_dir, s.app_id, s.app_version)
         self.client = httpx.AsyncClient(
             transport=self.transport,
@@ -126,10 +151,13 @@ class LabAgent:
         if path == "/_lab" or path.startswith("/_lab/"):
             if kind != "http":
                 return
+            headers = scope.get("headers") or []
             token = self.settings.lab_token
             if token:
-                given = dict(scope.get("headers") or []).get(b"x-lab-token", b"")
-                if not secrets.compare_digest(given, token.encode()):
+                given = [v for k, v in headers if k.lower() == b"x-lab-token"]
+                # Constant time; exactly one header, equal to the token.
+                ok = secrets.compare_digest(given[0] if len(given) == 1 else b"", token.encode())
+                if not ok or len(given) != 1:
                     await send_json(
                         send,
                         401,
@@ -141,6 +169,12 @@ class LabAgent:
                         },
                     )
                     return
+            refused = _not_json(headers)
+            if refused:
+                await send_json(
+                    send, 415, {"detail": {"code": "LAB_JSON_REQUIRED", "message": refused}}
+                )
+                return
             await self.admin(scope, receive, send)
             return
         if kind == "http":
@@ -280,10 +314,36 @@ class LabAgent:
             "kind": kind,
             "tables": sorted(rows),
         }
-        write_json(self.state_dir / "baseline.rows.json", rows)
-        write_json(self.state_dir / "baseline.meta.json", meta)
+        # Two files, each written atomically and each carrying the baseline id; reset checks the
+        # ids agree, so a crash between the writes can never restore rows under the wrong label.
+        write_json(self.state_dir / BASELINE_ROWS, {"baseline_id": meta["id"], "rows": rows})
+        write_json(self.state_dir / BASELINE_META, meta)
         self.baseline = meta
         return meta
+
+    def _read_baseline_rows(self) -> tuple[dict | None, JSONResponse | None]:
+        """The baseline rows, checked against the baseline metadata. Call with the lock held."""
+        if not self.baseline:
+            return None, error(
+                409, "LAB_NO_BASELINE", "no baseline yet: load data or take a baseline"
+            )
+        meta = read_json(self.state_dir / BASELINE_META)
+        stored = read_json(self.state_dir / BASELINE_ROWS)
+        if stored is None:
+            return None, error(409, "LAB_NO_BASELINE", "baseline rows are missing from STATE_DIR")
+        want = self.baseline.get("id")
+        got = stored.get("baseline_id") if isinstance(stored, dict) else None
+        meta_id = meta.get("id") if isinstance(meta, dict) else None
+        if not want or got != want or meta_id != want or not isinstance(stored.get("rows"), dict):
+            return None, error(
+                409,
+                "LAB_BASELINE_MISMATCH",
+                "the baseline rows on disk do not belong to the current baseline "
+                f"({want}); nothing was changed. Load data or take a baseline again",
+                baseline=want,
+                rows_baseline=got,
+            )
+        return stored["rows"], None
 
     async def load(self, request: Request) -> Response:
         if self.database is None:
@@ -344,12 +404,10 @@ class LabAgent:
     async def reset(self, request: Request) -> Response:
         if self.database is None:
             return self._no_db()
-        if not self.baseline:
-            return error(409, "LAB_NO_BASELINE", "no baseline yet: load data or take a baseline")
-        rows = read_json(self.state_dir / "baseline.rows.json")
-        if rows is None:
-            return error(409, "LAB_NO_BASELINE", "baseline rows are missing from STATE_DIR")
-        async with self.lock:
+        async with self.lock:  # a load cannot commit between reading the baseline and restoring
+            rows, problem = await asyncio.to_thread(self._read_baseline_rows)
+            if problem is not None:
+                return problem
             try:
                 result = await self.database.replace(rows)
             except DataProblems as exc:
@@ -361,9 +419,8 @@ class LabAgent:
                 )
             except Exception as exc:  # noqa: BLE001
                 return self._db_down(exc)
-        return JSONResponse(
-            {"baseline": self._baseline_meta(), "counts": result.counts, "cleared": result.cleared}
-        )
+            meta = self._baseline_meta()
+        return JSONResponse({"baseline": meta, "counts": result.counts, "cleared": result.cleared})
 
     # condition
 

@@ -119,6 +119,7 @@ class Job:
 
 
 _COLUMNS = [f for f in Job.__dataclass_fields__]
+_TERMINAL_SQL = ", ".join(f"'{s}'" for s in sorted(TERMINAL))
 
 
 class JobStore:
@@ -143,12 +144,12 @@ class JobStore:
         return db
 
     @staticmethod
-    def _encode(job: Job) -> list[Any]:
-        row = []
-        for c in _COLUMNS:
-            v = getattr(job, c)
-            row.append(json.dumps(v) if c == "pull_requests" else (None if v is None else str(v)))
-        return row
+    def _value(column: str, v: Any) -> Any:
+        return json.dumps(v) if column == "pull_requests" else (None if v is None else str(v))
+
+    @classmethod
+    def _encode(cls, job: Job) -> list[Any]:
+        return [cls._value(c, getattr(job, c)) for c in _COLUMNS]
 
     @staticmethod
     def _decode(row: tuple) -> Job:
@@ -170,16 +171,58 @@ class JobStore:
             )
         return job
 
-    def update(self, job_id: str, **fields: Any) -> Job:
-        with self._lock:
-            job = self.get(job_id)
-            if job is None:
-                raise KeyError(job_id)
-            for key, value in fields.items():
-                if key not in _COLUMNS:
-                    raise AttributeError(key)
-                setattr(job, key, value)
-            return self.save(job)
+    def insert_unless_unfinished(self, job: Job) -> Job | None:
+        """Insert `job` unless an unfinished direct job of the same app exists, atomically
+        (also across processes). Returns that unfinished job when there is one, else None."""
+        job.updated_at = _now()
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                row = db.execute(
+                    f"SELECT {', '.join(_COLUMNS)} FROM jobs WHERE app_id = ? AND mode = 'direct' "
+                    f"AND state NOT IN ({_TERMINAL_SQL}) ORDER BY created_at DESC LIMIT 1",
+                    (job.app_id,),
+                ).fetchone()
+                if row is None:
+                    db.execute(
+                        f"INSERT INTO jobs ({', '.join(_COLUMNS)}) "
+                        f"VALUES ({', '.join('?' for _ in _COLUMNS)})",
+                        self._encode(job),
+                    )
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+        return None if row is None else self._decode(row)
+
+    def update(self, job_id: str, *, from_poller: bool = False, **fields: Any) -> Job:
+        """Write only `fields` (one SQL UPDATE of those columns) and return the job as stored.
+
+        `from_poller=True` marks a write based on a Devin session read, which may be stale: it
+        never touches a cancelled job, and never moves a finished, failed or cancelled job back
+        to a non-terminal state. The guard is in the SQL, so it holds across processes.
+        """
+        for key in fields:
+            if key not in _COLUMNS or key == "id":
+                raise AttributeError(key)
+        current = self.get(job_id)
+        if current is None:
+            raise KeyError(job_id)
+        fields["updated_at"] = _now()
+        where = "id = ?"
+        if from_poller:
+            where += " AND state != 'cancelled'"
+            if "state" in fields and fields["state"] not in TERMINAL:
+                where += f" AND state NOT IN ({_TERMINAL_SQL})"
+        with self._lock, self._connect() as db:
+            db.execute(
+                f"UPDATE jobs SET {', '.join(f'{k} = ?' for k in fields)} WHERE {where}",
+                [*(self._value(k, v) for k, v in fields.items()), current.id],
+            )
+        job = self.get(current.id)
+        if job is None:  # pragma: no cover - deleted in between
+            raise KeyError(job_id)
+        return job
 
     def get(self, job_id: str) -> Job | None:
         """A job by id, or by a unique prefix of its id."""
@@ -247,28 +290,40 @@ class BuildJobs:
 
     # --- direct path -----------------------------------------------------------------------------
 
-    def start(self, app_id: str, repo: str, max_acu_limit: int | None = None) -> Job:
+    def start(
+        self, app_id: str, repo: str, max_acu_limit: int | None = None, *, force: bool = False
+    ) -> Job:
         """Package, upload, create the session, save the job and start polling it.
 
         Returns the job. A hand-off that fails is recorded as `failed` with `last_error`, not
-        raised, so it shows in the job list; a bad argument (repo format) raises.
+        raised, so it shows in the job list; a bad argument (repo format) raises. Refuses with
+        JobError while an unfinished direct build of the same app exists, unless `force`.
         """
         repo = pkg.normalize_repo(repo)
-        job = self.store.save(
-            Job(
-                id=uuid.uuid4().hex[:12],
-                app_id=app_id,
-                mode="direct",
-                state="preparing",
-                repo=repo,
-                max_acu_limit=max_acu_limit,
-            )
+        job = Job(
+            id=uuid.uuid4().hex[:12],
+            app_id=app_id,
+            mode="direct",
+            state="preparing",
+            repo=repo,
+            max_acu_limit=max_acu_limit,
         )
+        if force:
+            job = self.store.save(job)
+        else:
+            running = self.store.insert_unless_unfinished(job)
+            if running is not None:
+                raise JobError(
+                    f"a direct build of {app_id} is already in progress (job {running.id}, "
+                    f"{running.state}, started {running.created_at}). Follow or cancel it first, "
+                    "or start anyway with force (this creates a second, separately paid session)"
+                )
         try:
             path = pkg.build(self.repo_root, app_id, self.packages_dir, repo=repo)
             manifest = pkg.read_manifest(path)
             job = self.store.update(
                 job.id,
+                from_poller=True,  # never revives a job cancelled meanwhile
                 state="uploading",
                 package_path=str(path),
                 package_digest=manifest["package_digest"],
@@ -279,7 +334,7 @@ class BuildJobs:
             url = uploaded.get("url")
             if not url:
                 raise DevinError(0, "Upload answered without a url", json.dumps(uploaded)[:300])
-            job = self.store.update(job.id, state="starting", attachment_url=url)
+            job = self.store.update(job.id, from_poller=True, state="starting", attachment_url=url)
             text = pkg.prompt(self.repo_root, app_id, repo) + f'\nATTACHMENT:"{url}"\n'
             session = client.create_session(
                 text,
@@ -296,7 +351,11 @@ class BuildJobs:
             job = self._record(job.id, session)
         except (pkg.PackageError, DevinError, OSError, ValueError) as exc:
             return self.store.update(
-                job.id, state="failed", last_error=_describe(exc), finished_at=_now()
+                job.id,
+                from_poller=True,
+                state="failed",
+                last_error=_describe(exc),
+                finished_at=_now(),
             )
         if not job.terminal:
             self._ensure_poller(job.id)
@@ -321,7 +380,12 @@ class BuildJobs:
             if session.get("url"):
                 fields["session_url"] = session["url"]
             if isinstance(prs, list):
-                fields["pull_requests"] = [p for p in prs if isinstance(p, dict)]
+                from_devin = [p for p in prs if isinstance(p, dict)]
+                urls = {p.get("pr_url") for p in from_devin}
+                # Keep pull requests attached by hand that Devin does not list.
+                fields["pull_requests"] = from_devin + [
+                    p for p in job.pull_requests if p.get("pr_url") not in urls
+                ]
             if session.get("acus_consumed") is not None:
                 fields["acus_consumed"] = float(session["acus_consumed"])
             if state == "finished" and not (fields.get("pull_requests") or job.pull_requests):
@@ -330,7 +394,7 @@ class BuildJobs:
                 fields["finished_at"] = _now()
             if state not in TERMINAL:
                 fields["finished_at"] = None
-            return self.store.update(job_id, **fields)
+            return self.store.update(job_id, from_poller=True, **fields)
 
     def refresh(self, job_id: str) -> Job:
         """Read the session once and record it. Used by the poller and by `labctl devin status`."""
@@ -343,12 +407,15 @@ class BuildJobs:
             if exc.status == 404:
                 return self.store.update(
                     job_id,
+                    from_poller=True,
                     state="failed",
                     last_error=f"Devin session {job.devin_id} no longer exists ({_describe(exc)})",
                     last_polled_at=_now(),
                     finished_at=_now(),
                 )
-            self.store.update(job_id, last_error=_describe(exc), last_polled_at=_now())
+            self.store.update(
+                job_id, from_poller=True, last_error=_describe(exc), last_polled_at=_now()
+            )
             raise
         return self._record(job_id, session)
 
@@ -409,6 +476,13 @@ class BuildJobs:
 
     def get(self, job_id: str) -> Job | None:
         return self.store.get(job_id)
+
+    def get_for_app(self, job_id: str, app_id: str) -> Job:
+        """The job, which must belong to `app_id` (so a page for one app cannot act on another's)."""
+        job = self._require(job_id)
+        if job.app_id != app_id:
+            raise JobError(f"job {job.id} belongs to {job.app_id}, not {app_id}")
+        return job
 
     def message(self, job_id: str, text: str) -> Job:
         """Send a message to the job's Devin session (answers a question, resumes a suspended

@@ -1,8 +1,10 @@
 """A small client for the Devin API v3 (organisation-scoped paths, service-user bearer key).
 
-Retries 429 and 5xx with exponential backoff, honouring Retry-After, at most 5 tries in all.
-Connection failures are retried only for GET and DELETE: a create that timed out may have been
-created, and v3 has no idempotency key, so it is reported instead of repeated.
+GET and DELETE retry 429, 5xx and connection failures with exponential backoff, honouring
+Retry-After, at most 5 tries in all. POST retries only 429 (the request was not processed): a
+create that got a 5xx, a gateway timeout or no answer may still have created a paid session, and
+v3 has no idempotency key, so it is reported (with a hint to check the Devin web app) instead of
+repeated.
 Errors become `DevinError(status, title, detail)`, read from RFC 9457 problem+json when given.
 The key is never logged or shown in a repr.
 """
@@ -26,6 +28,11 @@ DEFAULT_BASE_URL = "https://api.devin.ai"
 MAX_TRIES = 5
 MAX_WAIT = 60.0
 SESSION_PREFIX = "devin-"
+UNCERTAIN = "The request may have been processed; check before sending it again"
+UNCERTAIN_SESSION = (
+    "A Devin session may have been created anyway: check the Devin web app for it before "
+    "retrying, or you may pay for two sessions"
+)
 
 
 class DevinError(Exception):
@@ -133,20 +140,32 @@ class DevinClient:
     def _org(self, path: str) -> str:
         return f"/v3/organizations/{self.org_id}{path}"
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> dict:
+    def _request(
+        self, method: str, path: str, *, uncertain: str = UNCERTAIN, **kwargs: Any
+    ) -> dict:
+        """One API call. `uncertain` is said when a POST may or may not have taken effect."""
         safe = method in ("GET", "DELETE")
         for attempt in range(1, self.max_tries + 1):
             try:
                 resp = self._http.request(method, path, **kwargs)
             except httpx.HTTPError as exc:
-                err = DevinError(0, "Cannot reach the Devin API", f"{self.base_url}: {exc}")
-                if not safe or attempt == self.max_tries:
-                    raise err from exc
+                if not safe:
+                    raise DevinError(
+                        0, "No answer from the Devin API", f"{self.base_url}: {exc}. {uncertain}"
+                    ) from exc
+                if attempt == self.max_tries:
+                    raise DevinError(
+                        0, "Cannot reach the Devin API", f"{self.base_url}: {exc}"
+                    ) from exc
                 wait = min(MAX_WAIT, self.backoff * 2 ** (attempt - 1))
                 log.warning("%s %s failed (%s); retrying in %.1fs", method, path, exc, wait)
                 self._sleep(wait)
                 continue
             log.debug("%s %s -> %s", method, path, resp.status_code)
+            if resp.status_code >= 500 and not safe:
+                err = _error(resp)
+                err.detail = f"{err.detail}. {uncertain}" if err.detail else uncertain
+                raise DevinError(err.status, err.title, err.detail)
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt == self.max_tries:
                     raise _error(resp)
@@ -207,7 +226,7 @@ class DevinClient:
         ):
             if value is not None:
                 body[key] = value
-        return self._request("POST", self._org("/sessions"), json=body)
+        return self._request("POST", self._org("/sessions"), json=body, uncertain=UNCERTAIN_SESSION)
 
     def get_session(self, devin_id: str) -> dict:
         return self._request("GET", self._org(f"/sessions/{session_id(devin_id)}"))

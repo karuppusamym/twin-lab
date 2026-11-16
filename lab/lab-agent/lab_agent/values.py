@@ -9,7 +9,7 @@ Out of the database (`to_json`):
 | boolean | true / false |
 | text, varchar, char | string |
 | date, time, timestamp | ISO 8601 string (`timestamptz` with offset, read in UTC) |
-| interval | `"<seconds> seconds"` (Postgres reads it back) |
+| interval | `"[-]<d> days <s>.<micro> seconds"`, exact (Postgres reads it back) |
 | bytea | base64 string |
 | uuid, inet and anything else | string |
 | json, jsonb | the JSON value itself |
@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import binascii
 import math
+import re
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
@@ -40,6 +41,9 @@ INT_RANGES = {
 TEXT_TYPES = {"varchar", "bpchar", "text", "name", "citext", "char"}
 TRUE = {"true", "t", "yes", "y", "1", "on"}
 FALSE = {"false", "f", "no", "n", "0", "off"}
+INTERVAL_TEXT = re.compile(
+    r"^(?:(?P<days>-?\d+) days)?(?: ?(?P<secs>-?\d+)(?:\.(?P<frac>\d{1,6}))? seconds)?$"
+)
 
 
 class ValueProblem(ValueError):
@@ -71,7 +75,7 @@ def to_json(value: Any) -> Any:
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, timedelta):
-        return f"{value.total_seconds():g} seconds"
+        return interval_text(value)
     if isinstance(value, (bytes, bytearray, memoryview)):
         return base64.b64encode(bytes(value)).decode("ascii")
     if isinstance(value, dict):
@@ -79,6 +83,25 @@ def to_json(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [to_json(v) for v in value]
     return str(value)
+
+
+def interval_text(value: timedelta) -> str:
+    """Exact interval text: days, seconds and microseconds, every unit with the same sign.
+
+    `timedelta(days=30, seconds=1)` gives `"30 days 1 seconds"`, `timedelta(microseconds=-1)`
+    gives `"-0.000001 seconds"`; Postgres parses either back to the same interval.
+    """
+    sign = "-" if value < timedelta(0) else ""
+    value = abs(value)
+    parts = []
+    if value.days:
+        parts.append(f"{sign}{value.days} days")
+    if value.seconds or value.microseconds or not parts:
+        secs = str(value.seconds)
+        if value.microseconds:
+            secs += f".{value.microseconds:06d}".rstrip("0")
+        parts.append(f"{sign}{secs} seconds")
+    return " ".join(parts)
 
 
 def row_to_json(row: dict[str, Any]) -> dict[str, Any]:
@@ -188,7 +211,14 @@ def convert(value: Any, udt: str, max_length: int | None = None) -> Any:
         if isinstance(value, (int, float)):
             return timedelta(seconds=value)
         if isinstance(value, str):
-            return value  # Postgres parses interval text
+            exact = INTERVAL_TEXT.match(value.strip())
+            if exact and value.strip():  # the form to_json writes: the identical timedelta
+                days, secs, frac = exact.group("days", "secs", "frac")
+                micro = int((frac or "0").ljust(6, "0"))
+                if secs and secs.startswith("-"):
+                    micro = -micro
+                return timedelta(days=int(days or 0), seconds=int(secs or 0), microseconds=micro)
+            return value  # any other interval text: Postgres parses it
         raise ValueProblem(f"expected an interval, got {type(value).__name__}")
     if udt == "uuid":
         try:

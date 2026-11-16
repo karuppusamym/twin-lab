@@ -179,3 +179,64 @@ def test_unreachable_api_is_a_devin_error():
 def test_session_id_prefix():
     assert session_id("abc") == "devin-abc"
     assert session_id("devin-abc") == "devin-abc"
+
+
+def _scripted(responses):
+    """A client whose transport answers from `responses` (a Response, or an exception to raise)."""
+    calls, slept = [], []
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        item = responses[min(len(calls), len(responses)) - 1]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    c = DevinClient(KEY, ORG, "http://devin.invalid", sleep=slept.append, backoff=1)
+    c._http = httpx.Client(base_url="http://devin.invalid", transport=httpx.MockTransport(handler))
+    return c, calls, slept
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(500, json={"title": "Internal Server Error", "detail": "boom"}),
+        httpx.Response(502, text="Bad gateway"),
+        httpx.Response(504, text="Gateway Timeout"),
+        httpx.ReadTimeout("timed out"),
+        httpx.ConnectError("connection reset"),
+    ],
+    ids=["500", "502", "504", "read-timeout", "connect-error"],
+)
+def test_create_session_is_never_repeated_when_it_may_have_succeeded(answer):
+    ok = httpx.Response(201, json={"session_id": "s1", "status": "new"})
+    c, calls, slept = _scripted([answer, ok])
+    with pytest.raises(DevinError) as err:
+        c.create_session("build it")
+    assert calls == [("POST", f"/v3/organizations/{ORG}/sessions")]  # one try, no second session
+    assert slept == []
+    assert "session may have been created" in str(err.value)
+    assert "Devin web app" in str(err.value)
+
+
+def test_create_session_retries_429_only():
+    c, calls, slept = _scripted(
+        [
+            httpx.Response(429, headers={"Retry-After": "2"}, json={"title": "Too Many Requests"}),
+            httpx.Response(201, json={"session_id": "s1", "status": "new"}),
+        ]
+    )
+    assert c.create_session("build it")["session_id"] == "s1"
+    assert len(calls) == 2 and slept == [2.0]
+
+
+def test_get_still_retries_5xx_and_connection_errors():
+    c, calls, slept = _scripted(
+        [
+            httpx.Response(503, text="down"),
+            httpx.ConnectError("refused"),
+            httpx.Response(200, json={"session_id": "s1", "status": "running"}),
+        ]
+    )
+    assert c.get_session("s1")["status"] == "running"
+    assert len(calls) == 3 and slept == [1, 2]
