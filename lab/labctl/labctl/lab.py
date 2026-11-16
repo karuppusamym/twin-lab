@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 import yaml
 
+from labctl import dbservers
 from labctl.bindings import BindingError, load_app
 
 AGENT_IMAGE = os.environ.get("TWINLAB_AGENT_IMAGE", "twinlab/lab-agent:dev")
@@ -113,6 +114,9 @@ def compose(root: Path, app_id: str) -> dict:
     token = lab_token(root)
     bind = bind_address(root)
     pw = db_password(root)  # not "lab": the DB port can be reachable from the network
+    choice = dbservers.choice(app.lab.database)
+    if choice != "postgres":
+        return _compose_other(root, app_id, app, choice, app_port, db_env, schema, token, bind)
     return {
         "name": project(app_id),
         "services": {
@@ -160,6 +164,108 @@ def compose(root: Path, app_id: str) -> dict:
         },
         "volumes": {"db": {}, "state": {}},
     }
+
+
+MSSQL_IMAGE = os.environ.get("TWINLAB_MSSQL_IMAGE", "mcr.microsoft.com/mssql/server:2022-latest")
+MSSQL_TOOLS = "/opt/mssql-tools18/bin/sqlcmd"
+
+
+def sqlserver_password(root: Path) -> str:
+    """SQL Server insists on upper, lower, digit and symbol: the generated password, made so."""
+    return "Tl9!" + db_password(root)
+
+
+def app_database_env(server: dbservers.DbServer, db_env: str, host: str, port: int) -> dict:
+    """What the app container gets: its database URL in the variable app.yaml names, and the
+    parts separately for apps that are not written in Python (DB_ENGINE, DB_HOST, ...)."""
+    bot = bool(server.bot_user)
+    return {
+        db_env: server.url(bot=bot, host=host, port=port),
+        "DB_ENGINE": server.engine,
+        "DB_HOST": host,
+        "DB_PORT": str(port),
+        "DB_NAME": server.database or "",
+        "DB_SERVICE": server.service or "",
+        "DB_USER": server.bot_user or server.owner_user,
+        "DB_PASSWORD": server.bot_password if bot else server.owner_password,
+        "DB_CONNECTION_STRING": server.connection_string(bot=True, host=host, port=port),
+    }
+
+
+def lab_server(root: Path, app_id: str, choice: str) -> dbservers.DbServer:
+    """The database server an app's lab uses, as Twin Lab reaches it from this machine."""
+    if choice == "sqlserver":
+        return dbservers.DbServer(
+            name="sqlserver", engine="mssql", host="db", port=1433, database=app_id,
+            owner_user="sa", owner_password=sqlserver_password(root),
+            bot_user="bot", bot_password=bot_password(root),
+        )  # fmt: skip
+    try:
+        return dbservers.server(root, choice)
+    except dbservers.DbServerError as exc:
+        raise LabError(str(exc)) from exc
+
+
+def _compose_other(root, app_id, app, choice, app_port, db_env, schema, token, bind) -> dict:
+    """SQL Server in a container Twin Lab owns, or a server the office provides. The lab agent
+    sits between the app and the database either way, so slowdowns and sessions still work."""
+    server = lab_server(root, app_id, choice)
+    agent_env = {
+        "APP_ID": app_id,
+        "APP_UPSTREAM": f"http://app:{app_port}",
+        "DB_UPSTREAM": f"{server.host}:{server.port}",
+        "DB_PROXY_PORT": "15432",
+        "ADMIN_DATABASE_URL": server.url(),
+        "SCHEMA_PATH": "/lab/schema.sql",
+        "STATE_DIR": "/var/lib/twinlab",
+        "LAB_PORT": "9000",
+        "LAB_TOKEN": token,
+        "APP_HEALTH_PATH": app.run.api.health if app.run.api else "/",
+    }
+    if server.schema:
+        agent_env["DB_SCHEMA"] = server.schema
+    services: dict = {}
+    volumes: dict = {"state": {}}
+    agent: dict = {
+        "image": AGENT_IMAGE,
+        "environment": agent_env,
+        "volumes": [f"{schema.as_posix()}:/lab/schema.sql:ro", "state:/var/lib/twinlab"],
+        "ports": [f"{bind}:{app.lab.port}:9000", f"{bind}:{app.lab.db_port}:15432"],
+        "restart": "unless-stopped",
+    }
+    if choice == "sqlserver":
+        services["db"] = {
+            "image": MSSQL_IMAGE,
+            "environment": {
+                "ACCEPT_EULA": "Y",
+                "MSSQL_PID": "Developer",
+                "MSSQL_SA_PASSWORD": server.owner_password,
+            },  # fmt: skip
+            "volumes": ["db:/var/opt/mssql"],
+            "healthcheck": {
+                "test": [
+                    "CMD-SHELL",
+                    f'{MSSQL_TOOLS} -C -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" '
+                    "-Q 'SELECT 1' -b -o /dev/null",
+                ],  # fmt: skip
+                "interval": "5s",
+                "timeout": "5s",
+                "retries": 40,
+                "start_period": "20s",
+            },  # fmt: skip
+            "restart": "unless-stopped",
+        }
+        volumes["db"] = {}
+        agent["depends_on"] = {"db": {"condition": "service_healthy"}}
+    services["agent"] = agent
+    services["app"] = {
+        "image": f"twinlab/{app_id}:dev",
+        "build": {"context": (root / "apps" / app_id).resolve().as_posix()},
+        "environment": app_database_env(server, db_env, "agent", 15432),
+        "depends_on": ["agent"],
+        "restart": "unless-stopped",
+    }
+    return {"name": project(app_id), "services": services, "volumes": volumes}
 
 
 def compose_file(root: Path, app_id: str) -> Path:
@@ -246,6 +352,9 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
     if build and "TWINLAB_AGENT_IMAGE" not in os.environ:
         build_agent_image(root)
     file = compose_file(root, app_id)
+    choice = dbservers.choice(load_app(root, app_id).lab.database)
+    if choice != "postgres":
+        return _up_other(root, app_id, file, choice, build)
     # 1. The database alone, so its logins match this machine's passwords before the app and the
     #    agent connect with them (a volume made earlier keeps the password it was created with).
     first = _docker(
@@ -271,6 +380,99 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
             lab_agent.baseline()
     except LabError:
         pass  # the app runs; the baseline can be set from the portal
+    return out.stdout + out.stderr
+
+
+def _sqlcmd(file: Path, sql: str) -> None:
+    """Run T-SQL as sa inside Twin Lab's SQL Server container."""
+    out = _docker(
+        ["compose", "-f", str(file), "exec", "-T", "db", "bash", "-c",
+         f'{MSSQL_TOOLS} -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -b -Q "$1"', "sqlcmd", sql],
+        timeout=120,
+    )  # fmt: skip
+    if out.returncode != 0:
+        raise LabError(f"setting up SQL Server failed:\n{(out.stdout + out.stderr)[-2000:]}")
+
+
+def _mssql_setup_sql(app_id: str, bot_pw: str) -> list[str]:
+    """The app's database, and the `bot` login that may read and change rows only. Two batches:
+    SQL Server checks a USE when it compiles a batch, before the database exists."""
+    q = bot_pw.replace("'", "''")
+    return [
+        f"IF DB_ID('{app_id}') IS NULL CREATE DATABASE [{app_id}];"
+        f"IF SUSER_ID('bot') IS NULL CREATE LOGIN [bot] WITH PASSWORD = '{q}', CHECK_POLICY = OFF;"
+        f"ALTER LOGIN [bot] WITH PASSWORD = '{q}', CHECK_POLICY = OFF;",
+        f"USE [{app_id}];"
+        "IF USER_ID('bot') IS NULL CREATE USER [bot] FOR LOGIN [bot];"
+        "ALTER ROLE db_datareader ADD MEMBER [bot]; ALTER ROLE db_datawriter ADD MEMBER [bot];",
+    ]
+
+
+def _wait_for(check, what: str, seconds: float = 180) -> None:
+    import time
+
+    deadline, last = time.monotonic() + seconds, None
+    while time.monotonic() < deadline:
+        try:
+            check()
+            return
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            time.sleep(2)
+    raise LabError(f"{what} did not answer within {seconds:.0f} s: {last}")
+
+
+def _up_other(root: Path, app_id: str, file: Path, choice: str, build: bool) -> str:
+    """SQL Server in Twin Lab's container, or a server the office provides: the database is
+    made ready (the app's tables from its schema file, in that engine's SQL) before the app
+    starts, so an app that expects its tables finds them."""
+    from labctl import dbsetup
+
+    app = load_app(root, app_id)
+    schema_file = root / "apps" / app_id / "db" / "schema.sql"
+    server = lab_server(root, app_id, choice)
+    if choice == "sqlserver":
+        first = _docker(
+            ["compose", "-f", str(file), "up", "-d", "--wait", "--wait-timeout", "300", "db"]
+        )
+        if first.returncode != 0:
+            raise LabError(f"SQL Server for {app_id} did not start:\n{first.stderr[-3000:]}")
+        for batch in _mssql_setup_sql(app_id, bot_password(root)):
+            _sqlcmd(file, batch)
+        # Reached from here through the lab agent's database port, once the agent runs.
+        start = _docker(["compose", "-f", str(file), "up", "-d", "agent"])
+        if start.returncode != 0:
+            raise LabError(f"the lab agent of {app_id} did not start:\n{start.stderr[-3000:]}")
+        here = dbservers.DbServer(
+            **{**server.__dict__, "host": "127.0.0.1", "port": app.lab.db_port}
+        )
+    else:
+        here = server
+    if schema_file.exists():
+        try:
+            _wait_for(lambda: dbservers.check(here, timeout=5), f"the database of {app_id}")
+            made = dbsetup.create_tables(here.url(), schema_file, here.engine, here.schema)
+        except dbservers.DbServerError as exc:
+            raise LabError(str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - a driver error, said plainly
+            raise LabError(f"creating the tables of {app_id} on {server.label} failed: "
+                           f"{str(getattr(exc, 'orig', exc)).splitlines()[0][:300]}") from exc  # fmt: skip
+        if made:
+            print(f"{app_id}: created {len(made)} table(s) on {server.label}: {', '.join(made)}")
+    args = ["compose", "-f", str(file), "up", "-d", "--wait", "--wait-timeout", "300"]
+    if build:
+        args.append("--build")
+    out = _docker(args)
+    if out.returncode != 0:
+        raise LabError(
+            f"`docker compose up` failed for {app_id}:\n{(out.stderr or out.stdout)[-3000:]}"
+        )
+    try:
+        lab_agent = agent(root, app_id)
+        if not (lab_agent.info() or {}).get("baseline"):
+            lab_agent.baseline()
+    except LabError:
+        pass
     return out.stdout + out.stderr
 
 

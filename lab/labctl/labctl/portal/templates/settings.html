@@ -26,4 +26,21 @@
     {% for j in updates %}<p class="small"><a href="/jobs/{{ j.id }}">{{ j.created }}</a> <span class="pill {{ 'ok' if j.status == 'done' else 'err' }}">{{ j.status }}</span></p>{% endfor %}
   </div>
 </div>
+
+<div class="card" id="databases">
+  <h2>Database servers</h2>
+  <p class="small muted">Where a demo app's database lives. Twin Lab can run <b>PostgreSQL</b> or <b>SQL Server</b> itself in a container, with nothing to set up. To use a server your DBA prepared (SQL Server, Oracle or PostgreSQL), ask for a database (or Oracle service), an owner account that may create tables, and a bot account that may only read and change rows. Then list it in <code>twinlab.local.yaml</code> under <code>databases:</code>; the example is in <code>twinlab.local.example.yaml</code>. Passwords stay on this machine and are never shown. Each app picks its database on its page (Lab).</p>
+  {% if db_error %}<p class="flash error">{{ db_error }}</p>{% endif %}
+  <div class="scroll"><table class="small">
+    <thead><tr><th>Name</th><th>Engine</th><th>Where</th><th>Owner</th><th>Bot</th><th></th></tr></thead><tbody>
+    <tr><td><b>postgres</b></td><td>PostgreSQL</td><td>a container Twin Lab runs</td><td>generated</td><td><code>bot</code>, generated</td><td><span class="pill ok">built in</span></td></tr>
+    <tr><td><b>sqlserver</b></td><td>SQL Server 2022</td><td>a container Twin Lab runs (Developer edition, for testing)</td><td>generated</td><td><code>bot</code>, generated</td><td><span class="pill ok">built in</span></td></tr>
+    {% for s in servers %}
+    <tr><td><b>{{ s.name }}</b></td><td>{{ s.engine }}</td><td><code>{{ s.host }}:{{ s.port }}</code> {{ s.database or s.service or "" }}{% if s.schema %} (schema {{ s.schema }}){% endif %}</td>
+      <td>{{ s.owner_user }} <span class="muted">password {{ s.owner_password }}</span></td><td>{{ s.bot_user }}{% if s.bot_password != "-" %} <span class="muted">password {{ s.bot_password }}</span>{% endif %}</td>
+      <td>{% if s.problems %}<span class="pill err" title="{{ s.problems | join('; ') }}">{{ s.problems | join('; ') }}</span>
+        {% else %}<form method="post" action="/settings/db-check"><input type="hidden" name="name" value="{{ s.name }}"><button type="submit" class="secondary">Check</button></form>{% endif %}</td></tr>
+    {% endfor %}
+  </tbody></table></div>
+</div>
 {% endblock %}

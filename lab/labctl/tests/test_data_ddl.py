@@ -164,7 +164,9 @@ GRANT ALL ON TABLE public.account TO lab;
 
 def test_postgres_dump():
     tables, problems = ddl.parse_with_problems(PG_DUMP)
-    assert [t.name for t in tables] == ["account", "ticket", "ticket_log"]
+    # the view becomes a table of its own (sample data goes into it), typed from its source
+    assert [t.name for t in tables] == ["account", "ticket", "ticket_log", "open_tickets"]
+    assert cols(tables, "open_tickets")["id"].type == "BIGINT"
     account = cols(tables, "account")
     assert account["id"].primary_key and account["id"].autoincrement  # serial via nextval
     assert account["account_no"].type == "VARCHAR(16)" and account["account_no"].unique
@@ -190,8 +192,9 @@ def test_postgres_dump():
     assert log["ticket_id"].references == ("ticket", "id")
     text = "\n".join(problems)
     assert "account.tags: array type" in text
-    assert "CREATE VIEW open_tickets" in text
-    assert "CREATE FUNCTION" in text and "CREATE TRIGGER" in text
+    assert "view open_tickets becomes a table" in text
+    assert "function " in text and "is not created in the demo database" in text
+    assert "trigger " in text
     assert "1 statement(s) with rows" in text
     assert "Someone" not in text
 
@@ -275,7 +278,7 @@ def test_sql_server_script():
     text = "\n".join(problems)
     assert "Customer.Version: row version column left out" in text
     assert "Customer.Label: computed column left out" in text
-    assert "CREATE PROCEDURE Touch" in text
+    assert "procedure Touch is not created in the demo database" in text
     assert "UPDATE" not in text.replace("CREATE PROCEDURE", "")  # the body stayed in one block
 
 
@@ -342,7 +345,7 @@ def test_oracle_ddl():
     assert e["DEPT_ID"].references == ("DEPT", "DEPT_ID") and e["DEPT_ID"].nullable
     assert e["SEQ_NO"].autoincrement and not e["SEQ_NO"].nullable
     assert not e["EMP_ID"].autoincrement
-    assert any("CREATE TRIGGER EMP_BI" in p for p in problems)
+    assert any("trigger EMP_BI is not created" in p for p in problems)
     assert not any("not understood" in p for p in problems), problems
 
 
@@ -473,7 +476,7 @@ def test_unknown_statements_and_garbage_never_crash():
 
 def test_problems_name_the_line():
     _, problems = ddl.parse_with_problems("CREATE TABLE a (id int);\n\nCREATE VIEW v AS SELECT 1;")
-    assert problems == ["line 3: skipped: CREATE VIEW v (only tables are read)"]
+    assert problems == ["line 3: view v: no columns could be read; left out"]
 
 
 def test_to_model():

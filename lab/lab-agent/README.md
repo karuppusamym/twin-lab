@@ -19,7 +19,11 @@ browser / robot ──► :LAB_PORT  lab agent ──► APP_UPSTREAM (demo app)
   SSLRequest and handshake are just bytes). Under a condition with `db`, every server-to-client
   chunk is held back `latency_ms ± jitter_ms` (uniform, never below 0), in order, so each round
   trip gets slower by about the latency. Changing the condition applies to open connections at once.
-- **Data, baseline, reset, sessions** through `ADMIN_DATABASE_URL`.
+- **Data, baseline, reset, sessions** through `ADMIN_DATABASE_URL`. Postgres, SQL Server and
+  Oracle: the same checks before loading (types, missing keys, missing parents), children deleted
+  first, explicit ids loaded into identity columns and the counters moved past them. The DB link
+  proxy is raw TCP, so it works for TDS and Oracle Net as well. The SQL statement log in sessions
+  is Postgres only.
 
 ## Run
 
@@ -48,8 +52,8 @@ Without Docker: `pip install -r lab/lab-agent/requirements.txt`, then
 | `LAB_PORT` | `9000` | Front door and admin API |
 | `DB_UPSTREAM` | none | `host:port` of the database; no DB link proxy without it |
 | `DB_PROXY_PORT` | `15432` | DB link proxy port |
-| `ADMIN_DATABASE_URL` | none | Direct Postgres URL for data, reset and sessions |
-| `SCHEMA_PATH` | none | If set, only the tables this DDL creates are read, loaded and reset |
+| `ADMIN_DATABASE_URL` | none | Direct URL for data, reset and sessions: `postgresql://…`, `mssql+pymssql://…` (SQL Server) or `oracle+oracledb://…/?service_name=…` (Oracle, thin mode, no client install) |
+| `SCHEMA_PATH` | none | If set, only the tables (and views, which the demo database holds as tables) this DDL creates are read, loaded and reset |
 | `LAB_TOKEN` | none | When set, every `/_lab/*` call needs exactly one header `X-Lab-Token` (`labctl` sets it; see `.lab-state/lab-token`) |
 | `APP_VERSION` | `dev` | Written into sessions (`apps[].version`) |
 | `APP_HEALTH_PATH` | `/` | App URL `/_lab/health` checks (ok when status < 500) |

@@ -138,6 +138,32 @@ def _run_env(conf: dict) -> tuple[str | None, int | None, str | None]:
     return env, port, health
 
 
+def _db_example(engine: str, app_id: str, db_var: str, port: str) -> str:
+    """Commands to try the app against a throwaway database of the right engine."""
+    net, db, app = f"twinlab-{app_id}", f"twinlab-{app_id}-db", f"twinlab-{app_id}-app"
+    e = (engine or "postgres").lower()
+    if e in ("mssql", "sqlserver", "sql server"):
+        lines = [
+            f"docker network create {net}",
+            f"docker run -d --name {db} --network {net} -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=Lab_pass1 mcr.microsoft.com/mssql/server:2022-latest",
+            f'docker exec {db} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P Lab_pass1 -Q "CREATE DATABASE [{app_id}]"',
+            f"docker run -d --name {app} --network {net} -p 18080:{port} -e {db_var}=mssql+pymssql://sa:Lab_pass1@{db}:1433/{app_id} twinlab/{app_id}:dev",
+        ]
+    elif e == "oracle":
+        lines = [
+            f"docker network create {net}",
+            f"docker run -d --name {db} --network {net} -e ORACLE_PASSWORD=lab -e APP_USER=lab -e APP_USER_PASSWORD=lab gvenzl/oracle-free:slim",
+            f"docker run -d --name {app} --network {net} -p 18080:{port} -e {db_var}=oracle+oracledb://lab:lab@{db}:1521/?service_name=FREEPDB1 twinlab/{app_id}:dev",
+        ]
+    else:
+        lines = [
+            f"docker network create {net}",
+            f"docker run -d --name {db} --network {net} -e POSTGRES_USER=lab -e POSTGRES_PASSWORD=lab -e POSTGRES_DB={app_id} postgres:17",
+            f"docker run -d --name {app} --network {net} -p 18080:{port} -e {db_var}=postgresql://lab:lab@{db}:5432/{app_id} twinlab/{app_id}:dev",
+        ]
+    return "   ```bash\n" + "\n".join(f"   {line}" for line in lines) + "\n   ```"
+
+
 def prompt(repo_root: Path, app_id: str, repo: str | None) -> str:
     """The task text for Devin. Pasted unchanged by a person, or sent by the API."""
     repo_root = Path(repo_root)
@@ -185,6 +211,31 @@ def prompt(repo_root: Path, app_id: str, repo: str | None) -> str:
             "6. Conformance: `app.yaml` lists no automations under `built_for`, so there is "
             "nothing to run. Say so in BUILD-NOTES.md."
         )
+    enhance = (repo_root / "apps" / app_id / "Dockerfile").is_file()
+    if enhance:
+        brief_rule = (
+            "   - **This app already exists: this is an enhancement.** The brief was regenerated "
+            "from new evidence (a new flow, screens, fields, routes or tables), and a person has "
+            "committed it to the default branch. If the repository's `BRIEF.md` differs from the "
+            "package's, stop and ask: never replace a brief yourself (CI refuses it). Then change "
+            "the existing app: keep everything that works and every element id, route and table "
+            "it already has; add what the new brief adds; remove only what the brief now lists as "
+            "out of scope. `git log -p` on `BRIEF.md` shows what changed."
+        )
+        enhance_rule = (
+            "\n7. Enhancement: every automation that was READY before must still be READY. In "
+            'BUILD-NOTES.md, add a section "Enhancement" listing what you added, changed and '
+            "removed, and why."
+        )
+        title = f"{app_id}: enhance from brief {digest}"
+    else:
+        brief_rule = (
+            f"   - If the repository already has a `{app}/BRIEF.md` that differs from the package, "
+            "stop and ask which one to build from."
+        )
+        enhance_rule = ""
+        title = f"{app_id}: demo app from brief {digest}"
+    db_example = _db_example(engine, app_id, db_var, port_text)
     return f"""# Twin Lab build task: `{app_id}`
 
 You are building the demo app `{app_id}` for Twin Lab from its build brief and opening one pull
@@ -209,8 +260,7 @@ inputs at their repository paths. `MANIFEST.json` in the package lists every fil
      `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json` and `{app}/pages/*.html` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
-   - If the repository already has a `{app}/BRIEF.md` that differs from the package, stop and
-     ask which one to build from.
+{brief_rule}
 3. Read what the brief builds from. If it lists source files, read them and only what they
    import. Otherwise (no source code, the usual case) read `{app}/pages/*.html`: value-free
    snapshots of each recorded screen, with the real element ids, classes, labels and layout;
@@ -228,8 +278,16 @@ inputs at their repository paths. `MANIFEST.json` in the package lists every fil
    `run:` section. Every rule keeps `verification: hypothesis`.
 4. Same framework and versions as "Stack to pin", same element ids and classes as the brief's
    screen tables.
-5. One `Dockerfile` in `{app}/`. The app reads its {engine} address from the environment
-   variable `{db_var}`. No secrets in the image. Synthetic data only.
+5. One `Dockerfile` in `{app}/`. The database is **{engine}**: include its driver. The app reads
+   its database address from the environment variable `{db_var}` (a URL such as
+   `mssql+pymssql://user:password@host:1433/db`); the lab also sets `DB_ENGINE`, `DB_HOST`,
+   `DB_PORT`, `DB_NAME` (Oracle: `DB_SERVICE`), `DB_USER`, `DB_PASSWORD` and
+   `DB_CONNECTION_STRING` (ADO.NET style) for stacks that want the parts. No secrets in the
+   image. Synthetic data only.
+6. Database objects: create tables from `{app}/db/schema.sql` when the database has none (the lab
+   may have created them already: then leave them). A view in the schema is a **table** in the
+   demo database, with sample rows; read it like a table. Stored procedures, functions and
+   triggers are not created; the brief says which the real app has.{enhance_rule}
 
 ## 4. Check
 
@@ -242,11 +300,7 @@ later). Keep the exact result of each one for steps 5 and 6.
 4. Run the container against a real {engine} server, as `docs/factory-playbook.md` describes.
    For example (throwaway local values, not secrets):
 
-   ```bash
-   docker network create twinlab-{app_id}
-   docker run -d --name twinlab-{app_id}-db --network twinlab-{app_id} -e POSTGRES_USER=lab -e POSTGRES_PASSWORD=lab -e POSTGRES_DB={app_id} postgres:17
-   docker run -d --name twinlab-{app_id}-app --network twinlab-{app_id} -p 18080:{port_text} -e {db_var}=postgresql://lab:lab@twinlab-{app_id}-db:5432/{app_id} twinlab/{app_id}:dev
-   ```
+{db_example}
 
    Use the URL scheme the app's database driver expects.
 5. Against the running container: the health route {health_text} answers 200; each screen in
@@ -265,7 +319,7 @@ in the brief you think is wrong.
 
 Open exactly ONE pull request from your branch to the default branch, titled:
 
-    {app_id}: demo app from brief {digest}
+    {title}
 
 Body: a table of the checks from step 4 with pass or fail and, for each failure, the relevant
 output; the assumptions; anything in the brief you think is wrong. If a pull request for this app

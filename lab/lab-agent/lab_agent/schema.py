@@ -160,13 +160,17 @@ ORDER BY kcu.table_name, kcu.constraint_name, kcu.ordinal_position
 """
 
 
+# A view in the schema file is a table in a demo database (labctl.dbsetup), so it counts too.
 _CREATE_TABLE = re.compile(
-    r"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\"?\w+\"?\.)?\"?(\w+)\"?", re.IGNORECASE
+    r"\bCREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?(?:[\"\[]?\w+[\"\]]?\.)?[\"\[]?(\w+)[\"\]]?",
+    re.IGNORECASE,
 )
 
 
 def tables_in_ddl(path: Path) -> set[str]:
-    """Table names created by a schema file (used to limit the agent to the app's own tables)."""
+    """Table names created by a schema file (used to limit the agent to the app's own tables);
+    views count, since a demo database holds a table for each."""
     text = path.read_text(encoding="utf-8")
     text = "\n".join(line.split("--", 1)[0] for line in text.splitlines())
     return {m.group(1) for m in _CREATE_TABLE.finditer(text)}

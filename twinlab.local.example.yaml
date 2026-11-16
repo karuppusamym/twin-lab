@@ -16,3 +16,27 @@ GITHUB_REPO: your-org/twin-lab
 
 # Where jobs and packages are kept. Relative paths are under the repository root.
 STATE_DIR: .lab-state
+
+# Database servers the DBA prepared for demo apps (optional). Twin Lab can also run PostgreSQL or
+# SQL Server itself ("postgres", "sqlserver"); an app picks one on its page or with
+# `labctl db use <app> <name>`. Passwords: an environment variable named here is best; a value
+# written in this (Git-ignored) file also works. Check with `labctl db check <name>`.
+databases:
+  qtt-sqlserver:
+    engine: mssql                      # mssql | oracle | postgresql
+    host: sqldemo01.office.local
+    port: 1433
+    database: TWINLAB_QTT              # Oracle: write `service: FREEPDB1` instead
+    owner_user: twinlab_owner          # may create tables and load data
+    owner_password_env: TL_QTT_OWNER_PASSWORD
+    bot_user: twinlab_bot              # what bots get: read and change rows only
+    bot_password_env: TL_QTT_BOT_PASSWORD
+  # loans-oracle:
+  #   engine: oracle
+  #   host: oradb01.office.local
+  #   port: 1521
+  #   service: LOANSDEMO
+  #   owner_user: TWINLAB_OWNER
+  #   owner_password_env: TL_LOANS_OWNER_PASSWORD
+  #   bot_user: TWINLAB_BOT
+  #   bot_password_env: TL_LOANS_BOT_PASSWORD

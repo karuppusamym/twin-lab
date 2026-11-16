@@ -149,6 +149,10 @@ jobs:
       TWINLAB_TAG: ${{ github.sha }}
       PULL_SECRET: ${{ vars.OCP_PULL_SECRET }}
       INSECURE_TLS: ${{ vars.OCP_INSECURE_TLS == 'true' }}
+      EXPOSE_DB: ${{ vars.OCP_EXPOSE_DB == 'true' }}
+      # Database servers the DBA provides (the twinlab.local.yaml databases: mapping as YAML,
+      # passwords included): only for apps whose lab.database names one. See docs/ocp.md.
+      TWINLAB_DATABASES: ${{ secrets.TWINLAB_DATABASES }}
     steps:
       - name: Is an OpenShift cluster configured?
         id: ocp
@@ -189,6 +193,7 @@ jobs:
         run: |
           args=()
           if [ -n "$PULL_SECRET" ]; then args+=(--pull-secret "$PULL_SECRET"); fi
+          if [ "$EXPOSE_DB" = "true" ]; then args+=(--expose-db); fi
           labctl ocp deploy "$APP" --namespace "$OCP_NAMESPACE" --no-smoke "${args[@]}"
       - name: Smoke check through the Route
         if: steps.ocp.outputs.ready == 'true'

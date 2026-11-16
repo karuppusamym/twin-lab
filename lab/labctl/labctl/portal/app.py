@@ -674,6 +674,16 @@ def create_app(root: Path) -> FastAPI:
         )  # fmt: skip
         lease = (lab_info or {}).get("lease")
         me = _me(request)
+        from labctl import dbservers
+
+        db_choices = [("postgres", "PostgreSQL, in a container Twin Lab runs"),
+                      ("sqlserver", "SQL Server 2022, in a container Twin Lab runs")]  # fmt: skip
+        try:
+            db_choices += [(s.name, f"{s.label} at {s.host} ({s.name})")
+                           for s in dbservers.load(root).values()]  # fmt: skip
+        except dbservers.DbServerError:
+            pass
+        db_current = dbservers.choice(model.lab.database if model and model.lab else None)
         return page(
             request,
             "app.html",
@@ -681,6 +691,9 @@ def create_app(root: Path) -> FastAPI:
             app=model,
             steps=steps,
             next=guide.next_step(steps),
+            db_choices=db_choices,
+            db_current=db_current,
+            db_label=dict(db_choices).get(db_current, f"{db_current} (not configured)"),
             lease=lease,
             lease_mine=bool(
                 lease
@@ -1412,8 +1425,50 @@ def create_app(root: Path) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             cfg, error = None, str(exc)
         git = _git(["status", "--short", "--branch"])
+        from labctl import dbservers
+
+        try:
+            servers, db_error = [{**s.described(), "problems": s.problems()}
+                                 for s in dbservers.load(root).values()], None  # fmt: skip
+        except dbservers.DbServerError as exc:
+            servers, db_error = [], str(exc)
         return page(request, "settings.html", cfg=cfg, cfg_error=error, git=git,
-                    checks=jobs.list("devin-check", limit=3), updates=jobs.list("git", limit=3))  # fmt: skip
+                    checks=jobs.list("devin-check", limit=3), updates=jobs.list("git", limit=3),
+                    servers=servers, db_error=db_error)  # fmt: skip
+
+    @portal.post("/settings/db-check")
+    def db_check(name: str = Form(...)):
+        from labctl import dbservers
+
+        try:
+            said = dbservers.check(dbservers.server(root, name))
+        except dbservers.DbServerError as exc:
+            return back("/settings#databases", str(exc), "error")
+        return back("/settings#databases", said)
+
+    @portal.post("/apps/{app_id}/database")
+    def app_database(app_id: str, name: str = Form("postgres")):
+        from labctl import dbservers
+
+        app_id = slug(app_id, "app id")
+        path = root / "apps" / app_id / "app.yaml"
+        model = app_model(app_id)
+        if model is None or model.lab is None:
+            return back(f"/apps/{app_id}#lab", "Set the lab ports first", "error")
+        if name not in dbservers.BUILT_IN:
+            try:
+                dbservers.server(root, name)
+            except dbservers.DbServerError as exc:
+                return back(f"/apps/{app_id}#lab", str(exc), "error")
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if name == "postgres":
+            data["lab"].pop("database", None)
+        else:
+            data["lab"]["database"] = name
+        path.write_text(yaml.safe_dump(data, sort_keys=False, width=100), encoding="utf-8",
+                        newline="\n")  # fmt: skip
+        return back(f"/apps/{app_id}#lab", f"{app_id} now uses the database {name}. Press "
+                    "Rebuild and restart: the tables are created there.")  # fmt: skip
 
     @portal.post("/settings/devin-check")
     def devin_check():

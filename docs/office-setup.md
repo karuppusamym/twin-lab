@@ -168,6 +168,45 @@ database owner, so a bot (or anyone who reaches the port) cannot run programs on
 read its files or drop tables. The owner's password is generated per machine
 (`.lab-state/lab-db-password`) and only the app and the lab agent use it.
 
+### Which database a demo app runs on
+
+Each app's lab uses one of these (App > Lab > **Database**, or `labctl db use <app> <name>`):
+
+| Choice | What it is | Who sets it up |
+|---|---|---|
+| `postgres` (default) | a Postgres container per app | Twin Lab, nothing to do |
+| `sqlserver` | a SQL Server 2022 Developer container per app; login `sa` for the app, `bot` for bots | Twin Lab (needs the `mcr.microsoft.com/mssql/server` image; local lab only) |
+| a server name | a SQL Server, Oracle or Postgres server your DBA gives you | the DBA: one empty database (or schema) and two accounts |
+
+For a DBA's server, ask for: the engine, host, port, database name (Oracle: service name), an
+**owner** account that may create tables in it, and a **bot** account that may only read and
+change rows. Put them in `twinlab.local.yaml` (never committed), one entry per server; any number
+of servers is fine:
+
+```yaml
+databases:
+  qtt-sqlserver:
+    engine: mssql              # mssql, oracle or postgres
+    host: sqldemo01.office.local
+    database: TWINLAB_QTT
+    owner_user: tl_owner
+    owner_password_env: TL_QTT_OWNER_PW   # read from the environment; or owner_password: ...
+    bot_user: tl_bot
+    bot_password_env: TL_QTT_BOT_PW
+```
+
+**Settings > Database servers** lists them; **Check** signs in with both accounts. Then choose the
+server on the app's page. On Start, Twin Lab creates the tables from the app's `db/schema.sql`
+(written for any engine; existing tables are left alone), loads the sample data and takes the
+baseline. The app gets `DATABASE_URL` plus `DB_ENGINE`, `DB_HOST`, `DB_PORT`, `DB_NAME`,
+`DB_SERVICE`, `DB_USER`, `DB_PASSWORD` and `DB_CONNECTION_STRING`; bots get the engine, a URL and
+an ADO.NET connection string through the lab's database port, so conditions still apply.
+
+**Views** in the real DDL become **tables of the same name** with the view's columns. Load sample
+rows into them like any table; nobody needs to know what the view was built from. Stored
+procedures, functions and triggers are listed as not created: a bot that calls one directly needs
+it written by hand.
+
 ## 6. Command line equivalents
 
 Everything in the portal is also a `labctl` command: `labctl --help`. The most used:
@@ -244,6 +283,18 @@ labctl behaviour compare --a evidence/<app>/uat-flow --b evidence/<app>/prod-flo
 labctl data load-across pack.json --dry-run
 ```
 
+```bash
+labctl db list
+```
+
+```bash
+labctl db check qtt-sqlserver
+```
+
+```bash
+labctl db use qtt qtt-sqlserver
+```
+
 To run the labs on OpenShift instead of this machine, see [ocp.md](ocp.md).
 
 The whole harness chain in one command (reset, condition, session, harness bot, robot log,
@@ -275,6 +326,8 @@ labctl harness run uipath-case-update --inputs inputs.json --condition slow-data
 | A session says FAIL after a change to the bot | the session page marks each unexpected change; if the new behaviour is right, accept the session again (it widens `expects:`) |
 | `labctl evidence attach` cannot connect | the browser must be started with `--remote-debugging-port=9222` and its own `--user-data-dir`, and on this machine |
 | "Tables used" is empty | the session was recorded by an older lab agent; run `labctl lab up <app>` once |
+| Database server Check fails | the message names the account; ask the DBA whether it may sign in to that database, and whether the password variable is set where the portal runs |
+| Start says a table cannot be created on the DBA's server | the owner account lacks CREATE TABLE in that database or schema |
 | Port already in use | change `lab:` ports on the app page (Lab > Ports and test sign-in) |
 
 ## 8. What it does not do
@@ -285,8 +338,21 @@ labctl harness run uipath-case-update --inputs inputs.json --condition slow-data
   how it was built (copy, reconstruction, skeleton, backend only, sample).
 - One shared copy per app: people using the same app at the same time share its data and
   condition. Reserve the lab when that matters.
-- The lab's databases are Postgres. Bots that query SQL Server or Oracle directly need their
-  connection pointed at the lab's Postgres address (the bindings give it).
+- It does not copy views' logic, stored procedures, functions or triggers: views become tables,
+  the rest is listed as not created.
+- The `sqlserver` container is for the local lab; on OpenShift use a DBA's server. Oracle has no
+  built-in container: use a DBA's server. Oracle support is tested against its SQL, not yet
+  against a live Oracle database.
+- The statement log in sessions ("Tables used" by SQL) is read from Postgres only; on SQL Server
+  and Oracle the row changes are still shown.
 - A session is judged only once its automation has `expects:`; until then the verdict says
   NOT DECLARED.
+- **You do not need an OCR component.** OCR only reads text that a page draws on a `<canvas>`
+  (some charts and grids). Forms, tables, iframes, web components and PDFs are read from their
+  HTML or the file. Canvas data usually also arrives as JSON in the recording's network part. On
+  Windows the OCR engine is built in and used automatically. Elsewhere, canvas text is simply
+  left empty unless Tesseract is installed (`pip install -e ".[ocr]"` and the `tesseract`
+  program).
+- No browser recorder can read Citrix, remote desktops, plug-ins or desktop windows. See
+  [06-evidence.md](06-evidence.md) for what to do instead.
 - Gaps still open, and how large they are: [07-prod-echo-coverage.md](07-prod-echo-coverage.md).

@@ -2,6 +2,34 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-16 — Demo databases on SQL Server, Oracle or Postgres
+Until now every demo database was a Postgres container. Now each app chooses:
+
+- **`postgres`** (default) or **`sqlserver`**: a container Twin Lab runs (SQL Server 2022
+  Developer, with the app's database, an owner and a rows-only `bot` login created on Start).
+- **A DBA's server**: SQL Server, Oracle or Postgres, any number of them, configured in
+  `twinlab.local.yaml` `databases:` (passwords from environment variables) or the
+  `TWINLAB_DATABASES` secret on OpenShift. **Settings > Database servers** lists and checks them;
+  the app page (or `labctl db use`) picks one.
+- **Tables from one `schema.sql` on any engine.** Twin Lab creates them on Start, leaving existing
+  ones alone. **Views become tables** of the same name with the view's columns, so sample rows
+  load straight in. Procedures, functions and triggers are listed as not created.
+- **The lab agent** loads, resets, takes baselines and records sessions on SQL Server and Oracle
+  too (identity columns reseeded, circular keys handled). Conditions apply through the same
+  database port.
+- **App and bots** get the engine, URL and an ADO.NET connection string (`DB_*` variables,
+  `{{app.db_engine}}`, `{{app.db_connection_string}}`).
+- **OpenShift**: an app on a DBA's server gets no database pod; a Job creates the tables and a
+  Secret written on each deploy holds the addresses. `OCP_EXPOSE_DB` / `--expose-db` puts the
+  database link on a NodePort for bots outside the cluster.
+- **Devin** is told the engine, its driver and the `DB_*` variables, that views are tables, and,
+  for an app already built, to enhance it rather than start again.
+
+Tried live on SQL Server 2022: tables (and a view-table) created, explicit ids loaded into
+identity columns, refusals for missing parents, reset, a session catching the app's update, a bot
+login that can change rows but not drop tables, and slow-database through the proxy (≈300 ms to
+≈1,700 ms). Oracle is tested against its generated SQL only, not a live database.
+
 ## 2026-11-16 — Recordings: frames, shadow DOM, canvas and PDFs
 The recorder used to read only the top page's HTML. Now:
 
