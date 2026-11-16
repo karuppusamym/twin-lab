@@ -2,6 +2,63 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-16 — Round 3: the bots' own fields, review fixes, Prod Echo gaps closed
+PR 3 was merged, and every merged branch and worktree was removed. Only `main` is left.
+
+**The brief now carries the fields each bot's code uses.** The UiPath analyser follows
+`HttpClient`, then `DeserializeJson`, then `obj("field")`. A new Python analyser reads the code
+statically and follows each response through variables, loops, functions and `sorted(key=...)`.
+For each route both record what the bot sends and reads, for example `/api/login`: sends
+`username` and `password`, reads `token`. The brief lists those fields for the builder. It also
+flags a read field that the recorded answer lacks. This is exactly the gap that broke the QTT
+build in round 2.
+
+**An independent review found 12 problems; all are fixed and tested.**
+- **Privacy.**
+  - Names returned by an API survived into page snapshots; they are now masked.
+  - Snapshots from deleted evidence stayed in `pages/`; regenerating now drops them.
+- **Portal.**
+  - Without a password, the portal answers only to its own host names, which stops DNS
+    rebinding.
+  - `git pull` is judged by its exit code, and never waits for a password prompt.
+  - Docker and git output is decoded as UTF-8 on Windows.
+  - A failed upload leaves nothing half-registered.
+  - Recordings run outside the job pool, stop after 30 minutes, and refuse to start from another
+    machine.
+  - A corrected Devin key is used without a restart.
+  - A by-hand build records only its own app's package.
+- **Lab.**
+  - Bots get a database login, `bot`, that can change rows only. It cannot run programs, read
+    files or drop tables. This was verified.
+  - The database owner's password is generated per machine.
+  - `TWINLAB_LAB_BIND` and `TWINLAB_HOST` are remembered, so the portal and the CLI agree.
+  - Admin calls always go to `127.0.0.1`.
+- **Real data.** The read-only guard now also refuses:
+  - a second statement after `;`
+  - writes inside `WITH`
+  - `SELECT ... INTO`
+  - comments, and `;` in a seed's `where`
+
+**Prod Echo and ATS gaps closed.** An audit checked every coverage claim against the code, and
+`07-prod-echo-coverage.md` now says what is really there. New:
+- **Robot runs in the portal.** Upload a robot log (I-08, I-09). Turn its timings into a
+  `robot_logs` condition (T-26). Compare a production run with the same bot's run in the lab
+  (parity, I-24). Tried live: screens and fields matched, and three value differences were
+  found.
+- **`labctl realdata load`.** Masked rows go into a lab, with real names mapped onto the demo
+  schema. A mask receipt is required (I-18). Tried live: 267 rows from SQL Server-style names
+  were loaded into QTT, and conformance stayed READY.
+- **The AI-change guard (T-22)** runs in CI as `guard.yml`.
+- **Optional drivers** for SQL Server, Oracle and MySQL.
+- **[realdata.md](realdata.md)**, a new guide.
+
+**Still open (see the end of `07-prod-echo-coverage.md`):**
+- a pass/fail verdict on unexpected changes
+- named data packs and versioned baselines
+- a recorder that attaches to a running browser
+- fidelity replay in the portal
+- the harness chain in one command
+
 ## 2026-11-15 — End to end without source: QTT stand-in, real bots, review fixes
 `apps/qtt/` was built by a stand-in Devin from its package alone: 4 recordings and SQL Server
 DDL, with no source. Both QTT automations are READY (65 and 4 checks). Running the real Python

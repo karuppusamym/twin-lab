@@ -81,10 +81,18 @@ The lab apps listen on this machine only (`127.0.0.1`). When bots run on other m
   that allows only the bot machines), and
 - set `TWINLAB_HOST` to this machine's name so the addresses handed to bots point here.
 
+Set them once, in any shell that runs `labctl` or the portal. They are remembered in
+`.lab-state/lab.yaml`, so the portal started later from another shell uses the same values.
+Admin calls always go to `127.0.0.1`.
+
 The lab agents' admin API (data, reset, conditions, sessions) needs a token. One is generated on
 first use in `.lab-state/lab-token`; the portal and `labctl` send it, bots never need it. Set
-`TWINLAB_LAB_TOKEN` only to choose your own. After changing either variable, run
-`labctl lab up <app>` again so the lab picks it up.
+`TWINLAB_LAB_TOKEN` only to choose your own; it is written to the same file. After changing any
+of these, run `labctl lab up <app>` again so the lab picks it up.
+
+Without a portal password, the portal answers only to this machine's own names (`127.0.0.1`,
+`localhost` and its host name). This stops a web page on another site from driving it. If
+people open it under another name, list that name in `TWINLAB_PORTAL_HOSTS`, or set a password.
 
 Addresses handed to bots use `127.0.0.1`, not `localhost`. On Windows, `localhost` tries IPv6
 first and each connection then waits about 20 seconds, which looks like a slow app.
@@ -124,6 +132,18 @@ the portal follows them and shows the pull request. Details: [devin.md](devin.md
 9. **App > Conditions**: pick normal, peak-hour, slow-database, intermittent-errors or timeouts.
 10. **App > Sessions**: start recording, run the bot as you normally would (bindings for UiPath
     are on the automation page), stop. Compare two sessions side by side.
+11. **Automation > Robot runs**: upload the bot's log from production (Orchestrator export or NLog
+    JSON lines). You see each run step by step with its waits. **Make a condition from these
+    timings** turns production's slowness into a condition you can apply in the lab.
+    **Compare** checks that the bot does the same in the lab as in production: screens, fields,
+    values, requests and row changes (parity).
+12. **Real data** (only when synthetic data is not enough): a masked slice of a replica, loaded
+    into the lab with `labctl realdata load`. See [realdata.md](realdata.md).
+
+The bots' database address uses the login `bot`. It may read and change rows, but it is not the
+database owner, so a bot (or anyone who reaches the port) cannot run programs on the database,
+read its files or drop tables. The owner's password is generated per machine
+(`.lab-state/lab-db-password`) and only the app and the lab agent use it.
 
 ## 6. Command line equivalents
 
@@ -149,6 +169,14 @@ labctl conformance <automation>
 labctl bindings <automation> --form uipath
 ```
 
+```bash
+labctl realdata load <app> --in masked.json --map map.yaml --dry-run
+```
+
+```bash
+labctl botlog trace robot.log.jsonl --automation automations/<automation> --out traces.json
+```
+
 ## 7. When something is wrong
 
 | Symptom | Look at |
@@ -160,6 +188,11 @@ labctl bindings <automation> --form uipath
 | A bot is slow even with no condition | its address says `localhost`; use `127.0.0.1` (bindings do) |
 | Reset says `LAB_BASELINE_MISMATCH` | the saved baseline does not match its label; take a baseline again (App > Data) |
 | `labctl devin start` says a build is unfinished | follow or cancel that build first, or add `--force` |
+| The portal says "unknown host name" | open it as http://127.0.0.1:8790, or add the name people use to `TWINLAB_PORTAL_HOSTS` (or set a portal password) |
+| "Record a flow" says the window opens on the Twin Lab machine | record there, or save a HAR in your own browser (developer tools > Network > Save all as HAR) and upload it |
+| A Devin build failed with 401 after you fixed the key | start it again: the new key is read at once, no restart needed |
+| An upload fails with "path longer than 260 characters" | move the repository to a short folder such as `C:	l`, or turn on Windows long paths |
+| A bot's database login fails after updating Twin Lab | run `labctl lab up <app>` once: it sets the generated passwords; the bindings now use the login `bot` |
 | Port already in use | change `lab:` ports on the app page (Lab > Ports and test sign-in) |
 
 ## 8. What it does not do
@@ -172,3 +205,5 @@ labctl bindings <automation> --form uipath
   condition.
 - The lab's databases are Postgres. Bots that query SQL Server or Oracle directly need their
   connection pointed at the lab's Postgres address (the bindings give it).
+- Nothing fails a session on an unexpected change yet: read the row changes on the session page.
+- Gaps still open, and how large they are: [07-prod-echo-coverage.md](07-prod-echo-coverage.md).

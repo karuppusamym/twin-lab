@@ -44,7 +44,10 @@ person, not edited by you.
 3. **Same behaviour on the in-scope paths.** Read the screen files and route handlers the brief
    lists. Reproduce what they do: conditional fields, cascades, disabled states, messages, status
    codes, error bodies. Copying in-scope source code is allowed and usually the most faithful
-   approach; then remove everything out of scope.
+   approach; then remove everything out of scope. Every field a route lists as *automations
+   read* (taken from the bots' own code, for example `token` or `items[].review_no`) is in its
+   success answer under exactly that name, and every field it lists as *automations send* is
+   accepted. A bot breaks on a missing one even when conformance is READY.
 4. **Nothing out of scope.** No screen, route, table, menu link or model listed under "Out of
    scope". A navigation link to an out-of-scope screen is removed, not left dead.
 5. **Database from `db/schema.sql`.** Table and column names exactly as there, on the engine the

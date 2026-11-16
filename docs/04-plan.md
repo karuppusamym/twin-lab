@@ -172,6 +172,9 @@ factory less and less evidence and measuring what is lost.
 
 - [ ] **T-16 Python and agentic analyser** · M
   Declared `touches` plus static scan for URLs, SQL and selectors.
+  *Part done (2026-11-16): `labctl automation analyse` reads a Python bot's HTTP calls and the
+  fields it sends and reads per route (no execution); undeclared calls become notes. SQL and
+  selector scanning still to do.*
   DoD: an undeclared table used in the script is reported; a backend-only automation
   (`surface: backend`, API and DB, no screens) reaches READY.
 
@@ -200,10 +203,11 @@ factory less and less evidence and measuring what is lost.
   Deploy step in the reusable workflow; hostname per app.
   DoD: a merge to main updates only the changed app on the shared host.
 
-- [ ] **T-22 Trust guard for AI-authored changes** · S
+- [x] **T-22 Trust guard for AI-authored changes** · S
   Port `tools/guard_ai_changes.py`: no self-approval of rules; an app and the conformance
   expectations for it not changed in one pull request without a reviewer label.
   DoD: a pull request raising a rule to `owner_approved` without the label fails.
+  *Done 2026-11-16: `tools/guard_ai_changes.py`, workflow `guard.yml`, `tests/test_guard.py`.*
 
 ## Milestone 3: QTT
 
@@ -228,6 +232,8 @@ is built from evidence (E-01 to E-05).
   Port the robot log parser (Prod Echo I-08) to derive per-step wait times; build QTT profiles.
   DoD: a profile marked `robot_logs` whose route latencies are within an agreed tolerance of the
   measured ones; if no logs are obtainable, a profile marked `estimate` signed off by bot support.
+  *Part done (2026-11-16): portal Robot runs > Make a condition writes a `robot_logs` profile from
+  uploaded logs. The QTT profile needs QTT's real robot logs.*
 
 - [ ] **T-27 QTT showcase** · M
   Original and agentic automation on the QTT demo, under normal and degraded conditions, with

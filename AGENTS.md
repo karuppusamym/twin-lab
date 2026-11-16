@@ -10,6 +10,11 @@ Full playbook for building a demo app: [docs/factory-playbook.md](docs/factory-p
 - Write only under `apps/<app>/`. Never edit `BRIEF.md`, `db/schema.sql`, or `app.yaml` outside its
   `run:` section.
 - Every rule stays `verification: hypothesis`. Never set `owner_approved` or `reference_verified`.
+- Return every response field the brief lists as *automations read*, with those names.
+- Do not change `automations/`, `flows/`, `lab/` or `conditions/` in the same pull request as an
+  app: they are the checks that judge it.
+- CI enforces the rules on approvals, generated files and checks with
+  `tools/guard_ai_changes.py` on branches `devin/...` and pull requests labelled `ai-built`.
 - One `Dockerfile` per app; the app reads its database address from the environment.
 - Record what you did, what you assumed and what you could not check in `apps/<app>/BUILD-NOTES.md`.
 
