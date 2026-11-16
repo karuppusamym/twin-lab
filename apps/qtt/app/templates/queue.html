@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Work queue{% endblock %}
+{% block body_class %}page-queue{% endblock %}
+{% block content %}
+<h1>Work queue</h1>
+<form id="queueFilters" class="filters" method="get" action="/queue">
+  <label for="statusFilter">Status</label>
+  <select id="statusFilter" name="status">
+    <option value="">All</option>
+    {% for s in statuses %}<option value="{{ s }}"{% if s == status %} selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <label for="reviewSearch">Review / loan / borrower</label>
+  <input id="reviewSearch" name="q" type="text" value="{{ q }}" placeholder="R-1001, L-200001 or name">
+  <label class="check"><input id="mineOnly" name="mine" type="checkbox" value="1"{% if mine %} checked{% endif %}> Assigned to me</label>
+  <button id="btnFilter" type="submit" class="btn">Apply</button>
+  <a id="btnClearFilters" href="/queue" class="btn btn-link">Clear</a>
+</form>
+<p id="resultCount" class="count">{{ rows | length }} review(s)</p>
+<table id="queueTable" class="grid">
+  <thead>
+    <tr><th>Review no</th><th>Loan no</th><th>Borrower</th><th>Product</th><th>Status</th><th>Due date</th><th>Assignee</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr class="review-row" data-review-no="{{ r.review_no }}">
+      <td class="review-no">{{ r.review_no }}</td>
+      <td class="loan-no">{{ r.loan_no }}</td>
+      <td class="borrower">{{ r.borrower_name }}</td>
+      <td class="product">{{ r.product }}</td>
+      <td class="status"><span class="badge status-{{ r.status | lower }}">{{ r.status }}</span></td>
+      <td class="due-date">{{ r.due_date }}</td>
+      <td class="assignee">{{ r.assignee or "" }}</td>
+      <td><a id="open-{{ r.review_no }}" class="open-review" href="/reviews/{{ r.review_no }}">Open</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
