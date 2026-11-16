@@ -369,7 +369,7 @@ def check(
             f"{len(automation.analysis.gaps)} unresolved analysis gap(s) in automation.yaml"
         )
     try:
-        b = bnd.for_automation(root, automation, host or bnd.LAB_HOST)
+        b = bnd.for_automation(root, automation, host or bnd.LAB_HOST)  # checked from here
         args = bnd.arguments(automation, b)
     except bnd.BindingError as exc:
         report.verdict = "BLOCKED"

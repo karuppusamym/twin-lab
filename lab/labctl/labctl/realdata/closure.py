@@ -56,6 +56,8 @@ class Seed(Contract):
             raise ValueError("a seed has either `values` or `where`, not both and not neither")
         if self.where is not None and re.search(r"'[^']*'", self.where):
             raise ValueError("literal strings in `where` are not allowed; use :params")
+        if self.where is not None and re.search(r";|--|/\*", self.where):
+            raise ValueError("`where` is one condition: no `;` and no comments")
         return self
 
 

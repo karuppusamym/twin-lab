@@ -238,7 +238,14 @@ def from_automations(app: str, automations: list[Automation]) -> AppModel:
             elif isinstance(touch, ApiTouch):
                 for r in touch.routes:
                     part.routes.append(
-                        Route(method=r.method, path=r.path, basis="declared", **{"from": [ev]})
+                        Route(
+                            method=r.method,
+                            path=r.path,
+                            basis="declared",
+                            sends=r.sends,
+                            reads=r.reads,
+                            **{"from": [ev]},
+                        )
                     )
             elif isinstance(touch, DbTouch):
                 for t in touch.tables:
@@ -426,6 +433,8 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
                     setattr(have, attr, getattr(have, attr) or getattr(route, attr))
             have.basis = stronger(have.basis, route.basis)
             have.from_ = _union(have.from_, route.from_)
+            have.sends = _union(have.sends, route.sends)  # every automation's needs count
+            have.reads = _union(have.reads, route.reads)
         else:
             model.routes.append(route)
     for table in part.tables:

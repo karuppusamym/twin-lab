@@ -264,9 +264,15 @@ class BuildJobs:
         repo_root: Path,
         poll_interval: float = DEFAULT_POLL_SECONDS,
         packages_dir: Path | None = None,
+        fingerprint: Callable[[], object] | None = None,
     ) -> None:
         self.store = store
         self.client_factory = client_factory
+        # What identifies the client's settings (key, org, address). When it changes, for example
+        # after a wrong key is corrected, the next call builds a new client instead of the old one.
+        self.fingerprint = fingerprint
+        self._made_with: object = None
+        self._refused = False  # a poller stopped on 401/403; restart them with the next client
         self.repo_root = Path(repo_root)
         self.poll_interval = poll_interval
         self.packages_dir = Path(packages_dir) if packages_dir else store.state_dir / "packages"
@@ -277,10 +283,19 @@ class BuildJobs:
     # --- helpers ---------------------------------------------------------------------------------
 
     def _devin(self) -> DevinClient:
+        restart = False
         with self._lock:
-            if self._client is None:
+            now = self.fingerprint() if self.fingerprint else None
+            if self._client is None or now != self._made_with:
                 self._client = self.client_factory()
-            return self._client
+                self._made_with = now
+                restart, self._refused = self._refused, False
+            client = self._client
+        if restart:  # pollers that stopped on a refused key follow their jobs again
+            for job in self.store.list():
+                if job.mode == "direct" and not job.terminal and job.devin_id:
+                    self._ensure_poller(job.id)
+        return client
 
     def _require(self, job_id: str) -> Job:
         job = self.store.get(job_id)
@@ -438,7 +453,10 @@ class BuildJobs:
             except DevinError as exc:
                 if exc.status in (401, 403):
                     log.error("job %s: polling stopped, Devin refused the key: %s", job_id, exc)
-                    return  # resumes on the next start once the key is fixed
+                    with self._lock:
+                        self._refused = True
+                        self._client = None  # the next call reads the settings again
+                    return  # resumes once a call succeeds with the corrected key
                 log.warning("job %s: poll failed, will retry: %s", job_id, exc)
                 continue
             except JobError:

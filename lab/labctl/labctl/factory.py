@@ -12,6 +12,7 @@ Evidence for an app is discovered under `evidence/<app>/` (Git-ignored):
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -143,6 +144,9 @@ def generate(
     if (brief_file.exists() or schema_file.exists() or model_file.exists()) and not force:
         raise FactoryError(f"apps/{app_id} already has a brief; replace it explicitly")
     backup(root, app_id)
+    # Snapshots are rewritten from the evidence there is now: one from deleted evidence (or from a
+    # screen no longer recorded) must not stay and travel to Devin. The backup keeps the old set.
+    shutil.rmtree(out / "pages", ignore_errors=True)
     model = build_model(root, app_id, source)
     result = brief_mod.scope(app_id, system or app_id, model, db_engine)
     schema_file.parent.mkdir(parents=True, exist_ok=True)
@@ -226,7 +230,6 @@ GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "behaviours.json", "page
 
 def backup(root: Path, app_id: str) -> Path | None:
     """Copy the generated files about to be replaced to .lab-state/backups/<app>/<time>/."""
-    import shutil
     from datetime import UTC, datetime
 
     from labctl.lab import state_dir

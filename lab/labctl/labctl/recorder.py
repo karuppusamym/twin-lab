@@ -137,8 +137,10 @@ def record(
     headless: bool = False,
     *,
     settle_ms: int = 400,
+    max_seconds: float = 1800,
 ) -> Path:
     """Open `url` in Chromium and record until the page is closed (or `script(page)` returns).
+    A window nobody closes is closed after `max_seconds`; what was recorded until then is kept.
 
     With `script`, the callback drives the page (for tests and scripted evidence runs); otherwise a
     person clicks through the flow in a headed browser and closes the window to finish. Returns
@@ -167,7 +169,14 @@ def record(
                 if not page.is_closed():
                     page.evaluate("() => window.__tlFlush && window.__tlFlush()")
             else:
-                page.wait_for_event("close", timeout=0)
+                from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+                try:
+                    page.wait_for_event("close", timeout=max_seconds * 1000)
+                except PlaywrightTimeout:
+                    if not page.is_closed():
+                        page.evaluate("() => window.__tlFlush && window.__tlFlush()")
+                    print(f"No one closed the window within {max_seconds / 60:.0f} min; stopped.")
             context.close()  # writes the HAR
             browser.close()
     finally:

@@ -11,6 +11,7 @@ reported as gaps until a real Studio export is available to code against.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from dataclasses import dataclass, field
@@ -135,6 +136,30 @@ def local(tag: str) -> str:
 
 def namespace(tag: str) -> str:
     return tag[1:].split("}", 1)[0] if tag.startswith("{") else ""
+
+
+JSON_READ = re.compile(r'(?:JObject\.Parse\((\w+)\)|\b(\w+))((?:\(\s*(?:"\w+"|\d+)\s*\))+)')
+
+
+def json_keys(body: str | None) -> list[str]:
+    """Top-level keys of a JSON body written as a VB string, where each quote is doubled:
+    `""username"":` gives `username`."""
+    if not body:
+        return []
+    keys = re.findall(r'""(\w+)""\s*:', body) or re.findall(r'"(\w+)"\s*:', body)
+    return list(dict.fromkeys(keys))
+
+
+def parameter_keys(el: ET.Element) -> list[str]:
+    """Query parameter names from `<HttpClient.Parameters>` (`x:Key` of each argument)."""
+    out = []
+    for child in el:
+        if local(child.tag) == f"{local(el.tag)}.Parameters":
+            for d in child.iter():
+                key = next((v for k, v in d.attrib.items() if k.endswith("}Key")), None)
+                if key and key not in out:
+                    out.append(key)
+    return out
 
 
 def argument(el: ET.Element, name: str) -> str | None:
@@ -272,6 +297,8 @@ class _Walker:
         self.result = Result()
         self.screens: dict[tuple[str, str], dict] = {}
         self.routes: dict[str, list[dict]] = {}
+        # (workflow file, variable) -> the route whose JSON answer it holds
+        self.json_vars: dict[tuple[str, str], dict] = {}
         self.tables: dict[str, dict[str, dict]] = {}
         self.order: list[tuple[str, str]] = []
         self.top_env: dict[str, list[Part]] = {}
@@ -303,6 +330,7 @@ class _Walker:
         if rel not in self.result.files:
             self.result.files.append(rel)
         self.children(safe_parse(path), rel, dict(env), browser, depth)
+        self.json_reads(path, rel)
 
     def children(
         self, el: ET.Element, rel: str, env: dict, browser: Browser | None, depth: int
@@ -340,6 +368,8 @@ class _Walker:
             self.element(el, name, browser, where)
         elif name == "HttpClient":
             self.http(el, env, where)
+        elif name == "DeserializeJson":
+            self.deserialize(el, where)
         elif name in ("ExecuteQuery", "ExecuteNonQuery"):
             self.query(el, env, where)
         elif name == "InvokeWorkflowFile":
@@ -436,9 +466,43 @@ class _Walker:
         if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
             self.gap(where, f"HTTP method {method} is not one the lab records")
             return
-        route = {"method": method, "path": path}
-        if route not in self.routes.setdefault(target[0], []):
-            self.routes[target[0]].append(route)
+        routes = self.routes.setdefault(target[0], [])
+        route = next((r for r in routes if r["method"] == method and r["path"] == path), None)
+        if route is None:
+            route = {"method": method, "path": path, "sends": [], "reads": []}
+            routes.append(route)
+        for name in json_keys(argument(el, "Body")) + parameter_keys(el):
+            if name not in route["sends"]:
+                route["sends"].append(name)
+        result = vb.variable(argument(el, "Result"))
+        if result:
+            self.json_vars[(where.split(":", 1)[0], result)] = route
+
+    def deserialize(self, el: ET.Element, where: str) -> None:
+        """`DeserializeJson JsonString=[reviewJson] JsonObject=[review]`: review is that answer."""
+        rel = where.split(":", 1)[0]
+        source = vb.variable(argument(el, "JsonString"))
+        target = vb.variable(argument(el, "JsonObject"))
+        if source and target and (rel, source) in self.json_vars:
+            self.json_vars[(rel, target)] = self.json_vars[(rel, source)]
+
+    def json_reads(self, path: Path, rel: str) -> None:
+        """Fields read from a JSON answer anywhere in the file: `JObject.Parse(v)("token")`,
+        `review("status")`, `review("items")(0)("code")`."""
+        if not any(k[0] == rel for k in self.json_vars):
+            return
+        text = html.unescape(path.read_text(encoding="utf-8", errors="replace"))
+        for m in JSON_READ.finditer(text):
+            var = m.group(1) or m.group(2)
+            route = self.json_vars.get((rel, var))
+            if route is None:
+                continue
+            names = []
+            for key in re.findall(r'\(\s*(?:"(\w+)"|(\d+))\s*\)', m.group(3)):
+                names.append(key[0] if key[0] else "[]")
+            field = ".".join(names).replace(".[]", "[]")
+            if field and not field.startswith("[]") and field not in route["reads"]:
+                route["reads"].append(field)
 
     # -- db --
 
@@ -491,7 +555,8 @@ class _Walker:
             if screens:
                 out.append({"app": app, "via": "web", "screens": screens})
             if self.routes.get(app):
-                out.append({"app": app, "via": "api", "routes": self.routes[app]})
+                routes = [{k: v for k, v in r.items() if v != []} for r in self.routes[app]]
+                out.append({"app": app, "via": "api", "routes": routes})
             if self.tables.get(app):
                 out.append({"app": app, "via": "db", "tables": list(self.tables[app].values())})
         return out

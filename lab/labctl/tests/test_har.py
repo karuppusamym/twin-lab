@@ -452,3 +452,32 @@ def test_live_recording_of_the_showcase_gives_the_same_screens_and_routes(tmp_pa
     assert {s.path for s in live.screens} == {s.path for s in fixed.screens}
     assert {r.key for r in live.routes} == {r.key for r in fixed.routes}
     assert har.load(out).id == "live"
+
+
+def test_names_an_api_returned_are_masked_on_every_page(tmp_path):
+    """Review finding 1: API answers keep no text, so their values were not known as data, and a
+    single title-case name in a heading, option or button survived into pages/ and the model."""
+    rec = tmp_path / "rec"
+    (rec / "dom").mkdir(parents=True)
+    answer = {"items": [{"id": 1, "name": "Okonkwo"}, {"id": 2, "name": "Vandermeer"}]}
+    entries = [{
+        "startedDateTime": "2026-01-01T00:00:00Z", "time": 5, "_resourceType": "fetch",
+        "request": {"method": "GET", "url": "https://app.example/api/customers", "headers": []},
+        "response": {"status": 200, "content": {"mimeType": "application/json",
+                                                "text": json.dumps(answer)}},
+    }]  # fmt: skip
+    (rec / "recording.har").write_text(json.dumps({"log": {"entries": entries}}), encoding="utf-8")
+    (rec / "dom" / "0001.html").write_text(
+        "<html><body><h2>Okonkwo</h2><select id='cust'><option>Vandermeer</option></select>"
+        "<button>Okonkwo</button><form><input id='a'></form></body></html>",
+        encoding="utf-8",
+    )
+    step = {"seq": 1, "ts": "2026-01-01T00:00:01Z", "url": "https://app.example/customers",
+            "action": "load", "dom": "dom/0001.html"}  # fmt: skip
+    (rec / "steps.jsonl").write_text(json.dumps(step) + "\n", encoding="utf-8")
+    pages = tmp_path / "pages"
+    model = har.analyse("demo", rec, tmp_path, pages)
+    written = "".join(p.read_text(encoding="utf-8") for p in pages.glob("*.html"))
+    dumped = model.model_dump_json()
+    for name in ("Okonkwo", "Vandermeer"):
+        assert name not in written and name not in dumped, name

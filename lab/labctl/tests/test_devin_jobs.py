@@ -336,3 +336,23 @@ def test_get_for_app_checks_the_app(tmp_path):
         jobs.get_for_app("abc123", "other")
     with pytest.raises(JobError, match="no job"):
         jobs.get_for_app("nope", "demo")
+
+
+def test_a_corrected_key_is_used_without_restarting(server, repo, tmp_path):
+    """Review finding 4: a wrong key cached forever meant every build after the fix still got 401."""
+    settings = {"key": "cog_wrong"}
+    jobs = BuildJobs(
+        JobStore(tmp_path / "state"),
+        lambda: DevinClient(settings["key"], ORG, server.state.url, timeout=5),
+        repo,
+        poll_interval=POLL,
+        fingerprint=lambda: settings["key"],
+    )
+    try:
+        refused = jobs.start("demo", "acme/twin-lab")
+        assert refused.state == "failed" and "401" in (refused.last_error or "")
+        settings["key"] = KEY  # the person fixes twinlab.local.yaml
+        job = jobs.start("demo", "acme/twin-lab")
+        assert wait(jobs, job.id, lambda j: j.terminal).state == "finished"
+    finally:
+        jobs.stop()

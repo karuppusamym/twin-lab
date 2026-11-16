@@ -46,7 +46,7 @@
         </tbody></table></div>
       {% endfor %}
     {% elif t.via == 'api' %}
-      <ul class="small">{% for r in t.routes %}<li><code>{{ r.method }} {{ r.path }}</code></li>{% endfor %}</ul>
+      <ul class="small">{% for r in t.routes %}<li><code>{{ r.method }} {{ r.path }}</code>{% if r.sends %} · sends {{ r.sends | join(', ') }}{% endif %}{% if r.reads %} · reads <b>{{ r.reads | join(', ') }}</b>{% endif %}</li>{% endfor %}</ul>
     {% elif t.via == 'db' %}
       <ul class="small">{% for tb in t.tables %}<li><code>{{ tb.table }}</code> {{ tb.access }}: {{ tb.columns | join(", ") }}</li>{% endfor %}</ul>
     {% endif %}
@@ -54,7 +54,7 @@
   {% if a.analysis.notes %}<details><summary>Notes ({{ a.analysis.notes | length }})</summary><ul class="small">{% for n in a.analysis.notes %}<li><b>{{ n.where }}</b>: {{ n.what }}</li>{% endfor %}</ul></details>{% endif %}
   <p class="small muted">Analysed by {{ a.analysis.by or "nobody" }} · reviewed by {{ a.analysis.reviewed_by or "nobody yet" }}</p>
   <div class="row">
-    {% if a.type.value == 'uipath' %}<form method="post" action="/automations/{{ a.id }}/analyse"><button type="submit" class="secondary">Analyse again</button></form>{% endif %}
+    {% if a.type.value in ('uipath', 'python') %}<form method="post" action="/automations/{{ a.id }}/analyse"><button type="submit" class="secondary">Analyse again</button></form>{% endif %}
     <form method="post" action="/automations/{{ a.id }}/review" class="row">
       <div><label for="reviewer">Reviewed by</label><input id="reviewer" type="text" name="reviewer" value="{{ a.analysis.reviewed_by or '' }}" placeholder="your name"></div>
       <div><button type="submit" class="secondary">Record review</button></div>
@@ -69,5 +69,45 @@
     <textarea name="settings" rows="12">{{ settings_yaml }}</textarea>
     <button type="submit">Save</button>
   </form>
+</div>
+
+<div class="card" id="runs">
+  <h2>Robot runs (logs from production)</h2>
+  <p class="small muted">Upload the bot's own log (an Orchestrator job log export, or NLog JSON lines) to see each run step by step with its timings. From those timings Twin Lab can make a condition that slows the lab the way production was slow, and compare a production run with a lab session of the same bot (parity). Logs stay on this machine (<code>.lab-state/botruns</code>); fields the bot marks Private are masked when read.</p>
+  <form method="post" action="/automations/{{ a.id }}/botruns" enctype="multipart/form-data" class="grid">
+    <label>Robot log <input type="file" name="log" required></label>
+    <label>Chrome NetLog (optional: joins the network requests) <input type="file" name="netlog"></label>
+    <label>Where it ran
+      <select name="source">
+        <option value="production">production</option>
+        <option value="harness">harness (test bot)</option>
+        <option value="agent">agent</option>
+        <option value="unknown">unknown</option>
+      </select>
+    </label>
+    <div><button type="submit">Read the log</button></div>
+  </form>
+  {% for u in botruns %}
+  <h3>{{ u.file }} <span class="small muted">{{ u.source }} · {{ u.at[:16] }} · {{ u.runs }} run(s)</span></h3>
+  <table>
+    <tr><th>Run</th><th>Steps</th><th>Gaps</th><th>Time in steps</th></tr>
+    {% for r in u.run_list %}
+    <tr><td><code>{{ r.run_id }}</code></td><td>{{ r.steps }}</td><td>{{ r.gaps }}</td><td>{{ '%.1f s' % (r.total_ms / 1000) if r.total_ms is not none else '-' }}</td></tr>
+    {% endfor %}
+  </table>
+  <form method="post" action="/automations/{{ a.id }}/botruns/{{ u.upload }}/condition" class="inline">
+    <button type="submit" class="secondary">Make a condition from these timings</button>
+  </form>
+  {% endfor %}
+  {% if botruns %}
+  <h3>Compare two runs (parity)</h3>
+  <p class="small muted">Does the bot do the same in the lab as in production? Pick a production run, then the same bot's run in the lab (upload the log of a lab run as <i>harness</i> or <i>agent</i>), and the lab session of that run for the row changes. Screens, fields, values, requests and row changes are compared; what one side lacks is reported as skipped, never as passed.</p>
+  <form method="post" action="/automations/{{ a.id }}/parity" class="grid">
+    <label>Run <select name="base">{% for u in botruns %}{% for r in u.run_list %}<option value="{{ u.upload }}/{{ r.run_id }}">{{ u.source }} · {{ r.run_id }}</option>{% endfor %}{% endfor %}</select></label>
+    <label>Against run <select name="other"><option value="">(only a lab session)</option>{% for u in botruns %}{% for r in u.run_list %}<option value="{{ u.upload }}/{{ r.run_id }}">{{ u.source }} · {{ r.run_id }}</option>{% endfor %}{% endfor %}</select></label>
+    <label>Lab session of that run <select name="session"><option value="">(none)</option>{% for s in lab_sessions %}<option value="{{ s.app }}/{{ s.session_id }}">{{ s.app }} · {{ s.label or s.automation or s.session_id }} · {{ (s.started or '')[:16] }}</option>{% endfor %}</select></label>
+    <div><button type="submit" class="secondary">Compare</button></div>
+  </form>
+  {% endif %}
 </div>
 {% endblock %}

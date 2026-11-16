@@ -164,17 +164,42 @@ def test_compose_wires_the_app_through_the_agent_and_its_db_proxy(tmp_path):
     (root / "apps/demo/db/schema.sql").write_text("CREATE TABLE t (id INTEGER);", encoding="utf-8")
     doc = lab_mod.compose(root, "demo")
     services = doc["services"]
+    pw = lab_mod.db_password(root)
+    assert pw != "lab" and len(pw) >= 24  # generated, never the well-known default
     assert services["app"]["environment"] == {
-        "DATABASE_URL": "postgresql://lab:lab@agent:15432/demo"
+        "DATABASE_URL": f"postgresql://lab:{pw}@agent:15432/demo"
     }
     assert services["agent"]["ports"] == [f"127.0.0.1:{PORT}:9000", "127.0.0.1:18612:15432"]
     assert services["agent"]["environment"]["LAB_TOKEN"]  # never an open admin API
     assert services["agent"]["environment"]["APP_UPSTREAM"] == "http://app:8000"
     assert (
         services["agent"]["environment"]["ADMIN_DATABASE_URL"]
-        == "postgresql://lab:lab@db:5432/demo"
+        == f"postgresql://lab:{pw}@db:5432/demo"
     )
+    assert services["db"]["environment"]["POSTGRES_PASSWORD"] == pw
     assert doc["name"] == "twinlab-demo"
+
+
+def test_bots_get_the_rows_only_login_and_remembered_settings(tmp_path, monkeypatch):
+    """Review findings 9 and 10: bots never get the database owner, and a setting given to one
+    process (TWINLAB_LAB_BIND, TWINLAB_HOST) is what every later process uses."""
+    from labctl import bindings as bnd
+
+    root, auto = make_repo(tmp_path, HOME_USES, [])
+    (root / "apps/demo/db").mkdir()
+    (root / "apps/demo/db/schema.sql").write_text("CREATE TABLE t (id INTEGER);", encoding="utf-8")
+    b = bnd.for_automation(root, auto)
+    assert b.apps["demo"].db.startswith(f"postgresql://bot:{lab_mod.bot_password(root)}@127.0.0.1:")
+    assert lab_mod.db_password(root) not in b.apps["demo"].db
+
+    monkeypatch.setenv("TWINLAB_LAB_BIND", "0.0.0.0")
+    monkeypatch.setenv("TWINLAB_HOST", "labbox")
+    assert lab_mod.compose(root, "demo")["services"]["agent"]["ports"][0].startswith("0.0.0.0:")
+    monkeypatch.delenv("TWINLAB_LAB_BIND")
+    monkeypatch.delenv("TWINLAB_HOST")  # another shell, without the variables
+    assert lab_mod.compose(root, "demo")["services"]["agent"]["ports"][0].startswith("0.0.0.0:")
+    assert "@labbox:" in bnd.for_automation(root, auto).apps["demo"].db
+    assert lab_mod.agent(root, "demo").base.startswith("http://127.0.0.1:")  # admin stays local
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="needs Docker")

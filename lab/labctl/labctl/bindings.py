@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
@@ -18,7 +17,7 @@ from labctl.models import App, AppBinding, Automation, Bindings
 TEMPLATE = re.compile(r"\{\{\s*([\w-]+)((?:\.[\w-]+)+)\s*\}\}")
 # 127.0.0.1, not "localhost": on Windows "localhost" tries IPv6 ::1 first, the lab listens on IPv4
 # only, and each connection then waits ~20 s before falling back. Bots would look slow for no reason.
-LAB_HOST = os.environ.get("TWINLAB_HOST", "127.0.0.1")
+LAB_HOST = "127.0.0.1"
 
 
 class BindingError(Exception):
@@ -33,22 +32,28 @@ def load_app(root: Path, app_id: str) -> App:
     return model
 
 
-def app_binding(app: App, host: str = LAB_HOST) -> AppBinding:
+def app_binding(app: App, host: str = LAB_HOST, db_password: str = "lab") -> AppBinding:
+    """Addresses a bot uses. The database login is `bot` (rows only, no superuser)."""
     if app.lab is None:
         raise BindingError(f"apps/{app.id}/app.yaml has no `lab:` section (port, db_port)")
     base = f"http://{host}:{app.lab.port}"
     return AppBinding(
         web=base,
         api=base,
-        db=f"postgresql://lab:lab@{host}:{app.lab.db_port}/{app.id}",
+        db=f"postgresql://bot:{db_password}@{host}:{app.lab.db_port}/{app.id}",
         credentials=dict(app.lab.credentials),
     )
 
 
-def for_automation(root: Path, automation: Automation, host: str = LAB_HOST) -> Bindings:
+def for_automation(root: Path, automation: Automation, host: str | None = None) -> Bindings:
+    """Bindings for a bot. `host` defaults to the remembered TWINLAB_HOST (for bots on other
+    machines), else 127.0.0.1."""
+    from labctl import lab
+
+    host = host or lab.setting(root, "host")
     apps = {}
     for app_id in automation.apps():
-        apps[app_id] = app_binding(load_app(root, app_id), host)
+        apps[app_id] = app_binding(load_app(root, app_id), host, lab.bot_password(root))
     return Bindings(apps=apps, inputs=dict(automation.test_inputs))
 
 

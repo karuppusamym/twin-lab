@@ -26,6 +26,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff==0.12.11", "starlette>=0.37", "asyncpg>=0.29"]
+# Drivers for reading a real replica (labctl realdata); see docs/realdata.md.
+mssql = ["pyodbc>=5.0"]       # also needs "ODBC Driver 18 for SQL Server" installed
+oracle = ["oracledb>=2.0"]
+mysql = ["pymysql>=1.1"]
 
 [project.scripts]
 labctl = "labctl.cli:app"

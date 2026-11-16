@@ -13,8 +13,21 @@ touches:
   routes:
   - method: POST
     path: /api/login
+    sends:
+    - password
+    - username
+    reads:
+    - token
   - method: GET
     path: /api/reviews
+    sends:
+    - status
+    reads:
+    - items[].assignee
+    - items[].due_date
+    - items[].loan_no
+    - items[].review_no
+    - items[].submitted_at
 - app: qtt
   via: db
   tables:
@@ -37,10 +50,11 @@ bindings:
   qtt_db: '{{qtt.db}}'
   qtt_user: '{{qtt.credentials.username}}'
   qtt_password: '{{qtt.credentials.password}}'
+test_inputs: {}
 analysis:
-  by: manual
+  by: python-fields/1
   gaps: []
   notes:
   - where: report.py
-    what: GET /api/reviews is called with query status=SUBMITTED; the SQL also filters
-      qc_reviews.status = 'SUBMITTED' and review_audit.event IN ('SUBMITTED', 'RETURNED')
+    what: GET /api/reviews is called with query status=SUBMITTED; the SQL also filters qc_reviews.status
+      = 'SUBMITTED' and review_audit.event IN ('SUBMITTED', 'RETURNED')

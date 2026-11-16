@@ -15,7 +15,7 @@ from labctl import conformance as conformance_mod
 from labctl import demand as demand_report
 from labctl import evidence_cli, factory, repo
 from labctl import lab as lab_mod
-from labctl.analyse import uipath
+from labctl.analyse import run as analysis
 from labctl.behaviour import cli as behaviour_cli
 from labctl.bindings import BindingError
 from labctl.botlog import cli as botlog_cli
@@ -88,28 +88,13 @@ def automation_analyse(
         for problem in problems:
             typer.echo(str(problem), err=True)
         raise typer.Exit(1)
-    if model.type.value != "uipath":
-        typer.echo(f"no analyser yet for type '{model.type.value}'", err=True)
-        raise typer.Exit(2)
-    if not model.source.path:
-        typer.echo("source.path is needed; the analyser reads files in the repository", err=True)
-        raise typer.Exit(2)
     try:
-        result = uipath.analyse(path.parent / model.source.path, model.source.entry, model.bindings)
-    except uipath.AnalysisError as exc:
+        result = analysis.analyse(path.parent, model)
+    except analysis.AnalysisError as exc:
         typer.echo(f"REJECTED  {exc}", err=True)
         raise typer.Exit(1) from exc
-
-    data = model.model_dump(mode="json", exclude_none=True)
-    data["touches"] = result.touches
-    data["analysis"] = {
-        "by": uipath.VERSION,
-        "gaps": [g.model_dump() for g in result.gaps],
-        "notes": [n.model_dump() for n in result.notes],
-        "reviewed_by": None,
-    }
     try:
-        updated = Automation.model_validate(data)
+        updated = Automation.model_validate(result.data)
     except ValidationError as exc:
         typer.echo("analysis does not fit what automation.yaml declares:", err=True)
         for e in exc.errors():
@@ -120,6 +105,10 @@ def automation_analyse(
     for touch in updated.touches:
         count = len(getattr(touch, {"web": "screens", "api": "routes", "db": "tables"}[touch.via]))
         typer.echo(f"  {touch.app}  {touch.via}  {count} item(s)")
+        for route in getattr(touch, "routes", []):
+            if route.sends or route.reads:
+                typer.echo(f"    {route.method} {route.path}  sends {', '.join(route.sends) or '-'}"
+                           f"  reads {', '.join(route.reads) or '-'}")  # fmt: skip
     for gap in result.gaps:
         typer.echo(f"  GAP  {gap.where}: {gap.what}")
     for note in result.notes:
@@ -139,6 +128,7 @@ def automation_analyse(
             updated.model_dump(mode="json", exclude_none=True), sort_keys=False, width=100
         ),
         encoding="utf-8",
+        newline="\n",
     )
     typer.echo(f"saved {path}")
 

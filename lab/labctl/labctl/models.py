@@ -71,6 +71,10 @@ class WebTouch(Contract):
 class Route(Contract):
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
     path: str = Field(pattern=r"^/")
+    # Field names the automation's code uses, never values. Dotted, `[]` for list items:
+    # `items[].review_no`. The demo app must accept `sends` and return every field in `reads`.
+    sends: list[str] = []
+    reads: list[str] = []
 
 
 class ApiTouch(Contract):

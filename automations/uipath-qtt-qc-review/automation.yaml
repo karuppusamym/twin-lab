@@ -228,8 +228,16 @@ touches:
   routes:
   - method: POST
     path: /api/login
+    sends:
+    - username
+    - password
+    reads:
+    - token
   - method: GET
     path: /api/reviews/{in_ReviewNo}
+    sends: []
+    reads:
+    - status
 - app: qtt
   via: db
   tables:

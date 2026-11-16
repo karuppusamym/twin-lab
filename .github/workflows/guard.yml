@@ -1,0 +1,23 @@
+name: guard
+# AGENTS.md rules, enforced: an AI builder cannot approve its own rules, edit the generated
+# brief, or change an app together with the checks that judge it. See tools/guard_ai_changes.py.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pyyaml
+      - name: Guard AI-built changes
+        env:
+          TWINLAB_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          TWINLAB_PR_BRANCH: ${{ github.head_ref }}
+        run: python tools/guard_ai_changes.py origin/${{ github.base_ref }}
