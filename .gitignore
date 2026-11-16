@@ -15,3 +15,5 @@ build/
 # Raw evidence (HAR files, database exports, screenshots) may hold customer data.
 evidence/
 *.har
+twinlab.local.yaml
+.lab-state/
