@@ -33,6 +33,7 @@ from labctl import lab as lab_mod
 from labctl.analyse import run as analysis
 from labctl.analyse import uipath
 from labctl.appmodel import Flow
+from labctl.botlog import runs as botruns
 from labctl.models import App, Automation, Condition
 from labctl.portal.jobs import JobRunner
 
@@ -372,7 +373,76 @@ def create_app(root: Path) -> FastAPI:
             binding_error=binding_error,
             settings_yaml=yaml.safe_dump({"bindings": model.bindings, "test_inputs": model.test_inputs}, sort_keys=False),
             conformance=jobs.list("conformance", model.id, 5),
+            botruns=botruns.uploads(state, model.id),
+            lab_sessions=_sessions_for(model),
         )  # fmt: skip
+
+    def _sessions_for(model: Automation) -> list[dict]:
+        """Lab sessions of this automation's apps (newest first), for a parity check."""
+        out = []
+        for app_id in model.apps():
+            try:
+                for s in lab_mod.agent(root, app_id).sessions() or []:
+                    out.append({**s, "app": app_id})
+            except (lab_mod.LabError, bnd.BindingError):
+                continue
+        return sorted(out, key=lambda s: s.get("started") or "", reverse=True)[:20]
+
+    @portal.post("/automations/{automation_id}/botruns")
+    async def add_botrun(
+        automation_id: str,
+        log: UploadFile = File(...),
+        netlog: UploadFile | None = File(None),
+        source: str = Form("production"),
+    ):
+        get_automation(automation_id)
+        data = await log.read()
+        net = await netlog.read() if netlog is not None and netlog.filename else None
+        if len(data) > MAX_UPLOAD or (net and len(net) > MAX_UPLOAD):
+            return back(
+                f"/automations/{automation_id}#runs", "File too large (200 MB at most)", "error"
+            )
+        try:
+            meta = botruns.import_log(root, state, automation_id, data, log.filename or "robot.log",
+                                      net, source)  # fmt: skip
+        except (botruns.RunsError, OSError, ValueError) as exc:
+            return back(f"/automations/{automation_id}#runs", str(exc), "error")
+        return back(f"/automations/{automation_id}#runs",
+                    f"Read {meta['runs']} robot run(s) from {meta['file']}")  # fmt: skip
+
+    @portal.post("/automations/{automation_id}/botruns/{upload}/condition")
+    def botrun_condition(automation_id: str, upload: str):
+        get_automation(automation_id)
+        try:
+            path = botruns.save_condition(
+                root, botruns.calibrated_condition(state, automation_id, upload)
+            )
+        except (botruns.RunsError, ValidationError) as exc:
+            return back(f"/automations/{automation_id}#runs", f"No condition made: {exc}", "error")
+        return back(f"/automations/{automation_id}#runs",
+                    f"Saved {path.relative_to(root).as_posix()}: apply it on the app page (Conditions)")  # fmt: skip
+
+    @portal.post("/automations/{automation_id}/parity", response_class=HTMLResponse)
+    def botrun_parity(
+        request: Request, automation_id: str, base: str = Form(...), other: str = Form(""),
+        session: str = Form(""),
+    ):  # fmt: skip
+        """A run (production) against another run of the bot (its log from a lab run), with that
+        run's lab session for the row changes."""
+        model = get_automation(automation_id)
+        try:
+            data = None
+            if session:
+                app_id, _, session_id = session.partition("/")
+                if app_id not in model.apps():
+                    raise botruns.RunsError(f"{app_id} is not an app of {automation_id}")
+                data = lab_mod.agent(root, slug(app_id, "app id")).session(session_id)
+            status, report = botruns.parity(state, automation_id, base, other or None, data)
+        except (botruns.RunsError, lab_mod.LabError, ValidationError) as exc:
+            return back(f"/automations/{automation_id}#runs", f"No comparison: {exc}", "error")
+        title = f"Parity {status.upper()}: {base.split('/')[-1]} against {(other or session).split('/')[-1]}"
+        return page(request, "report.html", title=title, html=md.render(report),
+                    back=f"/automations/{automation_id}#runs")  # fmt: skip
 
     @portal.post("/automations/{automation_id}/settings")
     def automation_settings(automation_id: str, settings: str = Form(...)):

@@ -324,3 +324,30 @@ def test_a_manual_build_records_only_its_own_apps_package(repo, tmp_path):
 
     jobs = JobStore(repo / ".lab-state").list()
     assert jobs and jobs[0].package_path.endswith("twinlab-showcase-1a2b3c4d.zip")
+
+
+def test_a_robot_log_becomes_runs_and_a_calibrated_condition(repo):
+    """Prod Echo I-08/I-09/T-26 in the portal: upload a robot log, see runs, make a condition."""
+    client = TestClient(create_app(repo))
+    log = (ROOT / "lab/labctl/tests/fixtures/botlog/robot.log.jsonl").read_bytes()
+    r = client.post("/automations/uipath-case-update/botruns", data={"source": "production"},
+                    files={"log": ("robot.log.jsonl", log, "application/json")})  # fmt: skip
+    assert "robot run(s) from robot.log.jsonl" in r.text and "Read 0" not in r.text
+    page = client.get("/automations/uipath-case-update").text
+    assert "Make a condition from these timings" in page
+    upload = next((repo / ".lab-state/botruns/uipath-case-update").iterdir()).name
+    r = client.post(f"/automations/uipath-case-update/botruns/{upload}/condition")
+    assert "Saved conditions/calibrated-uipath-case-update.yaml" in r.text
+    saved = yaml.safe_load(
+        (repo / "conditions/calibrated-uipath-case-update.yaml").read_text("utf-8")
+    )
+    assert saved["calibration"] == "robot_logs" and saved["targets"][0]["app"] == "showcase"
+    from labctl import repo as repo_mod
+
+    model, problems = repo_mod.load(repo / "conditions/calibrated-uipath-case-update.yaml")
+    assert model is not None, problems  # a valid profile, listed under Conditions on the app page
+    bad = client.post(
+        "/automations/uipath-case-update/botruns",
+        files={"log": ("x.txt", b"nonsense", "text/plain")},
+    )
+    assert "no robot runs found" in bad.text or "could not be read" in bad.text

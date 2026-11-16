@@ -16,7 +16,7 @@ import typer
 import yaml
 from pydantic import ValidationError
 
-from labctl.realdata import closure, inventory
+from labctl.realdata import closure, inventory, toapp
 from labctl.realdata import mask as mask_mod
 from labctl.realdata._db import RealDataError
 
@@ -141,6 +141,8 @@ def extract_cmd(
     out.write_text(json.dumps(rows, indent=1), encoding="utf-8")
     if manifest is None:
         _warn_if_tracked(out)
+    else:
+        toapp.write_receipt(out, manifest)
     for t in result.truncated:
         typer.echo(f"truncated: {t}")
     if result.stopped_at_max_rows:
@@ -189,6 +191,7 @@ def mask_cmd(
     except mask_mod.MaskError as exc:
         _fail(str(exc))
     out.write_text(json.dumps(masked, indent=1), encoding="utf-8")
+    toapp.write_receipt(out, manifest)
     typer.echo(f"masked {sum(len(r) for r in masked.values())} rows into {out}")
 
 
@@ -228,3 +231,50 @@ def sanitize_cmd(
     if problems:
         raise typer.Exit(1)
     typer.echo("sanitize: no problems")
+
+
+@app.command("load")
+def load_cmd(
+    app_id: str = typer.Argument(..., help="The demo app whose lab gets the rows."),
+    in_: Path = typer.Option(..., "--in", help="masked.json (from `mask` or `extract --manifest`)"),
+    mapping: Path = typer.Option(
+        None, "--map", help="YAML: tables, columns and skip, from real names to the demo schema."
+    ),
+    label: str = typer.Option(None, "--label", help="Name of this data set in the lab."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the mapping; load nothing."),
+    not_real: bool = typer.Option(
+        False, "--not-real-data", help="The rows are synthetic, so no mask receipt is needed."
+    ),
+) -> None:
+    """Load masked real rows into an app's lab. They become its baseline (Reset goes back to them)."""
+    from labctl import lab
+    from labctl.data import ddl
+
+    root = Path(os.environ.get("LABCTL_ROOT") or Path.cwd())
+    while not (root / "apps").is_dir() and root.parent != root:
+        root = root.parent
+    schema = root / "apps" / app_id / "db" / "schema.sql"
+    if not schema.exists():
+        _fail(f"apps/{app_id}/db/schema.sql not found; generate the brief first")
+    if not not_real:
+        try:
+            receipt = toapp.check_receipt(in_)
+        except toapp.LoadError as exc:
+            _fail(str(exc))
+        typer.echo(f"masked with {receipt['manifest']} at {receipt['masked_at']}")
+    spec = yaml.safe_load(mapping.read_text(encoding="utf-8")) if mapping else None
+    result = toapp.map_rows(_read_json(in_), ddl.parse(schema.read_text(encoding="utf-8")), spec)
+    for note in result.notes:
+        typer.echo(f"note  {note}")
+    if result.errors:
+        _fail("nothing loaded:\n" + "\n".join(f"  {e}" for e in result.errors))
+    counts = ", ".join(f"{t}={len(r)}" for t, r in result.rows.items())
+    typer.echo(f"{sum(len(r) for r in result.rows.values())} rows for {app_id}: {counts}")
+    if dry_run:
+        typer.echo("dry run: nothing loaded")
+        return
+    try:
+        reply = lab.agent(root, app_id).load(result.rows, label or f"real data ({in_.name})")
+    except lab.LabError as exc:
+        _fail(str(exc))
+    typer.echo(f"loaded; baseline {reply.get('id')}")
