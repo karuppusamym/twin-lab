@@ -23,6 +23,19 @@ NEED = ("automation:", "flow:")
 DEFAULT_STACK = "React, FastAPI and Postgres (the lab default)"
 check_selector = mb.check_selector  # kept here for callers of the T-05 interface
 
+# What gets built, by the evidence a screen (or the app) rests on (docs/06-evidence.md).
+MODES: dict[str, str] = {
+    "copy": "built from the application's source: same screens, API, tables and rules",
+    "reconstruction": "built from a recording of the real application: real markup and API on "
+    "the recorded paths; rules only where an error was recorded; nothing beyond what was recorded",
+    "skeleton": "built from an automation only: the bot's own selectors exist, but layout, look "
+    "and everything the bot does not name are invented",
+    "backend": "no screens: only the API and the database",
+    "sample": "built from a description: it follows the described flow; everything exact is "
+    "invented, so it is a sample, not a copy",
+}
+FIDELITY = ("copy", "reconstruction", "skeleton", "sample")  # strongest first
+
 
 @dataclass
 class ElementView:
@@ -40,6 +53,7 @@ class ScreenScope:
     screen: Screen
     reasons: list[str]
     elements: list[ElementView]
+    mode: str = "sample"
 
 
 @dataclass
@@ -57,6 +71,13 @@ class Brief:
 
     def route(self, key: str) -> Route:
         return self.model.route(key)
+
+    @property
+    def mode(self) -> str:
+        """The app's mode: the weakest of its screens' modes, or backend without screens."""
+        if not self.screens:
+            return "backend" if self.routes or self.tables else "sample"
+        return max((s.mode for s in self.screens), key=FIDELITY.index)
 
     def table(self, name: str) -> Table:
         return self.model.table(name)
@@ -97,17 +118,40 @@ def _by(ids: list[str]) -> list[str]:
     return [i.split(":", 1)[1] for i in ids if i.startswith(NEED)]
 
 
+def screen_mode(model: AppModel, screen: Screen) -> str:
+    """copy (source), reconstruction (recorded), skeleton (declared by an automation), sample."""
+    kinds = {e.id: e.kind for e in model.evidence}
+    seen = {kinds.get(f, f.split(":", 1)[0]) for f in screen.from_}
+    if "source" in seen:
+        return "copy"
+    if "har" in seen:
+        return "reconstruction"
+    if seen & {"automation", "openapi", "postman", "ddl"}:
+        return "skeleton"
+    return "sample"
+
+
 def make_model(
     app: str,
     automations: list[Automation],
     repo_root: Path,
     source: Path | None = None,
     flows: list[Flow] = (),
+    recordings: list[Path] = (),
+    openapi: list[Path] = (),
+    pages_dir: Path | None = None,
 ) -> AppModel:
-    """Every kind of evidence available for `app`, merged."""
+    """Every kind of evidence available for `app`, merged.
+
+    `recordings` are recording folders or bare `.har` files; their value-free page snapshots are
+    written to `pages_dir` when it is given (normally `apps/<app>/pages/`). `openapi` are OpenAPI
+    3.x descriptions or Postman v2.1 collections.
+    """
     parts = [mb.from_automations(app, automations), mb.from_flows(app, list(flows))]
     if source is not None:
         parts.append(mb.from_source(app, source, repo_root))
+    parts += [mb.from_recording(app, Path(p), repo_root, pages_dir) for p in recordings]
+    parts += [mb.from_openapi(app, Path(p)) for p in openapi]
     return mb.merge(app, parts)
 
 
@@ -120,8 +164,11 @@ def build(
     source: Path | None = None,
     flows: list[Flow] = (),
     db_engine: str | None = None,
+    recordings: list[Path] = (),
+    openapi: list[Path] = (),
+    pages_dir: Path | None = None,
 ) -> Brief:
-    model = make_model(app, automations, repo_root, source, flows)
+    model = make_model(app, automations, repo_root, source, flows, recordings, openapi, pages_dir)
     return scope(app, system, model, db_engine)
 
 
@@ -166,6 +213,8 @@ def scope(app: str, system: str, model: AppModel, db_engine: str | None = None) 
                 status, detail = mb.check_selector(
                     el.selector, set(screen.ids), set(screen.classes)
                 )
+            elif screen.snapshots == 0:
+                status, detail = "unchecked", "recorded by address only; no page content"
             else:
                 status, detail = "unchecked", "no recording or source of this screen"
             views.append(
@@ -173,7 +222,7 @@ def scope(app: str, system: str, model: AppModel, db_engine: str | None = None) 
                     el.selector, el.label, el.actions, _by(el.from_), el.basis, status, detail
                 )
             )
-        brief.screens.append(ScreenScope(screen, reasons, views))
+        brief.screens.append(ScreenScope(screen, reasons, views, screen_mode(model, screen)))
         for call in screen.calls:
             route = route_for(call.method, call.path)
             where = f"{call.at.file}:{call.at.line}" if call.at else screen.name
@@ -286,14 +335,23 @@ def schema(brief: Brief, repo_root: Path) -> str:
 
 def app_yaml(brief: Brief, repo_root: Path) -> dict:
     stack: dict = {"db": {"engine": brief.db_engine}}
-    if brief.model.stack.frontend:
-        stack["frontend"] = {k: v for k, v in brief.model.stack.frontend.items() if v is not None}
+    front = brief.model.stack.frontend or {}
+    if front.get(
+        "framework"
+    ):  # the fields the app.yaml contract has; the marker stays in the model
+        stack["frontend"] = {
+            "framework": front["framework"],
+            "version": front.get("version") or "unknown",
+        }
+        if front.get("ui_library"):
+            stack["frontend"]["ui_library"] = front["ui_library"]
     if brief.model.stack.backend:
         stack["backend"] = brief.model.stack.backend
     source = brief.source
     return {
         "id": brief.app,
         "name": f"{brief.system} (demo copy)",
+        "mode": brief.mode,
         "copies": {
             "system": brief.system,
             "source": source.id.split(":", 1)[1] if source else None,
@@ -325,6 +383,7 @@ def render(brief: Brief, repo_root: Path) -> str:
     for ev in model.evidence:
         w(f"| Evidence | `{ev.id}` ({ev.kind}{', ' + ev.ref if ev.ref else ''}) |")
     w(f"| Needed by | {', '.join(f'`{a}`' for a in brief.needed_by)} |")
+    w(f"| Mode | **{brief.mode}**: {MODES[brief.mode]} |")
     w(f"| Generated | {date.today().isoformat()} |")
     w("| Reviewed by | *nobody yet* |\n")
     w("Basis, on every item: **observed** (seen in a recording or the real code), **declared** (an "
@@ -357,8 +416,33 @@ def render(brief: Brief, repo_root: Path) -> str:
                 "and say which in BUILD-NOTES.md, unless the reviewer has named the version the real "
                 "application runs.\n"
             )
-    else:
+    elif not (model.stack.frontend or {}).get("marker"):
         w(f"No evidence shows the stack. Use {DEFAULT_STACK}; database: {brief.db_engine}.\n")
+    front = model.stack.frontend or {}
+    if front.get("marker"):
+        name = " ".join(str(front[k]) for k in ("framework", "version") if front.get(k))
+        w(f"Front end: **{name}**, read from the recording ({front['marker']}). Build the screens "
+          "with it, so they render the same elements.")  # fmt: skip
+        if not model.stack.backend:
+            w("No evidence shows the backend: use FastAPI (the lab default) and say so in "
+              f"BUILD-NOTES.md; database: {brief.db_engine}.")  # fmt: skip
+        w("")
+
+    w("## Build mode\n")
+    w(f"This app is a **{brief.mode}**: {MODES[brief.mode]}. A bot that passes on it has been "
+      "shown to work only as far as that evidence goes.\n")  # fmt: skip
+    if brief.screens:
+        w("| Screen | Mode |\n|---|---|")
+        for sc in brief.screens:
+            w(f"| `{sc.screen.path or sc.screen.name}` | {sc.mode} |")
+        w("")
+        others = [
+            m for m in FIDELITY if m != brief.mode and any(s.mode == m for s in brief.screens)
+        ]
+        for mode in others:
+            w(f"- **{mode}**: {MODES[mode]}.")
+        if others:
+            w("")
 
     w("## In scope\n")
     w("### Screens\n")
@@ -369,8 +453,11 @@ def render(brief: Brief, repo_root: Path) -> str:
                      f"`{screen.component}` in `{screen.files[0] if screen.files else '?'}`")  # fmt: skip
         else:
             where = "known only from " + ", ".join(f"`{f}`" for f in screen.from_)
-        w(f"**{screen.path or '(path unknown)'}** ({screen.name}, {screen.basis}; "
+        w(f"**{screen.path or '(path unknown)'}** ({screen.name}, {screen.basis}, {scope.mode}; "
           f"{'; '.join(scope.reasons)}): {where}\n")  # fmt: skip
+        if screen.snapshots == 0:
+            w("Recorded by address only: no page content was captured, so its elements are "
+              "unknown. Do not invent them as if they were observed.\n")  # fmt: skip
         w("| Element | Used for | By | Basis | In evidence |\n|---|---|---|---|---|")
         for el in scope.elements:
             mark = {"found": "yes", "missing": "**missing**", "unchecked": "not checked"}[el.status]
@@ -402,6 +489,17 @@ def render(brief: Brief, repo_root: Path) -> str:
             details.append("query: " + ", ".join(f"`{q}`" for q in route.query))
         if route.body:
             details.append("body: " + "; ".join(f"`{b}`" for b in route.body))
+        if route.responses:
+            details.append("responses: " + ", ".join(f"`{s}`" for s in route.responses))
+            ok = next((v for k, v in route.responses.items() if k.startswith("2") and v), None)
+            if ok:
+                fields = ok["[]"] if isinstance(ok.get("[]"), dict) else ok
+                details.append("fields: " + ", ".join(f"`{f}`" for f in fields)
+                               + " (shapes in `model.yaml`)")  # fmt: skip
+        if route.timings:
+            t = route.timings
+            details.append(f"recorded {t.count} call(s): p50 {t.p50_ms} ms, p95 {t.p95_ms} ms, "
+                           f"max {t.max_ms} ms")  # fmt: skip
         if details:
             w(f"- `{key}`: " + ". ".join(details))
     w("")
@@ -414,10 +512,23 @@ def render(brief: Brief, repo_root: Path) -> str:
         where = (
             f"`{table.model}` ({table.at.file}:{table.at.line})"
             if table.at
+            else "columns and types inferred from recorded responses"
+            if table.basis == "inferred"
             else "column types assumed"
         )
         w(f"| `{name}` | {table.basis} | {where} | {'; '.join(reasons)} |")
     w("")
+
+    codes = {k: v for k, v in model.codes.items() if k.split(".", 1)[0] in brief.tables}
+    if codes:
+        w("### Code lists\n")
+        w(
+            "Values seen in the evidence. Use the same codes; add others only if a person names them.\n"
+        )
+        w("| Field | Codes |\n|---|---|")
+        for key, values in codes.items():
+            w(f"| `{key}` | {', '.join(f'`{v}`' for v in values)} |")
+        w("")
 
     w("### Rules\n")
     w(

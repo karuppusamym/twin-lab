@@ -222,6 +222,7 @@ class Link(Contract):
 class App(Contract):
     id: Slug
     name: str
+    mode: str | None = None  # copy | reconstruction | skeleton | backend | sample (06-evidence.md)
     copies: Copies
     stack: Stack
     run: Run

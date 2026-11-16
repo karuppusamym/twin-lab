@@ -17,3 +17,7 @@ evidence/
 *.har
 twinlab.local.yaml
 .lab-state/
+
+# Synthetic recording of the showcase demo copy, kept as a test fixture (no real data).
+!lab/labctl/tests/fixtures/showcase-rec/
+!lab/labctl/tests/fixtures/showcase-rec/**

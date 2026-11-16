@@ -62,6 +62,12 @@ class Element(Item):
     selector: str | None = None  # None for a field a person described but nobody located
     label: str | None = None
     actions: list[str] = []
+    # Seen in a page snapshot (recordings): what the element is, never what it held.
+    tag: str | None = None
+    name: str | None = None
+    type: str | None = None
+    classes: list[str] = []
+    options: list[str] = []  # option texts of a select
 
 
 class Call(Contract):
@@ -81,6 +87,14 @@ class Screen(Item):
     classes: list[str] = []  # every class seen on the screen
     elements: list[Element] = []  # elements somebody needs
     calls: list[Call] = []  # API calls the screen makes
+    snapshots: int | None = None  # recordings: page snapshots seen; 0 means address only
+
+
+class Timing(Contract):
+    count: int
+    p50_ms: int
+    p95_ms: int
+    max_ms: int
 
 
 class Route(Item):
@@ -92,6 +106,8 @@ class Route(Item):
     query: list[str] = []
     body: list[str] = []  # request body fields with their constraints
     tables: list[str] = []
+    responses: dict[str, dict] = {}  # status -> response shape (field -> type, "[]" for items)
+    timings: Timing | None = None  # recordings: for slowness calibration
 
     @property
     def key(self) -> str:
@@ -147,6 +163,7 @@ class AppModel(Contract):
     tables: list[Table] = []
     rules: list[Rule] = []
     flows: list[str] = []
+    codes: dict[str, list[str]] = {}  # "entity.field" -> code values seen (low cardinality only)
     conflicts: list[Conflict] = []
     problems: list[str] = []
 
