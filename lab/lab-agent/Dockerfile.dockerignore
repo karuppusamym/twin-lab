@@ -1,0 +1,6 @@
+# Build context is the repository root; send only what the image copies.
+*
+!lab/lab-agent/requirements.txt
+!lab/lab-agent/lab_agent/**
+!lab/labctl/labctl/**
+**/__pycache__
