@@ -55,11 +55,58 @@ it, slows it down and records a run. Uses a showcase app, not QTT.
   to an AI coding agent; it opens a pull request adding `apps/showcase/`.
   DoD: the app builds and runs from its Dockerfile; record how many rounds of correction it took
   and what the agent got wrong.
-  *Done in 2 rounds, see `apps/showcase/BUILD-LOG.md`. No pull request: the folder is not a Git
-  repository yet, so the PR text sits at the end of `BUILD-NOTES.md`.*
+  *Done in 2 rounds, see `apps/showcase/BUILD-LOG.md`. Pull request:
+  https://github.com/karuppusamym/twin-lab/pull/1.*
+
+### Building without source (added 2026-11-15)
+
+Real source code will usually not be available ([06-evidence.md](06-evidence.md)). T-05 covers
+the case where it is. These items cover the rest, proven on the reference app by giving the
+factory less and less evidence and measuring what is lost.
+
+- [ ] **E-01 App model with provenance** · M
+  Contract for `apps/<app>/model.yaml` (screens, elements, flows, routes with shapes, tables,
+  rules, stack; each item with its evidence and basis) and for `flows/<id>.yaml`. The source
+  analysers of T-05 write into the model; `labctl brief` reads only the model; conflicts between
+  kinds of evidence become open questions. Scope accepts requested flows as well as automations.
+  DoD: the showcase brief generated through the model is the same as the T-05 brief, apart from
+  added basis labels; two kinds of evidence that disagree on a selector produce an open question,
+  not a silent choice.
+
+- [ ] **E-02 HAR analyser** · L
+  HAR 1.2 -> model: pages from captured HTML (elements, ids, classes, labels, framework and
+  version markers), API routes with request and response shapes, status codes and error bodies
+  (as `observed` rules), timings, and tables `inferred` from payloads. Drops cookies and
+  credential headers at once; keeps shapes and code lists, never values.
+  DoD: a HAR recorded by a scripted browser run through the reference app yields every screen,
+  selector and route the source analysis finds on the paths recorded; a test asserts that no
+  recorded customer value, cookie or token appears anywhere in the model.
+
+- [ ] **E-03 Flow descriptions, DDL and API descriptions** · M
+  `flows/<id>.yaml` -> `described` items; DDL -> tables; OpenAPI and Postman collections ->
+  routes. Mode label (copy, reconstruction, skeleton, backend only, sample) per screen and per
+  app, written into the brief and `app.yaml`. Screenshots are listed in the brief for the
+  builder, not parsed.
+  DoD: a brief from a flow description alone is labelled `sample` throughout; a brief from DDL
+  and a database-only automation is labelled `backend` and has no screens.
+
+- [ ] **E-04 Evidence ablation on the reference app** · M
+  Produce every kind of evidence from the reference app (source, HAR, DDL, OpenAPI, flow
+  description, screenshots) and generate briefs from these subsets: source; HAR + automation;
+  automation only; flow description + screenshots; DDL + database automation. Compare each with
+  the source brief.
+  DoD: a table in `docs/` of what each subset finds and misses (screens, selectors, routes,
+  tables, rules), which becomes the stated fidelity of each mode.
+
+- [ ] **E-05 Second build, without source** · L
+  Hand the HAR + automation brief to a fresh coding agent; build `apps/showcase-har/` with no
+  access to `reference/`. Review with the same independent checks as T-06.
+  DoD: built and running; the review result, the rounds of correction and the differences from
+  the source-built app recorded in its `BUILD-LOG.md`.
 
 - [ ] **T-07 Conformance check** · M
   `labctl conformance <automation>`: selectors in a headless browser, routes, tables and columns.
+  Reports, per automation, how many checked items are `observed` versus `assumed` (E-01).
   DoD: READY for the showcase automation; renaming one element id in the demo app gives BLOCKED
   naming that selector and screen.
 
@@ -140,15 +187,19 @@ it, slows it down and records a run. Uses a showcase app, not QTT.
 
 ## Milestone 3: QTT
 
-Needs answers to questions 1 to 6 in `05-open-questions.md`.
+Needs answers to questions 1 to 6 in `05-open-questions.md`. Source code is not expected, so QTT
+is built from evidence (E-01 to E-05).
 
 - [ ] **T-23 QTT automation inventory** · M
-  Register every automation that touches QTT, analyse, review gaps with their owners.
-  DoD: demand report for QTT reviewed by someone who knows the automations.
+  Register every automation that touches QTT whose code is shared; write a flow file for each
+  one whose code is not. Review gaps with their owners.
+  DoD: demand report for QTT, from automations and flows, reviewed by someone who knows them.
 
-- [ ] **T-24 QTT source analysis and brief** · L
-  Add stack support to T-05 if QTT's differs.
-  DoD: brief reviewed by someone who knows QTT; schema generated; rule list written, all `hypothesis`.
+- [ ] **T-24 QTT evidence and brief** · L
+  Collect HAR recordings of every QTT flow (from an agreed environment, stored in the evidence
+  store), screenshots, DDL and any API description; analyse into the QTT model.
+  DoD: brief reviewed by someone who knows QTT; every screen labelled with its mode; schema
+  generated; rule list written, all `hypothesis`; no raw evidence in the repository.
 
 - [ ] **T-25 QTT demo app build** · L (likely several rounds)
   DoD: all QTT automations READY, or each remaining gap listed with an owner.

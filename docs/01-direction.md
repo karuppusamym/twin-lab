@@ -18,9 +18,11 @@ real target. That changes three things:
 - **The demo app must look and behave like the real application**, in its own framework. Application
   Twin Studio's generic pages do not, and one engine cannot host a React 16 app and an Angular 14 app
   with their real DOM and selectors.
-- **We cannot wait for production capture approvals.** Prod Echo's first real output sits behind
-  weeks of tickets. The real app's *source code* is a faster and richer starting point: the backend
-  code gives the tables and the rules, the frontend code gives the screens and selectors.
+- **We cannot wait for production capture approvals, and we will not get source code.** Prod
+  Echo's first real output sits behind weeks of tickets, and access to the real applications'
+  source is not expected. Each app is built from whatever evidence exists: automation code, HAR
+  recordings, database schema, API descriptions, screenshots, a person's description of the
+  flow, and source when there happens to be some. See [06-evidence.md](06-evidence.md).
 - **The platform should not be the place automations run.** Automations are triggered manually, where
   they live. The platform builds, hosts and controls the apps.
 
@@ -32,8 +34,9 @@ So Twin Lab is a third thing: **a factory and a control room for real demo apps*
 |---|---|---|
 | 1 | What automations are there; onboarding | **Automation registry** is the entry point. Every automation gets an `automation.yaml` and an analysis of what it touches. |
 | 2 | Demo app build and check in to GitHub; UiPath, agentic, Python; "we need to know the automation, else no point building the demo app" | **Demand-driven scope**: the build brief for an app is the union of what its registered automations touch. No registered automation, no app. |
-| 2 | Source code repo; Devin / Copilot build; where saved and hosted | **App factory**: an AI coding agent reads the real source repo plus the build brief and opens a pull request into `apps/<app>/`. Saved in the monorepo; hosted as a container per app. |
-| 2 | DB tables can be retrieved from backend code; tables for the UI derived from the backend | Source analysis step extracts entities, migrations and SQL into `db/schema.sql`, and DTOs and routes into the API surface. The UI is built against those. |
+| 2 | Source code repo; Devin / Copilot build; where saved and hosted | **App factory**: evidence of every kind is analysed into one app model; an AI coding agent builds from the brief generated from it and opens a pull request into `apps/<app>/`. Saved in the monorepo; hosted as a container per app. |
+| 2 | DB tables can be retrieved from backend code; tables for the UI derived from the backend | Tables come from whichever evidence has them: backend code if any, DDL, SQL in automations, or inferred from API responses in a HAR. The UI is built against those. |
+| — | No access to real source code; sometimes a HAR, sometimes no automation code, sometimes only a description of the flow, sometimes database and API automations only | **Evidence-driven factory** with five build modes (copy, reconstruction, skeleton, backend only, sample), chosen per item by the evidence available, each labelled. Scope comes from automations or from requested flows. See [06-evidence.md](06-evidence.md). |
 | 2 | Host each app, CI/CD per app; why not a single app | **One container and one pipeline per app.** Reasons in "Why not one app" below. |
 | 3 | Automation mapped to application after the demo app is built | **Conformance check**: each automation's selectors, routes and tables are tested against the built app; result is READY or BLOCKED with the gaps listed. |
 | 4 | Triggered manually, but app controlled from the portal | Portal never executes automations. It controls apps through a **lab agent** beside each app: reset, data, conditions, recording. |
@@ -76,8 +79,8 @@ for every app, keep that cost flat.
 | Baselines, reset, lease (I-23, I-25) | **Kept, simplified** | Baseline = a loaded data pack; reset returns to it. Leases only if two people share an app. |
 | Keyed deterministic masking (I-17, ADR-003) | **Kept, optional** | Applies only when a bring-your-own pack came from real data. |
 | Cross-app identity `links` in the subset spec | **Kept** | A data pack that spans apps is validated against them. |
-| Behaviour from evidence (ADR-008) | **Changed** | Behaviour now comes from reading the real source, not from before/after snapshots. |
-| NetLog, CDP recorder, screen capture (I-03 to I-06) | **Optional evidence** | Useful input to a build brief when available. Not a prerequisite. |
+| Behaviour from evidence (ADR-008) | **Kept, widened** | Behaviour comes from whatever evidence exists: source when available, otherwise recordings, automations and descriptions, each item labelled with its basis. |
+| NetLog, CDP recorder, screen capture (I-03 to I-06) | **Back in, as HAR** | A HAR recording is one of the main inputs when there is no source. Capture tooling is optional; a HAR saved from browser developer tools is enough. |
 | DOM-to-template app generator (I-19 to I-22) | **Dropped** | Replaced by AI-built apps in the native framework. |
 | Schema inventory, value binding, closure, extractor, Synapse (I-10 to I-16) | **Dropped for now** | Production data extraction is out of scope. Returns if a real-data environment is wanted later. |
 | Parity against a production bot trace (I-24) | **Deferred** | Sessions record what an automation did; comparing two sessions is a later item. |
@@ -89,6 +92,7 @@ for every app, keep that cost flat.
 | Piece | Fate | Note |
 |---|---|---|
 | UiPath importer (`ats/importers/uipath.py`) | **Reused** | Safe static XAML parsing; start of the UiPath analyser. |
+| YAML specs written from descriptions | **Reused as an idea** | A flow written down by a person is evidence of basis `described`, for sample apps. |
 | Onboarding gaps and READY / BLOCKED (`ats/onboarding.py`) | **Reused as a concept** | Now checked against a running demo app. |
 | Bindings contract (`ATS_BINDINGS`, `ats/sdk.py`) | **Reused** | How an automation learns the demo app's URLs and credentials. |
 | Fault injection, isolation per environment | **Reused as a concept** | Moves out of the engine into the lab agent. |
@@ -102,8 +106,11 @@ for every app, keep that cost flat.
 
 ## What a demo app is, and is not
 
-It **is** the real application's screens, selectors, API shapes and tables, in the real framework,
-with enough behaviour for the registered automations to complete, running on data we control.
+At best it **is** the real application's screens, selectors, API shapes and tables, in the real
+framework, with enough behaviour for the registered automations to complete, running on data we
+control. How close it gets depends on the evidence, and every part says what it was built from:
+a reconstruction from recordings is close; a skeleton from bot selectors only finds the bot's
+elements; a sample app built from a description is a demonstration of the flow, not a copy.
 
 It **is not** the real application. Business rules are reproduced only where an automation depends
 on them, each marked `hypothesis` until an application owner confirms it. A passing automation on a

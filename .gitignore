@@ -11,3 +11,7 @@ build/
 *.db
 *.db-shm
 *.db-wal
+
+# Raw evidence (HAR files, database exports, screenshots) may hold customer data.
+evidence/
+*.har
