@@ -32,15 +32,35 @@ def load_app(root: Path, app_id: str) -> App:
     return model
 
 
-def app_binding(app: App, host: str = LAB_HOST, db_password: str = "lab") -> AppBinding:
-    """Addresses a bot uses. The database login is `bot` (rows only, no superuser)."""
+def app_binding(
+    app: App, host: str = LAB_HOST, db_password: str = "lab", server=None
+) -> AppBinding:
+    """Addresses a bot uses. The database is reached through the lab agent's database port (so
+    slowdowns apply), with the bot's login: `bot` (rows only) for Twin Lab's own databases, the
+    bot account the DBA gave for a server of theirs. `server` is that server, when not Postgres."""
     if app.lab is None:
         raise BindingError(f"apps/{app.id}/app.yaml has no `lab:` section (port, db_port)")
     base = f"http://{host}:{app.lab.port}"
+    if server is not None:
+        return AppBinding(
+            web=base,
+            api=base,
+            db=server.url(bot=True, host=host, port=app.lab.db_port),
+            db_engine=server.engine,
+            db_connection_string=server.connection_string(
+                bot=True, host=host, port=app.lab.db_port
+            ),
+            credentials=dict(app.lab.credentials),
+        )
     return AppBinding(
         web=base,
         api=base,
         db=f"postgresql://bot:{db_password}@{host}:{app.lab.db_port}/{app.id}",
+        db_engine="postgresql",
+        db_connection_string=(
+            f"Host={host};Port={app.lab.db_port};Database={app.id};"
+            f"Username=bot;Password={db_password}"
+        ),  # fmt: skip
         credentials=dict(app.lab.credentials),
     )
 
@@ -48,12 +68,20 @@ def app_binding(app: App, host: str = LAB_HOST, db_password: str = "lab") -> App
 def for_automation(root: Path, automation: Automation, host: str | None = None) -> Bindings:
     """Bindings for a bot. `host` defaults to the remembered TWINLAB_HOST (for bots on other
     machines), else 127.0.0.1."""
-    from labctl import lab
+    from labctl import dbservers, lab
 
     host = host or lab.setting(root, "host")
     apps = {}
     for app_id in automation.apps():
-        apps[app_id] = app_binding(load_app(root, app_id), host, lab.bot_password(root))
+        app = load_app(root, app_id)
+        choice = dbservers.choice(app.lab.database if app.lab else None)
+        server = None
+        if choice != "postgres":
+            try:
+                server = lab.lab_server(root, app_id, choice)
+            except lab.LabError as exc:
+                raise BindingError(str(exc)) from exc
+        apps[app_id] = app_binding(app, host, lab.bot_password(root), server)
     return Bindings(apps=apps, inputs=dict(automation.test_inputs))
 
 

@@ -18,6 +18,9 @@ TAG = typer.Option(..., envvar="TWINLAB_TAG", help="Image tag (the pipeline uses
 NAMESPACE = typer.Option("twinlab", envvar="OCP_NAMESPACE", help="OpenShift project.")
 POSTGRES = typer.Option(ocp.POSTGRES_IMAGE, help="Postgres image (restricted-SCC friendly).")
 PULL_SECRET = typer.Option(None, help="Image pull secret name, for a private registry.")
+EXPOSE_DB = typer.Option(
+    False, help="Also put the database link on a NodePort, for bots outside the cluster."
+)
 
 
 def _root() -> Path:
@@ -42,12 +45,13 @@ def render_cmd(
     out: Path = typer.Option(None, help="Folder for one YAML file per object. Default: stdout."),
     postgres_image: str = POSTGRES,
     pull_secret: str = PULL_SECRET,
+    expose_db: bool = EXPOSE_DB,
 ) -> None:
     """Write the manifests (no secret values in them). Apply with `oc apply -f DIR`."""
     try:
         docs = ocp.render(
             _root(), app_id, registry=registry, tag=tag, namespace=namespace,
-            postgres_image=postgres_image, pull_secret=pull_secret,
+            postgres_image=postgres_image, pull_secret=pull_secret, expose_db=expose_db,
         )  # fmt: skip
     except (ocp.OcpError, BindingError) as exc:
         raise _fail(exc) from exc
@@ -70,6 +74,7 @@ def deploy_cmd(
     namespace: str = NAMESPACE,
     postgres_image: str = POSTGRES,
     pull_secret: str = PULL_SECRET,
+    expose_db: bool = EXPOSE_DB,
     timeout: int = typer.Option(600, help="Seconds to wait for each rollout."),
     smoke: bool = typer.Option(True, help="Check the Route's health at the end."),
     insecure_tls: bool = typer.Option(
@@ -82,7 +87,7 @@ def deploy_cmd(
         url = ocp.deploy(
             _root(), app_id, registry=registry, tag=tag, namespace=namespace,
             postgres_image=postgres_image, pull_secret=pull_secret, timeout=timeout,
-            smoke_check=smoke, verify_tls=not insecure_tls, log=typer.echo,
+            smoke_check=smoke, verify_tls=not insecure_tls, expose_db=expose_db, log=typer.echo,
         )  # fmt: skip
     except (ocp.OcpError, BindingError) as exc:
         raise _fail(exc) from exc

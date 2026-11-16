@@ -15,7 +15,10 @@ Full playbook for building a demo app: [docs/factory-playbook.md](docs/factory-p
   app: they are the checks that judge it.
 - CI enforces the rules on approvals, generated files and checks with
   `tools/guard_ai_changes.py` on branches `devin/...` and pull requests labelled `ai-built`.
-- One `Dockerfile` per app; the app reads its database address from the environment.
+- One `Dockerfile` per app; the app reads its database address from the environment (Postgres,
+  SQL Server or Oracle; `DB_ENGINE` says which). A view in `db/schema.sql` is a table in the demo
+  database.
+- Enhancing an app that is already built: change what the new brief adds, keep everything else.
 - Record what you did, what you assumed and what you could not check in `apps/<app>/BUILD-NOTES.md`.
 
 ## Before opening a pull request

@@ -246,6 +246,9 @@ class Lab(Contract):
     port: int = Field(gt=0, lt=65536)  # the lab agent: the app's front door
     db_port: int = Field(gt=0, lt=65536)  # the database, through the slowdown proxy
     credentials: dict[str, str] = {}  # test values only, e.g. username/password from the seed
+    # Where the database lives: "postgres" (Twin Lab's container, the default), "sqlserver"
+    # (Twin Lab's SQL Server container), or the name of a server in twinlab.local.yaml.
+    database: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][\w.-]*$")
 
 
 class App(Contract):
@@ -392,7 +395,9 @@ class Session(Contract):
 class AppBinding(Contract):
     web: str | None = None
     api: str | None = None
-    db: str | None = None
+    db: str | None = None  # a database URL (Python bots: SQLAlchemy, psycopg ...)
+    db_engine: str | None = None  # postgresql | mssql | oracle
+    db_connection_string: str | None = None  # ADO.NET style, for UiPath and .NET bots
     credentials: dict[str, str] = {}
 
 

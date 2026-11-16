@@ -53,7 +53,17 @@ person, not edited by you.
 5. **Database from `db/schema.sql`.** Table and column names exactly as there, on the engine the
    brief names. The database is a server outside the container (the lab slows it down through a
    proxy), so include its driver and read its address from the environment variable the brief
-   names. Create the tables from `db/schema.sql` when the database has none.
+   names. Create the tables from `db/schema.sql` when the database has none (the lab may already
+   have created them). The engine can be Postgres, SQL Server or Oracle; the lab also sets
+   `DB_ENGINE`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_SERVICE`, `DB_USER`, `DB_PASSWORD` and
+   `DB_CONNECTION_STRING` (ADO.NET), so a .NET app reads its connection string as it is.
+   A **view** in the schema is a **table** of that name in the demo database: read and write it as
+   a table and never re-create its query. Stored procedures, functions and triggers are not in the
+   demo database; if an in-scope path calls one, write its effect in the app and say so in
+   `BUILD-NOTES.md`.
+   **Enhancing an app that already exists** (its `Dockerfile` is on main): change only what the
+   new brief adds or changes, keep every existing selector, route and field, and say in
+   `BUILD-NOTES.md` what changed and why.
 6. **Health route** at the path the brief states. It answers 200 only when the database is
    reachable, because the lab uses it to tell a broken app from a slow one.
 7. **One container.** One `Dockerfile` in `apps/<app>/` that builds the front end and serves it

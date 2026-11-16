@@ -26,6 +26,7 @@ from lab_agent.dbproxy import DbLinkProxy
 from lab_agent.httpproxy import HttpProxy, send_json
 from lab_agent.schema import tables_in_ddl
 from lab_agent.sessions import SessionStore, iso, utcnow
+from lab_agent.sqldb import SqlDatabase, engine_of
 from lab_agent.store import read_json, remove, write_json
 
 log = logging.getLogger("lab_agent")
@@ -106,11 +107,13 @@ class LabAgent:
         if settings.schema_path and settings.schema_path.is_file():
             only = tables_in_ddl(settings.schema_path) or None
         self.known_tables = {t.lower() for t in only or []}
-        self.database = (
-            Database(settings.admin_database_url, settings.db_schema, only)
-            if settings.admin_database_url
-            else None
-        )
+        self.engine_name = engine_of(settings.admin_database_url or "postgresql://")
+        self.database: Database | SqlDatabase | None = None
+        if settings.admin_database_url and self.engine_name in ("mssql", "oracle"):
+            schema_name = settings.db_schema if settings.db_schema != "public" else None
+            self.database = SqlDatabase(settings.admin_database_url, schema_name, only)
+        elif settings.admin_database_url:
+            self.database = Database(settings.admin_database_url, settings.db_schema, only)
         self.proxy: HttpProxy | None = None
         self.admin = Starlette(routes=self._routes(), lifespan=self._lifespan)
 
@@ -151,7 +154,9 @@ class LabAgent:
                 s.db_upstream_addr,
                 lambda: self.engine.db_link,
                 self.engine.db_rng,
-                on_sql=self._on_sql,
+                # Statement text is read from the Postgres wire protocol only; SQL Server (TDS)
+                # and Oracle (Net) are passed through untouched.
+                on_sql=self._on_sql if self.engine_name == "postgresql" else None,
             )
             await self.db_proxy.start("0.0.0.0", s.db_proxy_port)
             log.info("db link proxy on :%s -> %s", s.db_proxy_port, s.db_upstream)

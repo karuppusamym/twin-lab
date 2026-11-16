@@ -131,6 +131,8 @@ In the repository: **Settings** > **Secrets and variables** > **Actions**.
 | Variable | `OCP_NAMESPACE` | the project name (default `twinlab` when not set) |
 | Variable (optional) | `OCP_INSECURE_TLS` | `true` only if the cluster's certificates are self-signed |
 | Variable (optional) | `OCP_PULL_SECRET` | the pull secret name, if you use one (2.4) |
+| Variable (optional) | `OCP_EXPOSE_DB` | `true` to give bots outside the cluster the database link on a NodePort (section 7) |
+| Secret (optional) | `TWINLAB_DATABASES` | the DBA-provided servers, as the `databases:` YAML of `twinlab.local.yaml` with passwords written in (section 2.5) |
 
 The secrets can also be set on the **ocp** environment (**Settings** > **Environments** > **ocp**).
 That environment is where to add **required reviewers**, so every deploy waits for an approval.
@@ -163,6 +165,27 @@ oc secrets link default ghcr-pull --for=pull -n twinlab
 
 Linking it to the `default` service account is enough. Alternatively set the variable
 `OCP_PULL_SECRET` to `ghcr-pull` and every pod names it.
+
+### 2.5 Apps on a DBA's SQL Server, Oracle or Postgres server
+
+An app whose `lab.database` names a server (see [office-setup.md](office-setup.md), "Which
+database a demo app runs on") gets no database pod. Instead:
+
+- the secret `TWINLAB_DATABASES` holds the servers (the pipeline reads it; by hand, set the same
+  environment variable or have them in `twinlab.local.yaml`):
+
+  ```yaml
+  qtt-sqlserver: {engine: mssql, host: sqldemo01.office.local, database: TWINLAB_QTT, owner_user: tl_owner, owner_password: "...", bot_user: tl_bot, bot_password: "..."}
+  ```
+
+- each deploy writes the Secret `twinlab-<app>-dbconn` (owner and bot addresses, the app's
+  connection string) from it, so changing a password is: update `TWINLAB_DATABASES`, deploy again;
+- the Job `twinlab-<app>-db-tables` (in the lab-agent image) creates the tables from the app's
+  `db/schema.sql`, leaving existing ones alone;
+- the cluster must reach the server's port (ask for a firewall rule from the project's nodes).
+
+No password is written in a manifest. The built-in `sqlserver` choice is for local labs only;
+`labctl ocp render` refuses it.
 
 ## 3. How the pipeline runs
 
@@ -294,8 +317,11 @@ setup Job sets the owner and `bot` passwords. Not tried on a real cluster.
   login; that admin login uses the same `db-password`). The lab agent then loads data with the
   tables' triggers left on, which it already handles; a data pack whose tables refer to each other
   in a circle may load differently from the local lab.
-- **Bots outside the cluster** reach the app through the Route (HTTPS), but not the database link
-  (section 1). A `NodePort` or `LoadBalancer` service for port 15432 would be a separate decision
-  for the cluster admin.
+- **Bots outside the cluster** reach the app through the Route (HTTPS). The database link (port
+  15432, through the agent so conditions apply) is inside the cluster only, unless the variable
+  `OCP_EXPOSE_DB` is `true` (by hand: `--expose-db`): then the Service
+  `twinlab-<app>-db-external` puts it on a NodePort of every node
+  (`oc get svc twinlab-<app>-db-external` shows the port). Bots then use the node's address and
+  that port with the `bot` login. Ask the cluster admin first: it opens the port to the network.
 - **The portal** runs where you start it and talks to the local labs; it does not manage the labs on
   OpenShift yet.

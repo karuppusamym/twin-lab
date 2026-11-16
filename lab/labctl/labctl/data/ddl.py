@@ -464,6 +464,8 @@ _CREATE_OTHER = {"VIEW", "MATERIALIZED", "FUNCTION", "PROCEDURE", "PROC", "TRIGG
                  "SYNONYM", "RULE", "POLICY", "EVENT", "AGGREGATE", "OPERATOR", "CAST",
                  "TEXT", "FOREIGN", "ASSEMBLY", "FULLTEXT", "XML"}  # fmt: skip
 _OBJECTS = {"TABLE", "INDEX", "TYPE", "DOMAIN"} | _CREATE_SILENT | _CREATE_OTHER
+_VIEW_KEYWORDS = {"ON", "WHERE", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS",
+                  "GROUP", "ORDER", "HAVING", "UNION", "WITH", "LIMIT", "AS", "FROM", "USING"}  # fmt: skip
 _NOT_TYPES = {"NOT", "NULL", "PRIMARY", "UNIQUE", "REFERENCES", "DEFAULT", "CHECK", "CONSTRAINT",
               "GENERATED", "COLLATE"}  # fmt: skip
 _TABLE_CONSTRAINT = {"CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "EXCLUDE", "LIKE",
@@ -493,6 +495,7 @@ class _Parser:
         self.refs: dict[tuple[str, str], tuple[str, str | None]] = {}
         self.aliases: dict[str, str] = {}  # enum and domain types -> our type
         self.problems: list[str] = []
+        self.views: list[tuple[list[Tok], int, int]] = []  # read after every table is known
         self.row_statements = 0
         self.text = _drop_copy_data(text)
 
@@ -509,6 +512,11 @@ class _Parser:
                 self.statement(nested, line)
             except Exception as exc:  # never let one odd statement stop the import
                 self.problem(line, f"skipped: could not read {_preview(stmt)} ({exc})")
+        for toks, i, line in self.views:
+            try:
+                self.create_view(toks, i, line)
+            except Exception as exc:  # noqa: BLE001
+                self.problem(line, f"skipped: could not read view {_preview(toks)} ({exc})")
         if self.row_statements:
             self.problems.append(
                 f"{self.row_statements} statement(s) with rows (INSERT, COPY) skipped: "
@@ -558,10 +566,17 @@ class _Parser:
             self.create_domain(toks, i + 1, line)
         elif what in _CREATE_SILENT:
             pass
+        elif what == "VIEW" or (what == "MATERIALIZED" and _up(toks, i + 1) == "VIEW"):
+            self.views.append((toks, i + 1 if what == "VIEW" else i + 2, line))
         elif what in _CREATE_OTHER:
             name, _ = _qualified(toks, i + 1 if what != "MATERIALIZED" else i + 2)
-            self.problem(line, f"skipped: CREATE {what} {name or ''}".rstrip() + " (only tables "
-                         "are read)")  # fmt: skip
+            if what in ("PROCEDURE", "PROC", "FUNCTION", "TRIGGER", "PACKAGE"):
+                self.problem(line, f"{what.lower()} {name or ''} is not created in the demo "
+                             "database: its logic is not copied. A bot that calls it directly "
+                             "needs it written by hand, or the app's API instead")  # fmt: skip
+            else:
+                self.problem(line, f"skipped: CREATE {what} {name or ''}".rstrip() + " (only "
+                             "tables and views are read)")  # fmt: skip
         else:
             self.problem(line, f"skipped: {_preview(toks)} not understood")
 
@@ -589,6 +604,103 @@ class _Parser:
                 col = self.column_def(table.name, item, at)
                 if col:
                     self.add_column(table, col, at)
+
+    def create_view(self, toks: list[Tok], i: int, line: int) -> None:
+        """A view becomes a table of the same name and columns, filled with sample data like any
+        other table: a bot that reads the view gets rows, and nothing needs the tables behind it.
+        A column is typed like the table column it selects, when that can be seen; otherwise TEXT.
+        """
+        if _up(toks, i) == "IF":
+            i += 3
+        name, i = _qualified(toks, i)
+        if name is None:
+            self.problem(line, f"skipped: no view name in {_preview(toks)}")
+            return
+        declared: list[str] = []
+        if i < len(toks) and toks[i].kind == "group":  # CREATE VIEW v (a, b) AS ...
+            declared = [n for n in _column_list(toks[i].value) if n]
+            i += 1
+        start = next((k for k in range(i, len(toks)) if toks[k].up == "SELECT"), None)
+        if start is None:
+            self.problem(line, f"view {name}: no SELECT found; left out")
+            return
+        end = next((k for k in range(start + 1, len(toks)) if toks[k].up == "FROM"), len(toks))
+        sources = self._view_sources(toks[end + 1 :])
+        items = [p for p in _split(toks[start + 1 : end]) if p]
+        if items and items[0][0].up in ("DISTINCT", "ALL", "TOP"):
+            items[0] = items[0][1:] if items[0][0].up != "TOP" else items[0][2:]
+        cols: list[tuple[str, str]] = []
+        for item in items:
+            cols += self._view_item(item, sources)
+        if declared:
+            cols = [(d, cols[k][1] if k < len(cols) else "TEXT") for k, d in enumerate(declared)]
+        if not cols:
+            self.problem(line, f"view {name}: no columns could be read; left out")
+            return
+        if self.find_table(name) is not None:
+            self.problem(line, f"view {name} has the name of a table; the view is left out")
+            return
+        table = Table(name=name, model=name, file=None, line=line,
+                      note=f"stands in for the view {name}: a table with its columns, filled "
+                           "with sample data")  # fmt: skip
+        seen: set[str] = set()
+        for cname, ctype in cols:
+            if cname.lower() in seen:
+                continue
+            seen.add(cname.lower())
+            table.columns.append(Column(name=cname, type=ctype, nullable=True))
+        self.tables[name] = table
+        self.problems.append(f"line {line}: view {name} becomes a table with its "
+                             f"{len(table.columns)} column(s); load sample rows into it")  # fmt: skip
+
+    def _view_sources(self, toks: list[Tok]) -> dict[str, Table]:
+        """FROM / JOIN tables with their aliases: alias (or name) -> table."""
+        out: dict[str, Table] = {}
+        k = 0
+        while k < len(toks):
+            if toks[k].up in ("FROM", "JOIN") or (k == 0 and toks[k].name):
+                j = k + 1 if toks[k].up in ("FROM", "JOIN") else k
+                tname, j = _qualified(toks, j)
+                table = self.find_table(tname)
+                if table is not None:
+                    out[tname.lower()] = table
+                    if _up(toks, j) == "AS":
+                        j += 1
+                    alias = (
+                        toks[j].name
+                        if j < len(toks) and toks[j].kind in ("word", "ident")
+                        else None
+                    )
+                    if alias and (toks[j].up or "") not in _VIEW_KEYWORDS:
+                        out[alias.lower()] = table
+                k = j
+                continue
+            k += 1
+        return out
+
+    def _view_item(self, item: list[Tok], sources: dict[str, Table]) -> list[tuple[str, str]]:
+        """Columns one select-list item gives: (name, type)."""
+        if item[-1].kind == "punct" and item[-1].value == "*":  # * or t.*
+            owner = item[0].name.lower() if len(item) >= 3 and item[0].name else None
+            tables = [sources[owner]] if owner in sources else list(dict.fromkeys(sources.values()))
+            return [(c.name, c.type) for t in tables for c in t.columns]
+        alias = None
+        if len(item) >= 2 and item[-1].name and (item[-2].up == "AS" or (
+                item[-2].kind in ("word", "ident", "group") and item[-2].value != "."
+                and item[-1].up not in _VIEW_KEYWORDS)):  # fmt: skip
+            alias = item[-1].name
+            item = item[:-2] if item[-2].up == "AS" else item[:-1]
+        if len(item) == 1 and item[0].name:  # col
+            col = next((c for t in sources.values() for c in t.columns
+                        if c.name.lower() == item[0].name.lower()), None)  # fmt: skip
+            return [(alias or item[0].name, col.type if col else "TEXT")]
+        if len(item) == 3 and item[1].kind == "punct" and item[1].value == "." and item[2].name:
+            table = sources.get((item[0].name or "").lower())
+            col = self.find_column(table, item[2].name) if table else None
+            return [(alias or item[2].name, col.type if col else "TEXT")]
+        if alias:  # an expression: its type cannot be told from here
+            return [(alias, "TEXT")]
+        return []
 
     def create_index(self, toks: list[Tok], i: int, unique: bool, line: int) -> None:
         on = next((k for k in range(i, len(toks)) if toks[k].up == "ON"), None)

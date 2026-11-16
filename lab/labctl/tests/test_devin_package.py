@@ -211,7 +211,8 @@ def test_the_showcase_packages(tmp_path):
     path = pkg.build(ROOT, "showcase", tmp_path, repo="acme/twin-lab")
     found = names(path)
     assert "apps/showcase/BRIEF.md" in found and "apps/showcase/db/schema.sql" in found
-    assert "showcase: demo app from brief sha256:3adecca8a37e027b" in pkg.prompt(
+    # showcase is built already: the task is an enhancement of the existing app
+    assert "showcase: enhance from brief sha256:3adecca8a37e027b" in pkg.prompt(
         ROOT, "showcase", "acme/twin-lab"
     )
 

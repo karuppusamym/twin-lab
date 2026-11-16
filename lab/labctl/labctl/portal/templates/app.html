@@ -195,6 +195,16 @@
       </details>
       {% endif %}
     {% endif %}
+    {% if app.lab %}
+    <details><summary>Database: {{ db_label }}</summary>
+      <p class="small muted">The engine the real application uses, so bots that query the database directly get the same SQL. Twin Lab creates the app's tables there from its schema (views become tables you can load sample data into). Servers your DBA provides are listed under <a href="/settings#databases">Settings</a>.</p>
+      <form method="post" action="/apps/{{ app_id }}/database" class="row" data-confirm="Change the database of {{ app_id }}? Rebuild and restart afterwards; data in the old database stays there.">
+        <div><label for="dbname">Database</label><select id="dbname" name="name">{% for v, label in db_choices %}<option value="{{ v }}" {{ 'selected' if v == db_current }}>{{ label }}</option>{% endfor %}</select></div>
+        <div><button type="submit" class="secondary">Use this database</button></div>
+      </form>
+      {% if app.stack and app.stack.db and app.stack.db.engine %}<p class="small muted">The brief says the real application runs on <b>{{ app.stack.db.engine }}</b>.</p>{% endif %}
+    </details>
+    {% endif %}
     <details {{ 'open' if not app.lab }}><summary>Ports and test sign-in</summary>
       <form method="post" action="/apps/{{ app_id }}/lab-settings">
         <div class="row">

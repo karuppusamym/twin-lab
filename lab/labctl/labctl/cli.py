@@ -613,6 +613,71 @@ def data_quarantine(
     typer.echo(f"{baseline_id}: {'released' if release else 'quarantined: ' + reason}")
 
 
+db_app = typer.Typer(no_args_is_help=True, help="Database servers for demo apps.")
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("list")
+def db_list() -> None:
+    """Database servers an app can use: Twin Lab's own, and those in twinlab.local.yaml."""
+    from labctl import dbservers
+
+    typer.echo("postgres     PostgreSQL in a container Twin Lab runs (the default)")
+    typer.echo("sqlserver    SQL Server 2022 in a container Twin Lab runs (Developer edition)")
+    try:
+        servers = dbservers.load(_root())
+    except dbservers.DbServerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    for s in servers.values():
+        d = s.described()
+        problems = s.problems()
+        typer.echo(f"{s.name:<12} {d['engine']} at {s.host}:{s.port} {s.database or s.service or ''} "
+                   f"owner {d['owner_user']} (password {d['owner_password']}), bot {d['bot_user']}"
+                   + (f"  PROBLEM: {'; '.join(problems)}" if problems else ""))  # fmt: skip
+
+
+@db_app.command("check")
+def db_check(name: str) -> None:
+    """Connect to a configured server as the owner and as the bot."""
+    from labctl import dbservers
+
+    try:
+        typer.echo(dbservers.check(dbservers.server(_root(), name)))
+    except dbservers.DbServerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@db_app.command("use")
+def db_use(app_id: str, name: str) -> None:
+    """Choose the database an app's lab uses: postgres, sqlserver, or a configured server. Run
+    `labctl lab up <app>` afterwards; the app's tables are created there."""
+    from labctl import dbservers
+
+    root = _root()
+    path = root / "apps" / app_id / "app.yaml"
+    model, problems = repo.load(path, "app")
+    if model is None or model.lab is None:
+        typer.echo(f"apps/{app_id}/app.yaml: no lab section yet" if model else
+                   "; ".join(map(str, problems)), err=True)  # fmt: skip
+        raise typer.Exit(1)
+    if name not in dbservers.BUILT_IN:
+        try:
+            dbservers.server(root, name)
+        except dbservers.DbServerError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["lab"]["database"] = None if name == "postgres" else name
+    if data["lab"]["database"] is None:
+        data["lab"].pop("database")
+    path.write_text(
+        yaml.safe_dump(data, sort_keys=False, width=100), encoding="utf-8", newline="\n"
+    )
+    typer.echo(f"{app_id} uses {name}; run `labctl lab up {app_id}`")
+
+
 @lab_app.command("reserve")
 def lab_reserve(
     app_id: str,

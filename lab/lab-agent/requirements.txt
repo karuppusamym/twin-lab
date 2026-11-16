@@ -16,3 +16,12 @@ starlette==1.10.0
 typing-inspection==0.4.5
 typing_extensions==4.16.0
 uvicorn==0.54.0
+# SQL Server and Oracle demo databases (lab_agent/sqldb.py): SQLAlchemy with pymssql (FreeTDS
+# built in) and python-oracledb in thin mode (no Oracle client needed).
+SQLAlchemy==2.0.52
+greenlet==3.2.4
+pymssql==2.4.6
+oracledb==4.0.2
+cryptography==50.0.1
+cffi==2.0.0
+pycparser==2.23

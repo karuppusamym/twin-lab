@@ -202,9 +202,16 @@ def render(
     namespace: str,
     postgres_image: str = POSTGRES_IMAGE,
     pull_secret: str | None = None,
+    expose_db: bool = False,
 ) -> list[dict]:
     """OpenShift manifests for one app's lab, equivalent to `labctl.lab.compose`. The Secret is not
-    among them: `deploy` creates it once (see `ensure_secret`)."""
+    among them: `deploy` creates it once (see `ensure_secret`).
+
+    The database is Twin Lab's own Postgres, or a server the DBA provides (app.yaml
+    `lab.database`, configured in `databases:`): then no database is deployed, a Job creates the
+    app's tables there, and its connection details come from the Secret `twinlab-<app>-dbconn`,
+    which every deploy refreshes. `expose_db` adds a NodePort Service for the database link, so
+    bots outside the cluster can query the database (through the agent, slowdowns included)."""
     _check_names(app_id)
     if not DNS1123.match(namespace):
         raise OcpError(f"namespace {namespace!r} is not a DNS-1123 name")
@@ -225,6 +232,7 @@ def render(
     db_host, agent_host = name(app_id, "db"), name(app_id, "agent")
     db_url = f"postgresql://lab:$(DB_PASSWORD)@%s/{app_id}"  # $(VAR): expanded by Kubernetes
     docs: list[dict] = []
+    ext = _external_server(root, app)
 
     # --- configuration -------------------------------------------------------------------------
     docs.append({
@@ -233,81 +241,86 @@ def render(
         "metadata": _meta(app_id, "agent", name(app_id, "schema"), namespace),
         "data": {"schema.sql": schema},
     })  # fmt: skip
-    docs.append({
-        "apiVersion": "v1",
-        "kind": "ConfigMap",
-        "metadata": _meta(app_id, "db-setup", name(app_id, "db-setup"), namespace),
-        "data": {"setup.sql": setup_sql(app_id), "setup.sh": _SETUP_SCRIPT},
-    })  # fmt: skip
+    if ext is None:
+        docs.append({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": _meta(app_id, "db-setup", name(app_id, "db-setup"), namespace),
+            "data": {"setup.sql": setup_sql(app_id), "setup.sh": _SETUP_SCRIPT},
+        })  # fmt: skip
 
-    # --- database ------------------------------------------------------------------------------
-    docs.append(_pvc(app_id, "db", name(app_id, "db"), namespace, "5Gi"))
-    docs.append(_service(app_id, "db", namespace, [("postgres", DB_PORT)]))
-    ready = ["pg_isready", "-q", "-h", "127.0.0.1", "-U", "lab", "-d", app_id]
-    db_container = {
-        "name": "db",
-        "image": postgres_image,
-        "env": [
-            {"name": "POSTGRESQL_USER", "value": "lab"},
-            _secret_env("POSTGRESQL_PASSWORD", app_id, "db-password"),
-            {"name": "POSTGRESQL_DATABASE", "value": app_id},
-            # In this image `lab` owns the database but is no superuser, so it cannot create the
-            # `bot` login; the setup Job signs in as `postgres`. Same password: in the Compose lab
-            # `lab` itself is the superuser, so this gives nobody more than there.
-            _secret_env("POSTGRESQL_ADMIN_PASSWORD", app_id, "db-password"),
-        ],
-        "ports": [{"name": "postgres", "containerPort": DB_PORT}],
-        "volumeMounts": [{"name": "data", "mountPath": "/var/lib/pgsql/data"}],
-        "readinessProbe": {"exec": {"command": ready}, "periodSeconds": 5, "timeoutSeconds": 3},
-        "livenessProbe": {
-            "exec": {"command": ready},
-            "initialDelaySeconds": 60,
-            "periodSeconds": 15,
-            "timeoutSeconds": 5,
-            "failureThreshold": 6,
-        },
-        "resources": _resources("100m", "256Mi", "1", "1Gi"),
-        "securityContext": _restricted(),
-    }
-    db_volumes = [{"name": "data", "persistentVolumeClaim": {"claimName": name(app_id, "db")}}]
-    docs.append(
-        _deployment(app_id, "db", namespace, _pod([db_container], db_volumes), recreate=True)
-    )
+    if ext is None:
+        # --- database ------------------------------------------------------------------------------
+        docs.append(_pvc(app_id, "db", name(app_id, "db"), namespace, "5Gi"))
+        docs.append(_service(app_id, "db", namespace, [("postgres", DB_PORT)]))
+        ready = ["pg_isready", "-q", "-h", "127.0.0.1", "-U", "lab", "-d", app_id]
+        db_container = {
+            "name": "db",
+            "image": postgres_image,
+            "env": [
+                {"name": "POSTGRESQL_USER", "value": "lab"},
+                _secret_env("POSTGRESQL_PASSWORD", app_id, "db-password"),
+                {"name": "POSTGRESQL_DATABASE", "value": app_id},
+                # In this image `lab` owns the database but is no superuser, so it cannot create the
+                # `bot` login; the setup Job signs in as `postgres`. Same password: in the Compose lab
+                # `lab` itself is the superuser, so this gives nobody more than there.
+                _secret_env("POSTGRESQL_ADMIN_PASSWORD", app_id, "db-password"),
+            ],
+            "ports": [{"name": "postgres", "containerPort": DB_PORT}],
+            "volumeMounts": [{"name": "data", "mountPath": "/var/lib/pgsql/data"}],
+            "readinessProbe": {"exec": {"command": ready}, "periodSeconds": 5, "timeoutSeconds": 3},
+            "livenessProbe": {
+                "exec": {"command": ready},
+                "initialDelaySeconds": 60,
+                "periodSeconds": 15,
+                "timeoutSeconds": 5,
+                "failureThreshold": 6,
+            },
+            "resources": _resources("100m", "256Mi", "1", "1Gi"),
+            "securityContext": _restricted(),
+        }
+        db_volumes = [{"name": "data", "persistentVolumeClaim": {"claimName": name(app_id, "db")}}]
+        docs.append(
+            _deployment(app_id, "db", namespace, _pod([db_container], db_volumes), recreate=True)
+        )
 
-    # --- database logins (run on every deploy; idempotent) -------------------------------------
-    setup_container = {
-        "name": "db-setup",
-        "image": postgres_image,
-        "command": ["bash", "/setup/setup.sh"],
-        "env": [
-            {"name": "PGHOST", "value": db_host},
-            {"name": "PGPORT", "value": str(DB_PORT)},
-            {"name": "PGUSER", "value": "postgres"},
-            {"name": "PGDATABASE", "value": app_id},
-            _secret_env("PGPASSWORD", app_id, "db-password"),
-            _secret_env("BOT_PASSWORD", app_id, "bot-password"),
-        ],
-        "volumeMounts": [{"name": "setup", "mountPath": "/setup", "readOnly": True}],
-        "resources": _resources("50m", "64Mi", "500m", "256Mi"),
-        "securityContext": _restricted(),
-    }
-    setup_pod = _pod(
-        [setup_container],
-        [{"name": "setup", "configMap": {"name": name(app_id, "db-setup")}}],
-        pull_secret,
-    )
-    setup_pod["restartPolicy"] = "OnFailure"
-    docs.append({
-        "apiVersion": "batch/v1",
-        "kind": "Job",
-        "metadata": _meta(app_id, "db-setup", name(app_id, "db-setup"), namespace),
-        "spec": {
-            "backoffLimit": 6,
-            "activeDeadlineSeconds": 600,
-            "ttlSecondsAfterFinished": 86400,
-            "template": {"metadata": {"labels": _labels(app_id, "db-setup")}, "spec": setup_pod},
-        },
-    })  # fmt: skip
+        # --- database logins (run on every deploy; idempotent) -------------------------------------
+        setup_container = {
+            "name": "db-setup",
+            "image": postgres_image,
+            "command": ["bash", "/setup/setup.sh"],
+            "env": [
+                {"name": "PGHOST", "value": db_host},
+                {"name": "PGPORT", "value": str(DB_PORT)},
+                {"name": "PGUSER", "value": "postgres"},
+                {"name": "PGDATABASE", "value": app_id},
+                _secret_env("PGPASSWORD", app_id, "db-password"),
+                _secret_env("BOT_PASSWORD", app_id, "bot-password"),
+            ],
+            "volumeMounts": [{"name": "setup", "mountPath": "/setup", "readOnly": True}],
+            "resources": _resources("50m", "64Mi", "500m", "256Mi"),
+            "securityContext": _restricted(),
+        }
+        setup_pod = _pod(
+            [setup_container],
+            [{"name": "setup", "configMap": {"name": name(app_id, "db-setup")}}],
+            pull_secret,
+        )
+        setup_pod["restartPolicy"] = "OnFailure"
+        docs.append({
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": _meta(app_id, "db-setup", name(app_id, "db-setup"), namespace),
+            "spec": {
+                "backoffLimit": 6,
+                "activeDeadlineSeconds": 600,
+                "ttlSecondsAfterFinished": 86400,
+                "template": {"metadata": {"labels": _labels(app_id, "db-setup")}, "spec": setup_pod},
+            },
+        })  # fmt: skip
+
+    else:
+        docs.append(_tables_job(app_id, namespace, ext, registry, tag, pull_secret))
 
     # --- lab agent: front door, admin API, DB link proxy ---------------------------------------
     docs.append(_pvc(app_id, "agent", name(app_id, "agent-state"), namespace, "1Gi"))
@@ -323,9 +336,8 @@ def render(
             {"name": "APP_UPSTREAM", "value": f"http://{name(app_id, 'app')}:{app_port}"},
             {"name": "APP_HEALTH_PATH", "value": health_path},
             {"name": "APP_VERSION", "value": tag},
-            {"name": "DB_UPSTREAM", "value": f"{db_host}:{DB_PORT}"},
             {"name": "DB_PROXY_PORT", "value": str(AGENT_DB_PORT)},
-            {"name": "ADMIN_DATABASE_URL", "value": db_url % f"{db_host}:{DB_PORT}"},
+            *_agent_db_env(app_id, ext, db_host, db_url),
             {"name": "SCHEMA_PATH", "value": "/lab/schema.sql"},
             {"name": "STATE_DIR", "value": "/var/lib/twinlab"},
             {"name": "LAB_PORT", "value": str(AGENT_PORT)},
@@ -367,13 +379,7 @@ def render(
     app_container = {
         "name": "app",
         "image": image(registry, app_id, tag),
-        "env": [
-            _secret_env("DB_PASSWORD", app_id, "db-password"),
-            {
-                "name": app.run.env.database_url,
-                "value": db_url % f"{agent_host}:{AGENT_DB_PORT}",
-            },
-        ],
+        "env": _app_db_env(app_id, ext, app.run.env.database_url, db_url, agent_host),
         "ports": [{"name": n, "containerPort": p} for n, p in app_ports],
         "startupProbe": {**http_probe, "periodSeconds": 5, "failureThreshold": 36},
         "readinessProbe": {**http_probe, "periodSeconds": 10},
@@ -386,6 +392,15 @@ def render(
             app_id, "app", namespace, _pod([app_container], None, pull_secret), recreate=False
         )
     )
+
+    if expose_db:  # bots outside the cluster: the database link on a port of every node
+        docs.append({
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": _meta(app_id, "agent", name(app_id, "db-external"), namespace),
+            "spec": {"type": "NodePort", "selector": _selector(app_id, "agent"),
+                     "ports": [{"name": "db", "port": AGENT_DB_PORT, "targetPort": "db"}]},
+        })  # fmt: skip
 
     # --- the front door: HTTPS to the agent's port 9000 only (never 15432) ---------------------
     docs.append({
@@ -403,6 +418,123 @@ def render(
         },
     })  # fmt: skip
     return docs
+
+
+def conn_secret_name(app_id: str) -> str:
+    return f"twinlab-{app_id}-dbconn"
+
+
+def _external_server(root: Path, app):
+    """The DBA's server an app uses, or None for Twin Lab's own Postgres."""
+    from labctl import dbservers
+
+    choice = dbservers.choice(app.lab.database if app.lab else None)
+    if choice == "postgres":
+        return None
+    if choice == "sqlserver":
+        raise OcpError(
+            "the SQL Server container Twin Lab runs is for the local lab only. On OpenShift, use a "
+            "server your DBA provides: list it under `databases:` (twinlab.local.yaml, or the "
+            "TWINLAB_DATABASES secret in CI) and choose it for this app"
+        )
+    try:
+        return dbservers.server(root, choice, need_passwords=False)
+    except dbservers.DbServerError as exc:
+        raise OcpError(str(exc)) from exc
+
+
+def _conn_env(env: str, app_id: str, key: str) -> dict:
+    return {
+        "name": env,
+        "valueFrom": {"secretKeyRef": {"name": conn_secret_name(app_id), "key": key}},
+    }
+
+
+def _agent_db_env(app_id: str, ext, db_host: str, db_url: str) -> list[dict]:
+    if ext is None:
+        return [
+            {"name": "DB_UPSTREAM", "value": f"{db_host}:{DB_PORT}"},
+            {"name": "ADMIN_DATABASE_URL", "value": db_url % f"{db_host}:{DB_PORT}"},
+        ]
+    env = [{"name": "DB_UPSTREAM", "value": f"{ext.host}:{ext.port}"},
+           _conn_env("ADMIN_DATABASE_URL", app_id, "admin-url")]  # fmt: skip
+    if ext.schema:
+        env.append({"name": "DB_SCHEMA", "value": ext.schema})
+    return env
+
+
+def _app_db_env(app_id: str, ext, var: str, db_url: str, agent_host: str) -> list[dict]:
+    if ext is None:
+        return [
+            _secret_env("DB_PASSWORD", app_id, "db-password"),
+            {"name": var, "value": db_url % f"{agent_host}:{AGENT_DB_PORT}"},
+        ]
+    return [
+        _conn_env(var, app_id, "app-url"),
+        {"name": "DB_ENGINE", "value": ext.engine},
+        {"name": "DB_HOST", "value": agent_host},
+        {"name": "DB_PORT", "value": str(AGENT_DB_PORT)},
+        {"name": "DB_NAME", "value": ext.database or ""},
+        {"name": "DB_SERVICE", "value": ext.service or ""},
+        {"name": "DB_USER", "value": ext.bot_user or ext.owner_user},
+        _conn_env("DB_PASSWORD", app_id, "app-password"),
+        _conn_env("DB_CONNECTION_STRING", app_id, "app-connection-string"),
+    ]
+
+
+def _tables_job(app_id: str, namespace: str, ext, registry: str, tag: str, pull_secret) -> dict:
+    """Creates the app's tables on the DBA's server from schema.sql (views become tables).
+    Runs in the lab agent's image, which has the drivers; existing tables are left alone."""
+    script = (
+        "from pathlib import Path; import os\n"
+        "from labctl import dbsetup\n"
+        "made = dbsetup.create_tables(os.environ['ADMIN_DATABASE_URL'], Path('/lab/schema.sql'), "
+        "os.environ['DB_ENGINE'], os.environ.get('DB_SCHEMA') or None)\n"
+        "print('created:', ', '.join(made) or 'nothing (all tables exist)')\n"
+    )
+    container = {
+        "name": "db-tables",
+        "image": image(registry, "lab-agent", tag),
+        "command": ["python", "-c", script],
+        "env": [
+            _conn_env("ADMIN_DATABASE_URL", app_id, "admin-url"),
+            {"name": "DB_ENGINE", "value": ext.engine},
+            *([{"name": "DB_SCHEMA", "value": ext.schema}] if ext.schema else []),
+        ],  # fmt: skip
+        "volumeMounts": [{"name": "schema", "mountPath": "/lab", "readOnly": True}],
+        "resources": _resources("50m", "128Mi", "500m", "512Mi"),
+        "securityContext": _restricted(),
+    }
+    pod = _pod([container], [{"name": "schema", "configMap": {"name": name(app_id, "schema")}}],
+               pull_secret)  # fmt: skip
+    pod["restartPolicy"] = "OnFailure"
+    return {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": _meta(app_id, "db-setup", name(app_id, "db-setup"), namespace),
+        "spec": {"backoffLimit": 4, "activeDeadlineSeconds": 600, "ttlSecondsAfterFinished": 86400,
+                 "template": {"metadata": {"labels": _labels(app_id, "db-setup")}, "spec": pod}},
+    }  # fmt: skip
+
+
+def conn_secret_manifest(app_id: str, namespace: str, ext) -> dict:
+    """The DBA server's connection details for one app (owner for Twin Lab, bot for the app)."""
+    agent = name(app_id, "agent")
+    bot = bool(ext.bot_user)
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "type": "Opaque",
+        "metadata": _meta(app_id, "secrets", conn_secret_name(app_id), namespace),
+        "stringData": {
+            "admin-url": ext.url(),
+            "app-url": ext.url(bot=bot, host=agent, port=AGENT_DB_PORT),
+            "app-password": ext.bot_password if bot else ext.owner_password,
+            "app-connection-string": ext.connection_string(
+                bot=True, host=agent, port=AGENT_DB_PORT
+            ),
+        },
+    }
 
 
 class _Dumper(yaml.SafeDumper):
@@ -537,6 +669,7 @@ def deploy(
     timeout: int = 600,
     smoke_check: bool = True,
     verify_tls: bool = True,
+    expose_db: bool = False,
     log=print,
 ) -> str | None:
     """Render, create the Secret when missing, apply, wait for the rollouts, set up the database
@@ -544,25 +677,41 @@ def deploy(
     Route. Returns the Route's URL when the smoke check ran."""
     docs = render(
         root, app_id, registry=registry, tag=tag, namespace=namespace,
-        postgres_image=postgres_image, pull_secret=pull_secret,
+        postgres_image=postgres_image, pull_secret=pull_secret, expose_db=expose_db,
     )  # fmt: skip
+    ext = _external_server(root, load_app(root, app_id))
+    if ext is not None:
+        from labctl import dbservers
+
+        try:  # the full settings, passwords included, only now
+            ext = dbservers.server(root, load_app(root, app_id).lab.database)
+        except dbservers.DbServerError as exc:
+            raise OcpError(str(exc)) from exc
     _oc(["whoami"])  # a clear failure when not logged in, before anything changes
     ensure_secret(app_id, namespace, log)
+    if ext is not None:  # refreshed every deploy: the DBA may have changed a password
+        _oc(["apply", "-n", namespace, "-f", "-"],
+            stdin=json.dumps(conn_secret_manifest(app_id, namespace, ext)))  # fmt: skip
+        log(f"secret {conn_secret_name(app_id)} updated for {ext.label} at {ext.host}")
     job = next(d for d in docs if d["kind"] == "Job")
     rest = [d for d in docs if d["kind"] != "Job"]
     log(f"applying {len(rest)} objects to {namespace}")
     out = _oc(["apply", "-n", namespace, "-f", "-"], stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": rest}))  # fmt: skip
     log(out.stdout.strip())
-    _oc(["rollout", "status", f"deployment/{name(app_id, 'db')}", "-n", namespace,
-         f"--timeout={timeout}s"], timeout=timeout + 60)  # fmt: skip
-    log("database ready; setting up its logins")
+    if ext is None:
+        _oc(["rollout", "status", f"deployment/{name(app_id, 'db')}", "-n", namespace,
+             f"--timeout={timeout}s"], timeout=timeout + 60)  # fmt: skip
+        log("database ready; setting up its logins")
+    else:
+        log(f"creating the app's tables on {ext.label} where missing")
     _run_setup_job(app_id, namespace, job, timeout)
     for component in ("agent", "app"):
         _oc(["rollout", "status", f"deployment/{name(app_id, component)}", "-n", namespace,
              f"--timeout={timeout}s"], timeout=timeout + 60)  # fmt: skip
         log(f"{name(app_id, component)} rolled out")
-    _run_setup_job(app_id, namespace, job, timeout)  # grants on the tables the app created
-    log("database grants refreshed")
+    if ext is None:
+        _run_setup_job(app_id, namespace, job, timeout)  # grants on the tables the app created
+        log("database grants refreshed")
     if not smoke_check:
         return None
     return smoke(root, app_id, namespace=namespace, verify_tls=verify_tls, log=log)
