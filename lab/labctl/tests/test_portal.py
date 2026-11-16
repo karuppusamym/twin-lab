@@ -178,3 +178,36 @@ def test_password_protects_every_page(repo, monkeypatch):
     assert client.get("/").status_code == 401
     assert client.get("/", auth=("anyone", "s3cret-for-test")).status_code == 200
     assert client.get("/", auth=("anyone", "wrong")).status_code == 401
+
+
+def test_parallel_jobs_keep_their_own_logs_and_release_stdout(tmp_path):
+    import sys
+    import threading
+
+    from labctl.portal.jobs import JobRunner
+
+    runner = JobRunner(tmp_path / "jobs.db", workers=4)
+    gate = threading.Barrier(2)
+
+    def job(name):
+        def run(log):
+            gate.wait(5)
+            for i in range(50):
+                print(f"{name}-{i}")
+            return name
+
+        return run
+
+    a, b = runner.submit("t", "A", job("A")), runner.submit("t", "B", job("B"))
+    for _ in range(200):
+        if all(runner.get(j)["status"] == "done" for j in (a, b)):
+            break
+        time.sleep(0.05)
+    log_a, log_b = runner.get(a)["log"], runner.get(b)["log"]
+    assert "B-" not in log_a and "A-" not in log_b
+    assert log_a.count("A-") == 50 and log_b.count("B-") == 50
+    print("after the jobs")  # goes to the console, not into a finished job's log
+    assert "after the jobs" not in runner.get(a)["log"] + runner.get(b)["log"]
+    assert (
+        getattr(sys.stdout, "local", None) is None or getattr(sys.stdout.local, "log", None) is None
+    )

@@ -35,6 +35,28 @@ def state_dir(root: Path) -> Path:
     return path
 
 
+def lab_token(root: Path) -> str:
+    """The admin token for every lab agent: TWINLAB_LAB_TOKEN, or one generated once and kept in
+    the state folder (Git-ignored). Bots never need it; only the portal and labctl do."""
+    token = os.environ.get("TWINLAB_LAB_TOKEN", "")
+    if token:
+        return token
+    path = state_dir(root) / "lab-token"
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    import secrets
+
+    token = secrets.token_urlsafe(32)
+    path.write_text(token, encoding="utf-8")
+    return token
+
+
+def bind_address() -> str:
+    """Where the lab's ports listen: this machine only, unless TWINLAB_LAB_BIND says otherwise
+    (0.0.0.0 when bots on other machines must reach the apps; then set a firewall rule)."""
+    return os.environ.get("TWINLAB_LAB_BIND", "127.0.0.1")
+
+
 def compose(root: Path, app_id: str) -> dict:
     """The Compose document for one app. Ports come from `lab:` in app.yaml."""
     app = load_app(root, app_id)
@@ -45,7 +67,8 @@ def compose(root: Path, app_id: str) -> dict:
     app_port = (app.run.web or app.run.api).port
     db_env = app.run.env.database_url
     schema = (root / "apps" / app_id / "db" / "schema.sql").resolve()
-    token = os.environ.get("TWINLAB_LAB_TOKEN", "")
+    token = lab_token(root)
+    bind = bind_address()
     return {
         "name": project(app_id),
         "services": {
@@ -79,7 +102,7 @@ def compose(root: Path, app_id: str) -> dict:
                     "LAB_TOKEN": token,
                 },
                 "volumes": [f"{schema.as_posix()}:/lab/schema.sql:ro", "state:/var/lib/twinlab"],
-                "ports": [f"{app.lab.port}:9000", f"{app.lab.db_port}:15432"],
+                "ports": [f"{bind}:{app.lab.port}:9000", f"{bind}:{app.lab.db_port}:15432"],
                 "depends_on": {"db": {"condition": "service_healthy"}},
                 "restart": "unless-stopped",
             },
@@ -96,9 +119,14 @@ def compose(root: Path, app_id: str) -> dict:
 
 
 def compose_file(root: Path, app_id: str) -> Path:
+    """Write the Compose file only when it changed, atomically (a running `up` may be reading it)."""
     path = state_dir(root) / "compose" / f"{app_id}.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(compose(root, app_id), sort_keys=False), encoding="utf-8")
+    text = yaml.safe_dump(compose(root, app_id), sort_keys=False)
+    if not path.exists() or path.read_text(encoding="utf-8") != text:
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
     return path
 
 
@@ -109,6 +137,10 @@ def _docker(args: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
         )
     except FileNotFoundError as exc:
         raise LabError("Docker is not installed or not on PATH") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise LabError(
+            f"Docker did not answer within {timeout} s (is Docker Desktop still starting?)"
+        ) from exc
 
 
 def build_agent_image(root: Path) -> str:
@@ -156,7 +188,10 @@ def status(root: Path, app_id: str) -> Status:
         file = compose_file(root, app_id)
     except (LabError, BindingError) as exc:
         return Status(app_id, False, {}, error=str(exc))
-    out = _docker(["compose", "-f", str(file), "ps", "--all", "--format", "json"], timeout=60)
+    try:
+        out = _docker(["compose", "-f", str(file), "ps", "--all", "--format", "json"], timeout=20)
+    except LabError as exc:  # no Docker, or Docker not answering: the page still renders
+        return Status(app_id, False, {}, error=str(exc))
     services: dict[str, str] = {}
     for line in out.stdout.splitlines():
         line = line.strip()
@@ -245,4 +280,4 @@ def agent(root: Path, app_id: str, host: str | None = None) -> Agent:
     if app.lab is None:
         raise LabError(f"apps/{app_id}/app.yaml has no `lab:` section")
     host = host or os.environ.get("TWINLAB_HOST", "localhost")
-    return Agent(f"http://{host}:{app.lab.port}", os.environ.get("TWINLAB_LAB_TOKEN", ""))
+    return Agent(f"http://{host}:{app.lab.port}", lab_token(root))

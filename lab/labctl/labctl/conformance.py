@@ -118,7 +118,6 @@ def _check_screens(
     if not web_touches:
         return
     try:
-        from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
     except ImportError:
         report.errors.append("Playwright is not installed; screens not checked")
@@ -134,7 +133,17 @@ def _check_screens(
 
     values = {**args, **auto.test_inputs}
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:  # noqa: BLE001 - e.g. `playwright install chromium` never ran
+            report.errors.append(
+                f"the browser could not start ({_short(exc)}); run `python -m playwright install chromium`"
+            )
+            for t in web_touches:
+                for s in t.screens:
+                    for u in s.uses:
+                        report.items.append(Item("screen", t.app, f"{u.selector} on {s.path or s.name}", "unchecked", "no browser"))  # fmt: skip
+            return
         page = browser.new_page()
         page.set_default_timeout(STEP_TIMEOUT_MS)
         try:
@@ -153,7 +162,7 @@ def _check_screens(
                         if not _on_screen(page.url, base, screen.path):
                             try:
                                 page.goto(base + path, wait_until="domcontentloaded")
-                            except PlaywrightError as exc:
+                            except Exception as exc:  # noqa: BLE001
                                 report.items.append(
                                     Item("screen", touch.app, f"open {path}", "failed", _short(exc))
                                 )
@@ -171,7 +180,7 @@ def _check_screens(
                         try:
                             _act(page, use.action, use.selector, values.get(use.field or "", ""))
                             report.items.append(Item("screen", touch.app, what, "ok", "", b_))
-                        except PlaywrightError as exc:
+                        except Exception as exc:  # noqa: BLE001 - one step, not the run
                             report.items.append(
                                 Item("screen", touch.app, what, "failed", _short(exc), b_)
                             )
@@ -272,9 +281,16 @@ def _check_routes(
                         Item("route", touch.app, what, "failed", f"not reachable: {exc}", b_)
                     )
                     continue
-                if real.status_code == probe.status_code and real.content == probe.content:
+                if real.status_code == 405:
                     report.items.append(Item("route", touch.app, what, "failed",
-                                             f"answers like a route that does not exist ({real.status_code})", b_))  # fmt: skip
+                                             f"the path exists but not for {route.method} (405)", b_))  # fmt: skip
+                elif real.status_code == probe.status_code and real.content == probe.content:
+                    if real.status_code in (401, 403):
+                        report.items.append(Item("route", touch.app, what, "unchecked",
+                                                 "the app answers every request without a sign-in the same way", b_))  # fmt: skip
+                    else:
+                        report.items.append(Item("route", touch.app, what, "failed",
+                                                 f"answers like a route that does not exist ({real.status_code})", b_))  # fmt: skip
                 else:
                     report.items.append(
                         Item("route", touch.app, what, "ok", f"{real.status_code}", b_)
@@ -332,7 +348,21 @@ def _check_tables(auto: Automation, b: Bindings, report: Report, basis_by_app: d
                 )
 
 
-def check(root: Path, automation: Automation, host: str | None = None) -> Report:
+def _reset(root: Path, apps: list[str], report: Report, when: str) -> None:
+    from labctl import lab as lab_mod
+
+    for app_id in apps:
+        try:
+            lab_mod.agent(root, app_id).reset()
+        except Exception as exc:  # noqa: BLE001 - a check still runs without a baseline
+            report.errors.append(f"{app_id}: data not reset {when} the check ({_short(exc)})")
+
+
+def check(
+    root: Path, automation: Automation, host: str | None = None, reset: bool = True
+) -> Report:
+    """Run the check. With `reset`, each app's data is put back to its baseline before and after,
+    because replaying a bot clicks its buttons and the route checks send real requests."""
     report = Report(automation.id)
     if automation.analysis.gaps:
         report.errors.append(
@@ -348,8 +378,12 @@ def check(root: Path, automation: Automation, host: str | None = None) -> Report
     basis_by_app = {app_id: _model_basis(root, app_id) for app_id in b.apps}
     for app_id in b.apps:  # readiness is about what exists, not speed: say when a slowdown is on
         try:
+            from labctl import lab as lab_mod
+
             current = httpx.get(
-                f"{b.apps[app_id].api.rstrip('/')}/_lab/condition", timeout=5
+                f"{b.apps[app_id].api.rstrip('/')}/_lab/condition",
+                headers={"X-Lab-Token": lab_mod.lab_token(root)},
+                timeout=5,
             ).json()
         except (httpx.HTTPError, ValueError):
             continue
@@ -359,9 +393,15 @@ def check(root: Path, automation: Automation, host: str | None = None) -> Report
                 "steps time out. Check readiness under normal conditions."
             )
     values = {**args, **automation.test_inputs}
-    _check_screens(automation, b, args, report, basis_by_app)
-    _check_routes(automation, b, values, report, basis_by_app)
-    _check_tables(automation, b, report, basis_by_app)
+    if reset:
+        _reset(root, list(b.apps), report, "before")
+    try:
+        _check_screens(automation, b, args, report, basis_by_app)
+        _check_routes(automation, b, values, report, basis_by_app)
+        _check_tables(automation, b, report, basis_by_app)
+    finally:
+        if reset:
+            _reset(root, list(b.apps), report, "after")
     if any(i.status == "failed" for i in report.items) or automation.analysis.gaps:
         report.verdict = "BLOCKED"
     if any(i.kind == "screen" and i.status == "failed" for i in report.items):

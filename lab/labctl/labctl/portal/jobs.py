@@ -7,10 +7,10 @@ running as `interrupted`, never as done.
 
 from __future__ import annotations
 
-import contextlib
 import io
 import json
 import sqlite3
+import sys
 import threading
 import traceback
 import uuid
@@ -30,6 +30,33 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+class _ThreadRouter(io.TextIOBase):
+    """sys.stdout replacement installed once: a job thread's prints go to that job's log, every
+    other thread's to the real console. (Swapping sys.stdout per job mixes parallel jobs' logs.)"""
+
+    def __init__(self, console):
+        self.console = console
+        self.local = threading.local()
+
+    def write(self, text: str) -> int:
+        target = getattr(self.local, "log", None)
+        return (target or self.console).write(text)
+
+    def flush(self) -> None:
+        target = getattr(self.local, "log", None)
+        (target or self.console).flush()
+
+
+_router_lock = threading.Lock()
+
+
+def _router() -> _ThreadRouter:
+    with _router_lock:
+        if not isinstance(sys.stdout, _ThreadRouter):
+            sys.stdout = _ThreadRouter(sys.stdout)
+        return sys.stdout
 
 
 class Log(io.TextIOBase):
@@ -88,8 +115,12 @@ class JobRunner:
             self._set(job_id, status="running")
             log = Log(self, job_id)
             try:
-                with contextlib.redirect_stdout(log):
+                router = _router()
+                router.local.log = log
+                try:
                     result = fn(log)
+                finally:
+                    router.local.log = None
                 self._set(job_id, status="done", result=json.dumps(result, default=str))
             except Exception as exc:  # noqa: BLE001 - a failed job records why, it never crashes the portal
                 log.write(f"\nFAILED: {exc}\n")

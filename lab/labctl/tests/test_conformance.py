@@ -167,7 +167,8 @@ def test_compose_wires_the_app_through_the_agent_and_its_db_proxy(tmp_path):
     assert services["app"]["environment"] == {
         "DATABASE_URL": "postgresql://lab:lab@agent:15432/demo"
     }
-    assert services["agent"]["ports"] == [f"{PORT}:9000", "18612:15432"]
+    assert services["agent"]["ports"] == [f"127.0.0.1:{PORT}:9000", "127.0.0.1:18612:15432"]
+    assert services["agent"]["environment"]["LAB_TOKEN"]  # never an open admin API
     assert services["agent"]["environment"]["APP_UPSTREAM"] == "http://app:8000"
     assert (
         services["agent"]["environment"]["ADMIN_DATABASE_URL"]
@@ -183,3 +184,14 @@ def test_status_of_an_app_that_is_not_running(tmp_path):
     (root / "apps/demo/db/schema.sql").write_text("CREATE TABLE t (id INTEGER);", encoding="utf-8")
     state = lab_mod.status(root, "demo")
     assert state.running is False
+
+
+def test_a_route_that_exists_only_for_another_method_is_blocked(tmp_path, served):
+    served("btnSave")
+    root, auto = make_repo(
+        tmp_path, HOME_USES, [{"method": "DELETE", "path": "/api/things/{in_Id}/notes"}]
+    )
+    report = conformance.check(root, auto, host="127.0.0.1", reset=False)
+    route = next(i for i in report.items if i.kind == "route")
+    assert route.status == "failed" and "405" in route.detail
+    assert report.verdict == "BLOCKED"
