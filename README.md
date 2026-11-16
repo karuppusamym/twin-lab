@@ -8,22 +8,37 @@ Twin Lab does not run the automations. They are triggered where they live (a UiP
 an agent runtime). The portal controls what they run *against*: which app version, which data, how
 slow.
 
-> **Status: design, plan, repository scaffold and contracts.** Nothing that builds or runs a demo app
-> exists yet; see `docs/CHANGELOG.md`. This folder replaces neither `prod-echo/` nor
-> `ApplicationTwinStudio/`; it takes ideas and code from both. See `docs/01-direction.md`.
+> **Status: working.** Evidence analysis, briefs, Devin hand-off (package and API), the lab (Docker,
+> lab agent with slowdowns and data reset), readiness checks, data packs and the portal all run and
+> are tested (450+ tests). Two reference apps prove it: a React app built from its source, and a
+> QTT stand-in built from recordings and DDL only. See `docs/CHANGELOG.md` and `docs/04-plan.md`.
 
-## Setup
+## Start here
+
+**Setting it up in the office:** [docs/office-setup.md](docs/office-setup.md). In short:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
 ```bash
+python -m playwright install chromium
+```
+
+```bash
+labctl portal
+```
+
+Then open http://127.0.0.1:8790. Every portal action is also a `labctl` command (`labctl --help`).
+
+Checks:
+
+```bash
 labctl validate
 ```
 
 ```bash
-pytest -q
+python -m pytest -q
 ```
 
 ## Read in this order
@@ -36,6 +51,10 @@ pytest -q
 | [docs/04-plan.md](docs/04-plan.md) | Ordered build items with a Definition of Done each. |
 | [docs/05-open-questions.md](docs/05-open-questions.md) | What must be answered before specific items, starting with QTT. |
 | [docs/06-evidence.md](docs/06-evidence.md) | Building apps without source code: kinds of evidence, the app model, build modes, privacy. |
+| [docs/07-prod-echo-coverage.md](docs/07-prod-echo-coverage.md) | Every Prod Echo plan item and Application Twin Studio feature, and where it lives now. |
+| [docs/office-setup.md](docs/office-setup.md) | Installing and running it on an office machine; the everyday flow. |
+| [docs/devin.md](docs/devin.md) | Building apps with Devin: the manual package and the API. |
+| [docs/factory-playbook.md](docs/factory-playbook.md) | What the AI builder must do; `AGENTS.md` is the short form. |
 
 ## The idea in six lines
 
