@@ -1,0 +1,37 @@
+# Mask manifest (Prod Echo docs/04, I-17). Synthetic example for the demo replica. Draft one with
+# `labctl realdata draft-manifest`; a data owner reviews it and signs `review.approved_by`.
+# The key never appears in a file: it is read from the environment variable in `key_env`.
+app: showcase
+key_env: TWINLAB_MASK_KEY
+columns:
+  customers.id:                 {class: none, technique: keep}
+  customers.first_name:         {class: first_name, technique: dict_hmac, dict: first_names_v1}
+  customers.last_name:          {class: last_name, technique: dict_hmac, dict: last_names_v1}
+  customers.ssn:                {class: ssn, technique: ff1_ssn_valid}
+  customers.birth_date:         {class: date, technique: entity_shift, entity: customer, entity_column: id}
+  customers.email:              {class: email, technique: hmac_local_part}
+  customers.phone:              {class: phone, technique: ff1_keep_area}
+  customers.primary_account_id: {class: none, technique: keep}
+  customers.referred_by:        {class: none, technique: keep}
+  customers.updated_at:         {class: none, technique: keep}
+  accounts.id:                  {class: none, technique: keep}
+  accounts.customer_id:         {class: none, technique: keep}
+  accounts.branch_id:           {class: none, technique: keep}
+  accounts.account_no:          {class: account, technique: ff1_digits}
+  accounts.card_no:             {class: card, technique: luhn}
+  accounts.opened_on:           {class: date, technique: entity_shift, entity: customer, entity_column: customer_id}
+  accounts.status:              {class: none, technique: keep}
+  accounts.LAST_MOD_TS:         {class: none, technique: keep}
+  addresses.id:                 {class: none, technique: keep}
+  addresses.customer_ref:       {class: none, technique: keep}
+  addresses.line1:              {class: address, technique: dict_hmac, dict: streets_v1}
+  addresses.city:               {class: city, technique: dict_hmac, dict: cities_v1}
+  addresses.MODIFIED_DATE:      {class: none, technique: keep}
+  branches.id:                  {class: none, technique: keep}
+  branches.code:                {class: none, technique: keep}
+  branches.city:                {class: none, technique: keep}
+  transactions.id:              {class: none, technique: keep}
+  transactions.account_id:      {class: none, technique: keep}
+  transactions.amount:          {class: none, technique: keep}
+  transactions.posted_on:       {class: none, technique: keep}
+review: {approved_by: null, date: null, unclassified_policy: block}
