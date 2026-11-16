@@ -155,45 +155,74 @@ def _automations() -> list[Automation]:
     return out
 
 
+def _flows(app_id: str) -> list:
+    out = []
+    for path in repo.files_of(_root(), "flow"):
+        model, problems = repo.load(path)
+        if model is None:
+            typer.echo(f"skipped invalid {path} ({len(problems)} problem(s))", err=True)
+            continue
+        if model.app == app_id:
+            out.append(model)
+    return out
+
+
 @app.command()
 def brief(
-    app_id: str = typer.Argument(..., help="Application id, as used in automation.yaml touches."),
-    source: Path = typer.Option(..., help="Folder holding the real application's source."),
-    system: str = typer.Option(None, help="Name of the real system. Default: the source folder."),
-    force: bool = typer.Option(False, "--force", help="Replace an existing BRIEF.md and schema."),
+    app_id: str = typer.Argument(..., help="Application id, as used in automation.yaml and flows."),
+    source: Path = typer.Option(None, help="Folder holding the real application's source, if any."),
+    system: str = typer.Option(None, help="Name of the real system. Default: the app id."),
+    force: bool = typer.Option(
+        False, "--force", help="Replace an existing brief, model and schema."
+    ),
     db_engine: str = typer.Option(
         None, help="Database the real system runs: postgres, mssql, oracle, db2, mysql, sqlite."
     ),
 ) -> None:
-    """Write apps/<app>/BRIEF.md, db/schema.sql and a first app.yaml from the source and demand."""
+    """Write apps/<app>/model.yaml, BRIEF.md, db/schema.sql and a first app.yaml from the evidence."""
     root = _root()
-    report = demand_report.demand(app_id, _automations())
-    if not report["needed_by"]:
-        typer.echo(f"no registered automation touches '{app_id}'; nothing to build", err=True)
+    automations = [a for a in _automations() if any(t.app == app_id for t in a.touches)]
+    flows = _flows(app_id)
+    if not automations and not flows:
+        typer.echo(
+            f"no registered automation or requested flow needs '{app_id}'; nothing to build",
+            err=True,
+        )
         raise typer.Exit(1)
-    if not source.is_dir():
+    if source is not None and not source.is_dir():
         typer.echo(f"source folder not found: {source}", err=True)
         raise typer.Exit(2)
-    out = root / "apps" / app_id
-    brief_file, schema_file, app_file = (
-        out / "BRIEF.md",
-        out / "db" / "schema.sql",
-        out / "app.yaml",
-    )
     if db_engine is not None and db_engine not in sam.ENGINES:
         typer.echo(f"unknown --db-engine; one of {', '.join(sam.ENGINES)}", err=True)
         raise typer.Exit(2)
-    if (brief_file.exists() or schema_file.exists()) and not force:
+    out = root / "apps" / app_id
+    model_file, brief_file = out / "model.yaml", out / "BRIEF.md"
+    schema_file, app_file = out / "db" / "schema.sql", out / "app.yaml"
+    if (brief_file.exists() or schema_file.exists() or model_file.exists()) and not force:
         typer.echo(f"{out} already has a brief; --force replaces it", err=True)
         raise typer.Exit(1)
     try:
         result = brief_mod.build(
-            app_id, system or source.resolve().name, source, report, root, db_engine
+            app_id,
+            system or (source.resolve().name if source else app_id),
+            automations=automations,
+            flows=flows,
+            source=source,
+            repo_root=root,
+            db_engine=db_engine,
         )
     except UnsupportedStack as exc:
         typer.echo(f"UNSUPPORTED  {exc}", err=True)
         raise typer.Exit(2) from exc
     schema_file.parent.mkdir(parents=True, exist_ok=True)
+    model_file.write_text(
+        yaml.safe_dump(
+            result.model.model_dump(mode="json", by_alias=True, exclude_none=True),
+            sort_keys=False,
+            width=100,
+        ),
+        encoding="utf-8",
+    )
     brief_file.write_text(brief_mod.render(result, root), encoding="utf-8")
     schema_file.write_text(brief_mod.schema(result, root), encoding="utf-8")
     if app_file.exists():
@@ -211,7 +240,10 @@ def brief(
     )
     for gap in result.gaps:
         typer.echo(f"  OPEN  {gap}")
-    typer.echo(f"wrote {brief_file.relative_to(root)}, {schema_file.relative_to(root)}")
+    typer.echo(
+        f"wrote {model_file.relative_to(root)}, {brief_file.relative_to(root)}, "
+        f"{schema_file.relative_to(root)}"
+    )
 
 
 @app_app.command("list")

@@ -1,7 +1,9 @@
 # Contracts
 
-The files every part agrees on (the app model and flow files are described in
-[06-evidence.md](06-evidence.md) and get their contracts in plan item E-01). Each becomes a pydantic model in `lab/labctl` with an
+The files every part agrees on. The app model (`apps/<app>/model.yaml`) and requested flows
+(`flows/<id>.yaml`) are described in [06-evidence.md](06-evidence.md); their models are in
+`lab/labctl/labctl/appmodel.py`, with examples in `specs/model.example.yaml` and
+`specs/flow.example.yaml`. Each becomes a pydantic model in `lab/labctl` with an
 example under `specs/`; a test loads the example and asserts it validates. All names and values
 below are illustrative.
 

@@ -64,6 +64,12 @@ def match_score(pattern: str, path: str) -> int | None:
     return score
 
 
+def same_shape(a: str, b: str) -> bool:
+    """Whether two paths describe the same route: literals equal, parameters in the same places."""
+    x, y = segments(a), segments(b)
+    return len(x) == len(y) and all(p == q for p, q in zip(x, y, strict=True))
+
+
 def best_match(path: str, candidates: list, key) -> object | None:
     """The candidate whose pattern fits `path` with the most literal segments (router order)."""
     best, best_score = None, -1

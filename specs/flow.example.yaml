@@ -1,0 +1,21 @@
+id: case-update
+app: showcase
+requested_by: demo team
+purpose: Demo of a UiPath bot and an agent updating a case
+steps:
+  - screen: Sign in
+    path: /login
+    do: enter user id and password, press Sign in
+    fields: [User ID, Password]
+  - screen: Find a case
+    path: /cases
+    do: type the case number, press Search, read the status in the results
+    fields: [Case number]
+  - screen: Case
+    path: /cases/{caseNo}
+    do: choose category, then sub-category (depends on category), set status, Save
+    fields: [Category, Sub-category, Status]
+    rules:
+      - Resolving needs at least one note
+      - Escalating needs a reason of at least 10 characters
+evidence: [screenshots:case-screen]

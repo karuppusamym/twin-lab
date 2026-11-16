@@ -34,7 +34,7 @@ class Column:
 class Table:
     name: str
     model: str
-    file: Path
+    file: Path | None
     line: int
     columns: list[Column] = field(default_factory=list)
 
@@ -246,7 +246,12 @@ def ddl(tables: list[Table], header: str, engine: str = "sqlite") -> str:
                 body.append(
                     f"  FOREIGN KEY ({c.name}) REFERENCES {c.references[0]} ({c.references[1]})"
                 )
-        lines.append(f"\n-- {table.model}, {table.file.name}:{table.line}")
+        where = (
+            f"{table.file.name}:{table.line}"
+            if table.file
+            else "declared only; column types assumed"
+        )
+        lines.append(f"\n-- {table.model}, {where}")
         lines.append(f"CREATE TABLE {table.name} (\n" + ",\n".join(body) + "\n);")
         for c in table.columns:
             if c.index and not c.unique and not c.primary_key:

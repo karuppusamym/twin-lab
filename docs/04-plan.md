@@ -64,7 +64,7 @@ Real source code will usually not be available ([06-evidence.md](06-evidence.md)
 the case where it is. These items cover the rest, proven on the reference app by giving the
 factory less and less evidence and measuring what is lost.
 
-- [ ] **E-01 App model with provenance** · M
+- [x] **E-01 App model with provenance** · M
   Contract for `apps/<app>/model.yaml` (screens, elements, flows, routes with shapes, tables,
   rules, stack; each item with its evidence and basis) and for `flows/<id>.yaml`. The source
   analysers of T-05 write into the model; `labctl brief` reads only the model; conflicts between
@@ -72,6 +72,8 @@ factory less and less evidence and measuring what is lost.
   DoD: the showcase brief generated through the model is the same as the T-05 brief, apart from
   added basis labels; two kinds of evidence that disagree on a selector produce an open question,
   not a silent choice.
+  *Done: same screens, routes, tables, rules and schema as before; the brief text gained basis
+  labels and an evidence list. See CHANGELOG.*
 
 - [ ] **E-02 HAR analyser** · L
   HAR 1.2 -> model: pages from captured HTML (elements, ids, classes, labels, framework and
