@@ -1,0 +1,13 @@
+# Pipeline for the qtt demo app (written by labctl brief). The steps are in app.yml.
+name: app-qtt
+on:
+  push:
+    branches: [main]
+    paths: ["apps/qtt/**", "automations/**", "lab/**", ".github/workflows/app.yml", ".github/workflows/app-qtt.yml"]
+  pull_request:
+    paths: ["apps/qtt/**", "automations/**", "lab/**", ".github/workflows/app.yml", ".github/workflows/app-qtt.yml"]
+jobs:
+  app:
+    uses: ./.github/workflows/app.yml
+    with:
+      app: qtt

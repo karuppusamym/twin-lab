@@ -504,20 +504,32 @@ def _find_conflicts(model: AppModel) -> None:
                          "or the automation and the source disagree",
                     evidence=_union(el.from_, [e for e in screen.from_ if e not in el.from_]),
                 ))  # fmt: skip
-        if complete["screens"] and screen.basis == "declared":
+        if (
+            complete["screens"]
+            and screen.basis == "declared"
+            and not set(screen.from_) & set(complete["screens"])
+        ):
             model.conflicts.append(Conflict(
                 what=f"screen {screen.name} ({screen.path or 'path unknown'}) is used by {who(screen.from_)} "
                      "but no route in the frontend matches it",
                 evidence=screen.from_ + complete["screens"],
             ))  # fmt: skip
     for route in model.routes:
-        if complete["routes"] and route.basis == "declared":
+        if (
+            complete["routes"]
+            and route.basis == "declared"
+            and not set(route.from_) & set(complete["routes"])
+        ):
             model.conflicts.append(Conflict(
                 what=f"{route.key} is called by {who(route.from_)} but no backend route serves it",
                 evidence=route.from_ + complete["routes"],
             ))  # fmt: skip
     for table in model.tables:
-        if complete["tables"] and table.basis == "declared":
+        if (
+            complete["tables"]
+            and table.basis == "declared"
+            and not set(table.from_) & set(complete["tables"])
+        ):
             model.conflicts.append(Conflict(
                 what=f"table {table.name} is queried by {who(table.from_)} but no model declares it",
                 evidence=table.from_ + complete["tables"],

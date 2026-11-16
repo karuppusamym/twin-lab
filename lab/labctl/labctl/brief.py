@@ -234,6 +234,13 @@ def scope(app: str, system: str, model: AppModel, db_engine: str | None = None) 
             origin = call.at.file if call.at else "recorded"
             _add(brief.routes, route.key, f"called by screen {screen.path} ({origin})")
 
+    # A server-rendered screen is served by a GET route on its own path: that route is the page.
+    for scope_ in brief.screens:
+        if scope_.screen.path:
+            for route in model.routes:
+                if route.method == "GET" and src.same_shape(route.path, scope_.screen.path):
+                    _add(brief.routes, route.key, f"serves screen {scope_.screen.path}")
+
     # Routes somebody calls directly, and a health route for the lab agent.
     for route in model.routes:
         callers = _by([f for f in route.from_ if f.startswith("automation:")])
@@ -246,9 +253,23 @@ def scope(app: str, system: str, model: AppModel, db_engine: str | None = None) 
         brief.gaps.append("no health route in the evidence; the demo app must add GET /api/health")
 
     # Tables behind those routes, tables queried directly, and their parents.
+    listed = set(model.complete("tables"))  # evidence that lists every table (source, DDL)
     for key in list(brief.routes):
         for table in model.route(key).tables:
+            known = next((x for x in model.tables if x.name == table), None)
+            if listed and known is not None and known.basis == "inferred":
+                continue  # a shape guessed from a response; the listed tables are the real ones
             _add(brief.tables, table, f"used by {key}")
+    # Without source code nothing shows which tables a screen reads (server-rendered pages read
+    # the database directly), so every listed table may be needed by those screens.
+    sources = {e.id for e in model.evidence if e.kind == "source"}
+    blind = [s.screen.name for s in brief.screens if not sources & set(s.screen.from_)]
+    if blind and listed:
+        names = ", ".join(blind[:3]) + (f" and {len(blind) - 3} more" if len(blind) > 3 else "")
+        for table in model.tables:
+            if listed & set(table.from_):
+                _add(brief.tables, table.name,
+                     f"may be read by {names}: no source code shows which tables these screens use")  # fmt: skip
     for table in model.tables:
         callers = _by([f for f in table.from_ if f.startswith("automation:")])
         if callers:
