@@ -6,8 +6,10 @@ from __future__ import annotations
 import json
 import socket
 import subprocess
+import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -80,31 +82,38 @@ def test_attach_records_a_browser_someone_else_started(site, tmp_path):
     with sync_playwright() as pw:
         exe = pw.chromium.executable_path
     port = _free_port()
-    robot = subprocess.Popen(
-        [
-            exe,
-            "--headless=new",
-            f"--remote-debugging-port={port}",
-            "--no-first-run",
-            f"--user-data-dir={tmp_path / 'profile'}",
-            f"{site}/",
-        ],  # fmt: skip
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    args = [exe, "--headless=new", f"--remote-debugging-port={port}", "--no-first-run",
+            f"--user-data-dir={tmp_path / 'profile'}"]  # fmt: skip
+    if sys.platform.startswith("linux"):
+        args.append("--no-sandbox")  # CI containers have no user namespaces for Chrome's sandbox
+    log = (tmp_path / "chrome.log").open("w")
+    robot = subprocess.Popen([*args, f"{site}/"], stdout=log, stderr=subprocess.STDOUT)
     try:
         cdp = f"http://127.0.0.1:{port}"
-        for _ in range(100):
+        deadline = time.monotonic() + 30
+        while True:  # the DevTools endpoint answers once the browser is up
             try:
-                socket.create_connection(("127.0.0.1", port), 0.2).close()
-                break
+                with urllib.request.urlopen(f"{cdp}/json/version", timeout=1) as r:
+                    if r.status == 200:
+                        break
             except OSError:
-                time.sleep(0.1)
+                pass
+            if robot.poll() is not None or time.monotonic() > deadline:
+                log.flush()
+                pytest.fail(
+                    "the browser did not start:\n" + (tmp_path / "chrome.log").read_text()[-2000:]
+                )
+            time.sleep(0.2)
         done = threading.Event()
         result = {}
 
         def record():
-            result["out"] = recorder.attach(cdp, tmp_path / "att", stop=done.is_set, settle_ms=200)
+            try:
+                result["out"] = recorder.attach(
+                    cdp, tmp_path / "att", stop=done.is_set, settle_ms=200
+                )
+            except Exception as exc:  # noqa: BLE001 - reported by the test below
+                result["error"] = exc
 
         t = threading.Thread(target=record)
         t.start()
@@ -120,6 +129,8 @@ def test_attach_records_a_browser_someone_else_started(site, tmp_path):
     finally:
         robot.terminate()
         robot.wait(10)
+        log.close()
+    assert "error" not in result, f"the recorder failed: {result.get('error')!r}"
     out = result["out"]
     steps = steps_of(out)
     assert "click" in [s["action"] for s in steps]
