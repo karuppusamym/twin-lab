@@ -1,0 +1,80 @@
+id: showcase
+name: Case Workbench (demo copy)
+copies:
+  system: Case Workbench
+  source: reference/case-workbench
+  ref: sha256:3adecca8a37e027b
+  analysed: '2026-11-15'
+stack:
+  frontend:
+    framework: react
+    version: 18.3.1
+  backend:
+    framework: fastapi
+    version: '>=0.110'
+    language: python
+  db:
+    engine: postgres
+run:
+  web:
+    port: 8000
+  api:
+    port: 8000
+    health: /api/health
+  env:
+    database_url: DATABASE_URL
+db:
+  schema: db/schema.sql
+  derived_from:
+  - sqlalchemy models
+built_for:
+- uipath-case-update
+rules:
+- id: R1
+  where: POST /api/login
+  rule: '401 INVALID_CREDENTIALS when user is None or not secrets.compare_digest(user.password_hash, hash_password(body.password)):
+    Invalid user ID or password'
+  verification: hypothesis
+- id: R2
+  where: POST /api/login
+  rule: 'request body username: str, min_length=1'
+  verification: hypothesis
+- id: R3
+  where: POST /api/login
+  rule: 'request body password: str, min_length=1'
+  verification: hypothesis
+- id: R4
+  where: GET /api/categories, GET /api/categories/{category_id}/subcategories, GET /api/cases/search,
+    GET /api/cases/{case_no}, PUT /api/cases/{case_no}, GET /api/cases/{case_no}/notes, POST /api/cases/{case_no}/notes
+  rule: '401 NOT_SIGNED_IN when token not in tokens: Sign in to continue (in current_user)'
+  verification: hypothesis
+- id: R5
+  where: GET /api/cases/{case_no}, PUT /api/cases/{case_no}, GET /api/cases/{case_no}/notes, POST /api/cases/{case_no}/notes
+  rule: '404 CASE_NOT_FOUND when case is None: Case {case_no} not found (in load_case)'
+  verification: hypothesis
+- id: R6
+  where: PUT /api/cases/{case_no}, POST /api/cases/{case_no}/notes
+  rule: '409 CASE_CLOSED when case.status == ''CLOSED'': Case {case_no} is closed and cannot be changed'
+  verification: hypothesis
+- id: R7
+  where: PUT /api/cases/{case_no}
+  rule: '422 SUBCATEGORY_MISMATCH when sub is None or sub.category_id != body.category_id: Sub-category
+    does not belong to the category'
+  verification: hypothesis
+- id: R8
+  where: PUT /api/cases/{case_no}
+  rule: '422 ESCALATION_REASON_REQUIRED when body.status == ''ESCALATED'' and len(reason) < 10: Escalation
+    needs a reason of at least 10 characters'
+  verification: hypothesis
+- id: R9
+  where: PUT /api/cases/{case_no}
+  rule: '422 NOTE_REQUIRED when not notes: Add a note before resolving the case'
+  verification: hypothesis
+- id: R10
+  where: PUT /api/cases/{case_no}
+  rule: 'request body status: one of OPEN, IN_PROGRESS, ESCALATED, RESOLVED'
+  verification: hypothesis
+- id: R11
+  where: POST /api/cases/{case_no}/notes
+  rule: 'request body text: str, min_length=1, max_length=500'
+  verification: hypothesis
