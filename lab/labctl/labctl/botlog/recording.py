@@ -172,7 +172,7 @@ def load(path: Path) -> Recording:
                         ts=_ts(d.get("ts")),
                         url=d.get("url"),
                         action=str(d.get("action") or ""),
-                        selector=d.get("selector"),
+                        selector=_mask_ids(d.get("selector")),
                         dom=d.get("dom"),
                         value=d.get("value") if isinstance(d.get("value"), str) else None,
                     )
@@ -184,3 +184,12 @@ def load(path: Path) -> Recording:
     if har.exists():
         rec.entries = read_har(har)
     return rec
+
+
+def _mask_ids(selector):
+    """Record numbers built into a recorded selector (#open-R-1001) are masked like page ids."""
+    if not isinstance(selector, str):
+        return selector
+    from labctl.sanitize import mask_identifiers
+
+    return mask_identifiers(selector)

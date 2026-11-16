@@ -1,0 +1,2471 @@
+{
+  "app": "qtt",
+  "generated_by": "behaviour-catalog@0.1.0",
+  "recordings": [
+    "error-cases",
+    "loan-search",
+    "qc-review",
+    "review-return"
+  ],
+  "rules": [
+    {
+      "id": "B01",
+      "kind": "show",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loan-L-999999",
+      "detail": {},
+      "observations": 2,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        },
+        {
+          "recording": "loan-search",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        }
+      ]
+    },
+    {
+      "id": "B02",
+      "kind": "show",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loanCount",
+      "detail": {},
+      "observations": 2,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        },
+        {
+          "recording": "loan-search",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        }
+      ]
+    },
+    {
+      "id": "B03",
+      "kind": "show",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loanResults",
+      "detail": {},
+      "observations": 2,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        },
+        {
+          "recording": "loan-search",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        }
+      ]
+    },
+    {
+      "id": "B04",
+      "kind": "show",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#noResults",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 13,
+          "before": "dom/0012.html",
+          "after": "dom/0013.html"
+        }
+      ]
+    },
+    {
+      "id": "B05",
+      "kind": "hide",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loan-L-999999",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 13,
+          "before": "dom/0012.html",
+          "after": "dom/0013.html"
+        }
+      ]
+    },
+    {
+      "id": "B06",
+      "kind": "hide",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#searchHint",
+      "detail": {},
+      "observations": 2,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        },
+        {
+          "recording": "loan-search",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        }
+      ]
+    },
+    {
+      "id": "B07",
+      "kind": "set_value",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loanQuery",
+      "detail": {
+        "values": [
+          "A",
+          "A A A",
+          "A-9"
+        ]
+      },
+      "observations": 3,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        },
+        {
+          "recording": "loan-search",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        },
+        {
+          "recording": "loan-search",
+          "step": 13,
+          "before": "dom/0012.html",
+          "after": "dom/0013.html"
+        }
+      ]
+    },
+    {
+      "id": "B08",
+      "kind": "set_value",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loanResults",
+      "detail": {
+        "values": [
+          "A A A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 13,
+          "before": "dom/0012.html",
+          "after": "dom/0013.html"
+        }
+      ]
+    },
+    {
+      "id": "B09",
+      "kind": "delay",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#btnSearch",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loanCount",
+      "detail": {
+        "ms": [
+          64
+        ],
+        "p50_ms": 64,
+        "max_ms": 64,
+        "requests": [
+          "GET /loans/*"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        }
+      ]
+    },
+    {
+      "id": "B10",
+      "kind": "navigate",
+      "screen": "/loans",
+      "trigger": {
+        "element": "#loan-L-999999",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "/loans/*",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 8,
+          "before": "dom/0007.html",
+          "after": "dom/0008.html"
+        }
+      ]
+    },
+    {
+      "id": "B11",
+      "kind": "navigate",
+      "screen": "/loans/*",
+      "trigger": {
+        "element": "#backToSearch",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "/loans",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "loan-search",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B12",
+      "kind": "show",
+      "screen": "/login",
+      "trigger": {
+        "element": "#btnLogin",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loginError",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 4,
+          "before": "dom/0003.html",
+          "after": "dom/0004.html"
+        }
+      ]
+    },
+    {
+      "id": "B13",
+      "kind": "set_value",
+      "screen": "/login",
+      "trigger": {
+        "element": "#btnLogin",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#username",
+      "detail": {
+        "values": [
+          "A9"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 4,
+          "before": "dom/0003.html",
+          "after": "dom/0004.html"
+        }
+      ]
+    },
+    {
+      "id": "B14",
+      "kind": "navigate",
+      "screen": "/login",
+      "trigger": {
+        "element": "#btnLogin",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "/queue",
+      "detail": {},
+      "observations": 6,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 8,
+          "before": "dom/0007.html",
+          "after": "dom/0008.html"
+        },
+        {
+          "recording": "error-cases",
+          "step": 21,
+          "before": "dom/0020.html",
+          "after": "dom/0021.html"
+        },
+        {
+          "recording": "loan-search",
+          "step": 4,
+          "before": "dom/0003.html",
+          "after": "dom/0004.html"
+        },
+        {
+          "recording": "qc-review",
+          "step": 4,
+          "before": "dom/0003.html",
+          "after": "dom/0004.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 4,
+          "before": "dom/0003.html",
+          "after": "dom/0004.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 14,
+          "before": "dom/0013.html",
+          "after": "dom/0014.html"
+        }
+      ]
+    },
+    {
+      "id": "B15",
+      "kind": "delay",
+      "screen": "/login",
+      "trigger": {
+        "element": "#btnLogin",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#loginError",
+      "detail": {
+        "ms": [
+          3
+        ],
+        "p50_ms": 3,
+        "max_ms": 3,
+        "requests": [
+          "GET /login"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 4,
+          "before": "dom/0003.html",
+          "after": "dom/0004.html"
+        }
+      ]
+    },
+    {
+      "id": "B16",
+      "kind": "set_value",
+      "screen": "/queue",
+      "trigger": {
+        "element": "#btnFilter",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#mineOnly",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "review-return",
+          "step": 17,
+          "before": "dom/0016.html",
+          "after": "dom/0017.html"
+        }
+      ]
+    },
+    {
+      "id": "B17",
+      "kind": "set_value",
+      "screen": "/queue",
+      "trigger": {
+        "element": "#btnFilter",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#reviewSearch",
+      "detail": {
+        "values": [
+          "A-9"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        }
+      ]
+    },
+    {
+      "id": "B18",
+      "kind": "set_value",
+      "screen": "/queue",
+      "trigger": {
+        "element": "#btnFilter",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#statusFilter",
+      "detail": {
+        "values": [
+          "OPEN",
+          "RETURNED",
+          "SUBMITTED"
+        ]
+      },
+      "observations": 3,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 6,
+          "before": "dom/0005.html",
+          "after": "dom/0006.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 17,
+          "before": "dom/0016.html",
+          "after": "dom/0017.html"
+        }
+      ]
+    },
+    {
+      "id": "B19",
+      "kind": "delay",
+      "screen": "/queue",
+      "trigger": {
+        "element": "#btnFilter",
+        "event": "submit",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#statusFilter",
+      "detail": {
+        "ms": [
+          37,
+          60,
+          68
+        ],
+        "p50_ms": 60,
+        "max_ms": 68,
+        "requests": [
+          "GET /reviews/*"
+        ]
+      },
+      "observations": 3,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 6,
+          "before": "dom/0005.html",
+          "after": "dom/0006.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 17,
+          "before": "dom/0016.html",
+          "after": "dom/0017.html"
+        }
+      ]
+    },
+    {
+      "id": "B20",
+      "kind": "navigate",
+      "screen": "/queue",
+      "trigger": {
+        "element": "#open-R-9999",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "/reviews/*",
+      "detail": {},
+      "observations": 3,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 8,
+          "before": "dom/0007.html",
+          "after": "dom/0008.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 7,
+          "before": "dom/0006.html",
+          "after": "dom/0007.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 18,
+          "before": "dom/0017.html",
+          "after": "dom/0018.html"
+        }
+      ]
+    },
+    {
+      "id": "B21",
+      "kind": "show",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#returnNotice",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "review-return",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B22",
+      "kind": "show",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#returnReasonText",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "review-return",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B23",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#btnApprove",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "review-return",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B24",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#returnReason",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "review-return",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B25",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#auditRows",
+      "detail": {
+        "values": [
+          "9-9-9A9:9:9A A A9-9-9A9:9:9A_A9-9-9A9:9:9A_A9A-9 A A A9-9-9A9:9:9A_A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "review-return",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B26",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#findings",
+      "detail": {
+        "values": [
+          "A-9 A A A A A A A A: A A A A A A A A A A A A.A-9 A A A A (A A, A-9A A A A):"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "review-return",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B27",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#message",
+      "detail": {
+        "values": [
+          "A A A A A 9 A A A A A A A.",
+          "A A-9 A A A A."
+        ]
+      },
+      "observations": 2,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 24,
+          "before": "dom/0023.html",
+          "after": "dom/0024.html"
+        },
+        {
+          "recording": "review-return",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B28",
+      "kind": "delay",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#message",
+      "detail": {
+        "ms": [
+          9
+        ],
+        "p50_ms": 9,
+        "max_ms": 9,
+        "requests": [
+          "GET /reviews/*"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 24,
+          "before": "dom/0023.html",
+          "after": "dom/0024.html"
+        }
+      ]
+    },
+    {
+      "id": "B29",
+      "kind": "delay",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnReturn",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#returnNotice",
+      "detail": {
+        "ms": [
+          6
+        ],
+        "p50_ms": 6,
+        "max_ms": 6,
+        "requests": [
+          "GET /login",
+          "GET /logout"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "review-return",
+          "step": 9,
+          "before": "dom/0008.html",
+          "after": "dom/0009.html"
+        }
+      ]
+    },
+    {
+      "id": "B30",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-CMP-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B31",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-CMP-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B32",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-CMP-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B33",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-COL-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B34",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-COL-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B35",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-COL-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B36",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-CRD-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B37",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-CRD-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B38",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-CRD-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B39",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-INC-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B40",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-INC-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B41",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#comment-INC-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B42",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-CMP-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B43",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-CMP-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B44",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-CMP-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B45",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-COL-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B46",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-COL-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B47",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-COL-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B48",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-CRD-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B49",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-CRD-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B50",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-CRD-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B51",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-INC-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B52",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-INC-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B53",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#result-INC-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B54",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-CMP-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B55",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-CMP-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B56",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-CMP-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B57",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-COL-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B58",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-COL-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B59",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-COL-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B60",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-CRD-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B61",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-CRD-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B62",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-CRD-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B63",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-INC-01",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B64",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-INC-02",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B65",
+      "kind": "disable",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#save-INC-03",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B66",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#message",
+      "detail": {
+        "values": [
+          "9 A A(A) A A A: A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9.",
+          "9 A A(A) A A A: A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9, A-9.",
+          "A A-9 A A A."
+        ]
+      },
+      "observations": 3,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        },
+        {
+          "recording": "error-cases",
+          "step": 16,
+          "before": "dom/0015.html",
+          "after": "dom/0016.html"
+        },
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B67",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#reviewStatus",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B68",
+      "kind": "delay",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#message",
+      "detail": {
+        "ms": [
+          8
+        ],
+        "p50_ms": 8,
+        "max_ms": 8,
+        "requests": [
+          "GET /login",
+          "GET /logout"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 16,
+          "before": "dom/0015.html",
+          "after": "dom/0016.html"
+        }
+      ]
+    },
+    {
+      "id": "B69",
+      "kind": "delay",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#btnSubmit",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#reviewStatus",
+      "detail": {
+        "ms": [
+          7
+        ],
+        "p50_ms": 7,
+        "max_ms": 7,
+        "requests": [
+          "GET /queue*"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 45,
+          "before": "dom/0044.html",
+          "after": "dom/0045.html"
+        }
+      ]
+    },
+    {
+      "id": "B70",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CMP-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-CMP-01",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 38,
+          "before": "dom/0037.html",
+          "after": "dom/0038.html"
+        }
+      ]
+    },
+    {
+      "id": "B71",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CMP-02",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-CMP-02",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 41,
+          "before": "dom/0040.html",
+          "after": "dom/0041.html"
+        }
+      ]
+    },
+    {
+      "id": "B72",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CMP-03",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-CMP-03",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 44,
+          "before": "dom/0043.html",
+          "after": "dom/0044.html"
+        }
+      ]
+    },
+    {
+      "id": "B73",
+      "kind": "delay",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CMP-03",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-CMP-03",
+      "detail": {
+        "ms": [
+          42
+        ],
+        "p50_ms": 42,
+        "max_ms": 42,
+        "requests": [
+          "POST /api/reviews/*/submit"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 44,
+          "before": "dom/0043.html",
+          "after": "dom/0044.html"
+        }
+      ]
+    },
+    {
+      "id": "B74",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-COL-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-COL-01",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 29,
+          "before": "dom/0028.html",
+          "after": "dom/0029.html"
+        }
+      ]
+    },
+    {
+      "id": "B75",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-COL-02",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-COL-02",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 32,
+          "before": "dom/0031.html",
+          "after": "dom/0032.html"
+        }
+      ]
+    },
+    {
+      "id": "B76",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-COL-03",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-COL-03",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 35,
+          "before": "dom/0034.html",
+          "after": "dom/0035.html"
+        }
+      ]
+    },
+    {
+      "id": "B77",
+      "kind": "hide",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#noFindings",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 15,
+          "before": "dom/0014.html",
+          "after": "dom/0015.html"
+        }
+      ]
+    },
+    {
+      "id": "B78",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#auditRows",
+      "detail": {
+        "values": [
+          "9-9-9A9:9:9A A A9-9-9A9:9:9A_A9-9-9A9:9:9A_A9A-9 A A A"
+        ]
+      },
+      "observations": 2,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 15,
+          "before": "dom/0014.html",
+          "after": "dom/0015.html"
+        },
+        {
+          "recording": "qc-review",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        }
+      ]
+    },
+    {
+      "id": "B79",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#findings",
+      "detail": {
+        "values": [
+          "A-9 A A A A 9 A A A A A: A A A 9 A A A A A A."
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 15,
+          "before": "dom/0014.html",
+          "after": "dom/0015.html"
+        }
+      ]
+    },
+    {
+      "id": "B80",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-CRD-01",
+      "detail": {
+        "values": [
+          "A",
+          "A_A"
+        ]
+      },
+      "observations": 3,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 13,
+          "before": "dom/0012.html",
+          "after": "dom/0013.html"
+        },
+        {
+          "recording": "error-cases",
+          "step": 15,
+          "before": "dom/0014.html",
+          "after": "dom/0015.html"
+        },
+        {
+          "recording": "qc-review",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        }
+      ]
+    },
+    {
+      "id": "B81",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#message",
+      "detail": {
+        "values": [
+          "A A A A A A A A A.",
+          "A-9 A."
+        ]
+      },
+      "observations": 3,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 13,
+          "before": "dom/0012.html",
+          "after": "dom/0013.html"
+        },
+        {
+          "recording": "error-cases",
+          "step": 15,
+          "before": "dom/0014.html",
+          "after": "dom/0015.html"
+        },
+        {
+          "recording": "qc-review",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        }
+      ]
+    },
+    {
+      "id": "B82",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#reviewStatus",
+      "detail": {
+        "values": [
+          "A_A"
+        ]
+      },
+      "observations": 2,
+      "single_observation": false,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 15,
+          "before": "dom/0014.html",
+          "after": "dom/0015.html"
+        },
+        {
+          "recording": "qc-review",
+          "step": 11,
+          "before": "dom/0010.html",
+          "after": "dom/0011.html"
+        }
+      ]
+    },
+    {
+      "id": "B83",
+      "kind": "delay",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#reviewStatus",
+      "detail": {
+        "ms": [
+          29
+        ],
+        "p50_ms": 29,
+        "max_ms": 29,
+        "requests": [
+          "POST /api/reviews/*/submit"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "error-cases",
+          "step": 15,
+          "before": "dom/0014.html",
+          "after": "dom/0015.html"
+        }
+      ]
+    },
+    {
+      "id": "B84",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-02",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#auditRows",
+      "detail": {
+        "values": [
+          "9-9-9A9:9:9A A A9-9-9A9:9:9A_A9-9-9A9:9:9A_A9A-9 A A A9-9-9A9:9:9A_A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 14,
+          "before": "dom/0013.html",
+          "after": "dom/0014.html"
+        }
+      ]
+    },
+    {
+      "id": "B85",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-02",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-CRD-02",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 14,
+          "before": "dom/0013.html",
+          "after": "dom/0014.html"
+        }
+      ]
+    },
+    {
+      "id": "B86",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-CRD-03",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-CRD-03",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 17,
+          "before": "dom/0016.html",
+          "after": "dom/0017.html"
+        }
+      ]
+    },
+    {
+      "id": "B87",
+      "kind": "hide",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-INC-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#noFindings",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 20,
+          "before": "dom/0019.html",
+          "after": "dom/0020.html"
+        }
+      ]
+    },
+    {
+      "id": "B88",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-INC-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#findings",
+      "detail": {
+        "values": [
+          "A-9 A A A A (A A, A-9A A A A): A A A A A-9A A A A; A A A."
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 20,
+          "before": "dom/0019.html",
+          "after": "dom/0020.html"
+        }
+      ]
+    },
+    {
+      "id": "B89",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-INC-01",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-INC-01",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 20,
+          "before": "dom/0019.html",
+          "after": "dom/0020.html"
+        }
+      ]
+    },
+    {
+      "id": "B90",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-INC-02",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-INC-02",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 23,
+          "before": "dom/0022.html",
+          "after": "dom/0023.html"
+        }
+      ]
+    },
+    {
+      "id": "B91",
+      "kind": "set_value",
+      "screen": "/reviews/*",
+      "trigger": {
+        "element": "#save-INC-03",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#itemStatus-INC-03",
+      "detail": {
+        "values": [
+          "A"
+        ]
+      },
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "qc-review",
+          "step": 26,
+          "before": "dom/0025.html",
+          "after": "dom/0026.html"
+        }
+      ]
+    }
+  ]
+}

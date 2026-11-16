@@ -253,6 +253,11 @@ bindings:
   in_Db: '{{qtt.db}}'
   in_User: '{{qtt.credentials.username}}'
   in_Password: '{{qtt.credentials.password}}'
+test_inputs:
+  in_ReviewNo: R-1001
+  queueStatus: OPEN
+  in_PassComment: Checked against the loan file
+  in_FailComment: Income document missing from the file
 analysis:
   by: uipath-analyser@0.1.0
   gaps: []

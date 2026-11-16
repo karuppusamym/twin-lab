@@ -153,7 +153,20 @@ def generate(
         ),
         encoding="utf-8",
     )
-    brief_file.write_text(brief_mod.render(result, root), encoding="utf-8")
+    text = brief_mod.render(result, root)
+    behaviours_file = out / "behaviours.json"
+    lines = write_behaviours(app_id, discover(root, app_id).recordings, behaviours_file)
+    if lines:
+        marker = "## Running in the lab"
+        bullet_list = "\n".join(line if line.startswith("- ") else f"- {line}" for line in lines)
+        section = (
+            "## Behaviour seen in the recordings\n\n"
+            "Inferred from the page before and after each recorded step; every rule has evidence in "
+            "`behaviours.json`. Reproduce these. A rule seen once is marked as a single observation.\n\n"
+            f"{bullet_list}\n\n"
+        )
+        text = text.replace(marker, section + marker, 1) if marker in text else f"{text}\n{section}"
+    brief_file.write_text(text, encoding="utf-8")
     schema_file.write_text(brief_mod.schema(result, root), encoding="utf-8")
     write_workflow(root, app_id)
     kept = app_file.exists()
@@ -162,7 +175,10 @@ def generate(
             yaml.safe_dump(brief_mod.app_yaml(result, root), sort_keys=False, width=100),
             encoding="utf-8",
         )
-    return Result(result, [model_file, brief_file, schema_file, app_file], kept)
+    files = [model_file, brief_file, schema_file, app_file]
+    if behaviours_file.exists():
+        files.append(behaviours_file)
+    return Result(result, files, kept)
 
 
 WORKFLOW = """# Pipeline for the {app} demo app (written by labctl brief). The steps are in app.yml.
@@ -189,3 +205,17 @@ def write_workflow(root: Path, app_id: str) -> Path | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(WORKFLOW.format(app=app_id), encoding="utf-8")
     return path
+
+
+def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[str]:
+    """Behaviour catalog from the recordings that have page snapshots; returns lines for the brief."""
+    usable = [r for r in recordings if r.is_dir() and (r / "steps.jsonl").exists()]
+    if not usable:
+        if path.exists():
+            path.unlink()
+        return []
+    from labctl.behaviour import catalog as catalog_mod
+
+    found = catalog_mod.build(usable, app=app_id)
+    catalog_mod.write(found, path)
+    return catalog_mod.brief_lines(found)

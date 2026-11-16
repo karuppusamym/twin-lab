@@ -48,6 +48,34 @@ def mask(text: str) -> str:
     )
 
 
+IDENTIFIER_ATTRS = {"id", "class", "name", "for", "href", "action", "src", "aria-controls", "aria-labelledby",
+                    "aria-describedby", "headers", "list", "form"}  # fmt: skip
+DATA_TOKEN = re.compile(r"[A-Za-z0-9]*\d[A-Za-z0-9]*")
+
+
+def mask_identifiers(value: str) -> str:
+    """Mask record identifiers built into attribute values: any part with 3 or more digits.
+
+    `loan-L-200040` -> `loan-L-999999`, `/reviews/R-1001` -> `/reviews/R-9999`. Short codes such
+    as `CRD-01` are application constants and stay as they are.
+    """
+    return DATA_TOKEN.sub(
+        lambda m: mask(m.group()) if sum(c.isdigit() for c in m.group()) >= 3 else m.group(), value
+    )
+
+
+def mask_attributes(attrs):
+    return [
+        (
+            k,
+            mask_identifiers(v)
+            if v and (k.lower() in IDENTIFIER_ATTRS or k.lower().startswith("data-"))
+            else v,
+        )
+        for k, v in attrs
+    ]
+
+
 ID_SEGMENT = re.compile(
     r"^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,}|"
     r"(?=[^/]*\d)[A-Za-z0-9][A-Za-z0-9._~%+-]*)$",
@@ -200,6 +228,7 @@ class _Page(HTMLParser):
         self._start(tag, attrs, closed=True)
 
     def _start(self, tag: str, attrs, closed: bool) -> None:
+        attrs = mask_attributes(attrs)  # record numbers in ids and links never leave the evidence
         if self.drop:
             if tag in DROP_WITH_CONTENT and not closed:
                 self.drop += 1
@@ -298,6 +327,9 @@ class _Page(HTMLParser):
             return
         keep = self._kept()
         if keep:
+            data = mask_identifiers(
+                data
+            )  # "Loan L-200001" in a title or heading is a record number
             for label in self.open_label:
                 label["text"].append(data)
             for item in self.open_text:

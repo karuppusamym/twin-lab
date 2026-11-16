@@ -101,6 +101,7 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         f"{app}/model.yaml",
         f"{app}/db/schema.sql",
         f"{app}/app.yaml",
+        f"{app}/behaviours.json",
         "AGENTS.md",
         "docs/factory-playbook.md",
     ]

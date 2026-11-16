@@ -64,6 +64,9 @@ class _Builder(HTMLParser):
         self.stack: list[Node] = [self.root]
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        from labctl.sanitize import mask_attributes
+
+        attrs = mask_attributes(attrs)  # record numbers in ids never reach behaviours.json
         node = Node(tag, {k: (v if v is not None else "") for k, v in attrs}, self.stack[-1])
         self.stack[-1].children.append(node)
         if tag not in VOID:

@@ -841,4 +841,5 @@ def _safe_selector(selector: str) -> str:
             return m.group(0)
         return f'[{name}{m.group(2)}"{sanitize.mask(value)}"]'
 
-    return re.sub(r'\[([\w-]+)\s*([~|^$*]?=)\s*["\']?([^"\'\]]*)["\']?\]', fix, selector)[:200]
+    cleaned = re.sub(r'\[([\w-]+)\s*([~|^$*]?=)\s*["\']?([^"\'\]]*)["\']?\]', fix, selector)
+    return sanitize.mask_identifiers(cleaned)[:200]  # record numbers built into ids: #open-R-1001

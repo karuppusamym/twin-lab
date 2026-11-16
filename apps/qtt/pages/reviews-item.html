@@ -1,0 +1,382 @@
+<!-- /reviews/{id}: value-free snapshot from har:review-return. Structure, ids, classes and the application's own labels are real; every other text and value is masked (letters x/X, digits 9). -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="application-name" content="QTT">
+  <title>Review R-9999 - Quality Tracking Tool</title>
+  <link rel="stylesheet" href="/static/qtt.css?v=">
+</head>
+<body class="page-review">
+  <header id="appHeader" class="app-header">
+    <a id="appTitle" class="app-title" href="/queue">XXX <span class="app-sub">Xxxxxxx Xxxxxxxx Xxxx</span></a>
+    
+    <nav id="mainNav" class="main-nav">
+      <a id="navQueue" href="/queue">Xxxx xxxxx</a>
+      <a id="navLoans" href="/loans">Xxxx xxxxxx</a>
+      <a id="navAdmin" href="/admin/checklist">Xxxxxxxxx xxxxxxxxx</a>
+    </nav>
+    <div class="user-box">
+      <span id="currentUser" data-username="xxxxxxxx9" data-role="XXXXXXXX">Xxxxxx Xxxxx (Xxxxxxxx)</span>
+      <a id="btnLogout" href="/logout">Xxxx xxx</a>
+    </div>
+    
+  </header>
+  <main id="content" class="content">
+    
+
+<div class="title-row">
+  <h1>Review <span id="reviewNo" data-review-no="X-9999">X-9999</span></h1>
+  <span id="reviewStatus" class="badge status-submitted">XXXXXXXXX</span>
+</div>
+
+<div id="message" class="msg" role="status" aria-live="polite"></div>
+
+<div id="lockNotice" class="notice notice-locked" hidden>Xxxx xxxxxx xx xxxxxxxx xxx xxxxxx. Xxxxxxx xx xx xxx xxxxxx.</div>
+<div id="returnNotice" class="notice notice-returned" hidden>
+  Xxxxxxxx xx xxx xxxxxxxx: <span id="returnReasonText"></span>
+</div>
+
+<div class="columns">
+  <section id="loanSummary" class="card summary">
+    <h2>Loan summary</h2>
+    <dl>
+      <dt>Loan no</dt><dd id="loanNo"><a href="/loans/{id}">X-999999</a></dd>
+      <dt>Borrower</dt><dd id="borrowerName">Xxxx Xxxxxxxx</dd>
+      <dt>Product</dt><dd id="product">XXX 9/9</dd>
+      <dt>Amount</dt><dd id="loanAmount">$999,999.99</dd>
+      <dt>Closing date</dt><dd id="closingDate">9999-99-99</dd>
+      <dt>Branch</dt><dd id="branch">XX-999 Xxxxxxx Xxxxxxx</dd>
+    </dl>
+  </section>
+  <section id="reviewSummary" class="card summary">
+    <h2>Review</h2>
+    <dl>
+      <dt>Type</dt><dd id="reviewType">Xxxxxxxx</dd>
+      <dt>Assignee</dt><dd id="assignee">Xxxxx Xxxx (xxxxxxx9)</dd>
+      <dt>Due date</dt><dd id="dueDate">9999-99-99</dd>
+      <dt>Progress</dt><dd id="progress">99 xx 99 xxxxxxxx</dd>
+    </dl>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Checklist</h2>
+  <table id="checklist" class="grid checklist">
+    <thead><tr><th>Item</th><th>Check</th><th>Result</th><th>Comment</th><th></th></tr></thead>
+    
+    <tbody class="category" data-category="Xxxxxx">
+      <tr class="category-row"><th colspan="5">Credit</th></tr>
+      
+      <tr id="item-CRD-01" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxxx xxxxxx xxxxx xxxxxx 999 xxxx xx xxx xxxx xxxx<div class="guidance">Xxxxxxx xxx xxxxxx xxxxxx xxxx xxxx xxx xxxx xxxx.</div></td>
+        <td>
+          <select id="result-CRD-01" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX" selected>Pass</option><option value="XXXX">Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-CRD-01" class="comment-input" name="comment" type="text" maxlength="500" value="" disabled>
+        </td>
+        <td>
+          <button id="save-CRD-01" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-CRD-01" class="item-status"></span>
+        </td>
+      </tr>
+      
+      <tr id="item-CRD-02" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxxxxxxxxxxx xxxxxx xxxxx xxxxx xxx xxxxxxx xxxxxxx<div class="guidance">Xxx xxx xxxxxx xxxxx xx xxx xxxxxxx xxxxxxxx.</div></td>
+        <td>
+          <select id="result-CRD-02" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX" selected>Pass</option><option value="XXXX">Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-CRD-02" class="comment-input" name="comment" type="text" maxlength="500" value="" disabled>
+        </td>
+        <td>
+          <button id="save-CRD-02" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-CRD-02" class="item-status"></span>
+        </td>
+      </tr>
+      
+      <tr id="item-CRD-03" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxxxxxxxx xx xxx xxxxxxxxxxx xxxxx xxx xxxxxx xxxxxx<div class="guidance">Xxxxx xxxx xxxxxxxxx xx xxxxxx xx xxxxxxxxx.</div></td>
+        <td>
+          <select id="result-CRD-03" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX">Pass</option><option value="XXXX" selected>Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-CRD-03" class="comment-input required" name="comment" type="text" maxlength="500" value="Xxxx xxxx xx xxx xxxxxx xxxxxx xx xxx xxxxxx xx xxx xxxxxxxxxxx." required disabled>
+        </td>
+        <td>
+          <button id="save-CRD-03" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-CRD-03" class="item-status"></span>
+        </td>
+      </tr>
+      
+    </tbody>
+    
+    <tbody class="category" data-category="Xxxxxx">
+      <tr class="category-row"><th colspan="5">Income</th></tr>
+      
+      <tr id="item-INC-01" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxxx xxxxxxxxxxxxx xx xxxxxxxx (xxx xxxxx, X-9x xx xxx xxxxxxx)<div class="guidance">Xxx xxxxx xx xxxxxxx xxx xxxxxxxx xxx xxxx-xxxxxxxx xxxxxxxxx.</div></td>
+        <td>
+          <select id="result-INC-01" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX">Pass</option><option value="XXXX" selected>Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-INC-01" class="comment-input required" name="comment" type="text" maxlength="500" value="Xxxx xxx xxxx xx X-9x xx xxx xxxx; xxxxxx xxxx xxxxxxx." required disabled>
+        </td>
+        <td>
+          <button id="save-INC-01" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-INC-01" class="item-status"></span>
+        </td>
+      </tr>
+      
+      <tr id="item-INC-02" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxxx xxxxxxxxxxxx xx xxxxxxxxxx xxxxxx 99 xxxxxxxx xxxx xx xxxxxxx<div class="guidance">Xxx xxxxxxxx xxx xxxxxxx xxxxxxxxx; xxxx X/X xxxx x xxxxxxx.</div></td>
+        <td>
+          <select id="result-INC-02" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX">Pass</option><option value="XXXX" selected>Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-INC-02" class="comment-input required" name="comment" type="text" maxlength="500" value="Xxxxxx XXX xxxxx 99 xxxxxxxx xxxx xxxxxx xxxxxxx." required disabled>
+        </td>
+        <td>
+          <button id="save-INC-02" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-INC-02" class="item-status"></span>
+        </td>
+      </tr>
+      
+      <tr id="item-INC-03" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxx-xx-xxxxxx xxxxx xxxxxxxxxxxx xxx xxxxxx xxxxxxxxx<div class="guidance">Xxxxxxxxxxx xxxx xxxxxxxxxx xxxxxx xxx xxxxxxxxxxx.</div></td>
+        <td>
+          <select id="result-INC-03" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX" selected>Pass</option><option value="XXXX">Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-INC-03" class="comment-input" name="comment" type="text" maxlength="500" value="" disabled>
+        </td>
+        <td>
+          <button id="save-INC-03" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-INC-03" class="item-status"></span>
+        </td>
+      </tr>
+      
+    </tbody>
+    
+    <tbody class="category" data-category="Xxxxxxxxxx">
+      <tr class="category-row"><th colspan="5">Collateral</th></tr>
+      
+      <tr id="item-COL-01" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxxxxxx xxxxx xxxxxxxx xxx xxxx-xx-xxxxx xxxxx<div class="guidance">XXX xxxx xxx xxxxx xx xxxxxxxxx xxxxx xxx xxxxx.</div></td>
+        <td>
+          <select id="result-COL-01" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX" selected>Pass</option><option value="XXXX">Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-COL-01" class="comment-input" name="comment" type="text" maxlength="500" value="" disabled>
+        </td>
+        <td>
+          <button id="save-COL-01" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-COL-01" class="item-status"></span>
+        </td>
+      </tr>
+      
+      <tr id="item-COL-02" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxxxxxx xxxxxxx xxxxxx xx xxx xxxxxxxxxx xxxx</td>
+        <td>
+          <select id="result-COL-02" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX" selected>Pass</option><option value="XXXX">Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-COL-02" class="comment-input" name="comment" type="text" maxlength="500" value="" disabled>
+        </td>
+        <td>
+          <button id="save-COL-02" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-COL-02" class="item-status"></span>
+        </td>
+      </tr>
+      
+      <tr id="item-COL-03" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxx xxxxxxxxxx xxxxx xx xxxxxxxxxx xxxxx</td>
+        <td>
+          <select id="result-COL-03" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX" selected>Pass</option><option value="XXXX">Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-COL-03" class="comment-input" name="comment" type="text" maxlength="500" value="" disabled>
+        </td>
+        <td>
+          <button id="save-COL-03" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-COL-03" class="item-status"></span>
+        </td>
+      </tr>
+      
+    </tbody>
+    
+    <tbody class="category" data-category="Xxxxxxxxxx">
+      <tr class="category-row"><th colspan="5">Compliance</th></tr>
+      
+      <tr id="item-CMP-01" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxx Xxxxxxxx xxxxxx xxxxxx 9 xxxxxxxx xxxx xx xxxxxxxxxxx</td>
+        <td>
+          <select id="result-CMP-01" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX">Pass</option><option value="XXXX" selected>Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-CMP-01" class="comment-input required" name="comment" type="text" maxlength="500" value="Xxxx Xxxxxxxx xxxxxx xx xxxxxxxx xxx 9 xxxxx xxxxxxxxxxx." required disabled>
+        </td>
+        <td>
+          <button id="save-CMP-01" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-CMP-01" class="item-status"></span>
+        </td>
+      </tr>
+      
+      <tr id="item-CMP-02" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">Xxxxxxx Xxxxxxxxxx xxxxxxxx 9 xxxxxxxx xxxx xxxxxx xxxxxxxxxxxx</td>
+        <td>
+          <select id="result-CMP-02" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX" selected>Pass</option><option value="XXXX">Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-CMP-02" class="comment-input" name="comment" type="text" maxlength="500" value="" disabled>
+        </td>
+        <td>
+          <button id="save-CMP-02" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-CMP-02" class="item-status"></span>
+        </td>
+      </tr>
+      
+      <tr id="item-CMP-03" class="check-item" data-item-id="XXX-99">
+        <td class="item-code">XXX-99</td>
+        <td class="item-desc">XXXX xxxx xxxxxx xxxxxxxx xxx xxxxxxxxxx xxxx xxx xxxx</td>
+        <td>
+          <select id="result-CMP-03" class="result-select" name="result" disabled>
+            <option value="">-- Select --</option>
+            <option value="XXXX" selected>Pass</option><option value="XXXX">Fail</option><option value="XX">N/A</option>
+          </select>
+        </td>
+        <td>
+          <input id="comment-CMP-03" class="comment-input" name="comment" type="text" maxlength="500" value="" disabled>
+        </td>
+        <td>
+          <button id="save-CMP-03" type="button" class="btn btn-small btn-save-item" disabled>Save</button>
+          <span id="itemStatus-CMP-03" class="item-status"></span>
+        </td>
+      </tr>
+      
+    </tbody>
+    
+  </table>
+</section>
+
+<section class="card">
+  <h2>Findings <span id="findingsCount" class="count">(9)</span></h2>
+  <ul id="findings" class="findings">
+    
+    <li class="finding" data-item-id="XXX-99"><strong>XXX-99</strong> Xxxxxxxxxxx xx xxx xxxxxxxxxxx xxxxx xxx xxxxxx xxxxxx: <span class="finding-comment">Xxxx xxxx xx xxx xxxxxx xxxxxx xx xxx xxxxxx xx xxx xxxxxxxxxxx.</span></li>
+    
+    <li class="finding" data-item-id="XXX-99"><strong>XXX-99</strong> Xxxxxx xxxxxxxxxxxxx xx xxxxxxxx (xxx xxxxx, X-9x xx xxx xxxxxxx): <span class="finding-comment">Xxxx xxx xxxx xx X-9x xx xxx xxxx; xxxxxx xxxx xxxxxxx.</span></li>
+    
+    <li class="finding" data-item-id="XXX-99"><strong>XXX-99</strong> Xxxxxx xxxxxxxxxxxx xx xxxxxxxxxx xxxxxx 99 xxxxxxxx xxxx xx xxxxxxx: <span class="finding-comment">Xxxxxx XXX xxxxx 99 xxxxxxxx xxxx xxxxxx xxxxxxx.</span></li>
+    
+    <li class="finding" data-item-id="XXX-99"><strong>XXX-99</strong> Xxxx Xxxxxxxx xxxxxx xxxxxx 9 xxxxxxxx xxxx xx xxxxxxxxxxx: <span class="finding-comment">Xxxx Xxxxxxxx xxxxxx xx xxxxxxxx xxx 9 xxxxx xxxxxxxxxxx.</span></li>
+    
+  </ul>
+  <p id="noFindings" class="empty" hidden>Xx xxxxxx xxxxx.</p>
+</section>
+
+
+
+
+<section id="reviewerPanel" class="card actions">
+  <h2>Reviewer decision</h2>
+  <label for="returnReason">Reason for returning (at least 15 characters)</label>
+  <textarea id="returnReason" name="reason" rows="3" maxlength="500"></textarea>
+  <div class="buttons">
+    <button id="btnApprove" type="button" class="btn btn-primary">Approve</button>
+    <button id="btnReturn" type="button" class="btn btn-danger">Return with reason</button>
+  </div>
+</section>
+
+
+<section class="card">
+  <h2>History</h2>
+  <table id="auditTable" class="grid audit">
+    <thead><tr><th>When</th><th>Event</th><th>From</th><th>To</th><th>By</th><th>Detail</th></tr></thead>
+    <tbody id="auditRows">
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXXXXX</td><td></td><td>XXXX</td><td class="actor">xxxxxx</td><td class="detail">Xxxxxxxx xx xxxxxxx9</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXXXXX</td><td>XXXX</td><td>XX_XXXXXXXX</td><td class="actor">xxxxxxx9</td><td class="detail"></td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXX_XXXXXXX</td><td></td><td></td><td class="actor">xxxxxxx9</td><td class="detail">XXX-99 xxx xx XXXX</td></tr>
+      
+      <tr class="audit-row"><td class="when">9999-99-99X99:99:99X</td><td class="event">XXXXXXXXX</td><td>XX_XXXXXXXX</td><td>XXXXXXXXX</td><td class="actor">xxxxxxx9</td><td class="detail"></td></tr>
+      
+    </tbody>
+  </table>
+</section>
+
+  </main>
+  <footer class="app-footer">XXX 9.9.9 · xxxxxxxxx xxxxxx xxxx</footer>
+  
+</body>
+</html>

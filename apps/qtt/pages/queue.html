@@ -1,0 +1,176 @@
+<!-- /queue: value-free snapshot from har:review-return. Structure, ids, classes and the application's own labels are real; every other text and value is masked (letters x/X, digits 9). -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="application-name" content="QTT">
+  <title>Work queue - Quality Tracking Tool</title>
+  <link rel="stylesheet" href="/static/qtt.css?v=">
+</head>
+<body class="page-queue">
+  <header id="appHeader" class="app-header">
+    <a id="appTitle" class="app-title" href="/queue">XXX <span class="app-sub">Xxxxxxx Xxxxxxxx Xxxx</span></a>
+    
+    <nav id="mainNav" class="main-nav">
+      <a id="navQueue" href="/queue">Xxxx xxxxx</a>
+      <a id="navLoans" href="/loans">Xxxx xxxxxx</a>
+      <a id="navAdmin" href="/admin/checklist">Xxxxxxxxx xxxxxxxxx</a>
+    </nav>
+    <div class="user-box">
+      <span id="currentUser" data-username="xxxxxxxx9" data-role="XXXXXXXX">Xxxxxx Xxxxx (Xxxxxxxx)</span>
+      <a id="btnLogout" href="/logout">Xxxx xxx</a>
+    </div>
+    
+  </header>
+  <main id="content" class="content">
+    
+<h1>Work queue</h1>
+<form id="queueFilters" class="filters" method="get" action="/queue">
+  <label for="statusFilter">Status</label>
+  <select id="statusFilter" name="status">
+    <option value="">All</option>
+    <option value="XXXX">OPEN</option><option value="XX_XXXXXXXX">IN_PROGRESS</option><option value="XXXXXXXXX" selected>SUBMITTED</option><option value="XXXXXXXX">RETURNED</option><option value="XXXXXXXX">APPROVED</option>
+  </select>
+  <label for="reviewSearch">Review / loan / borrower</label>
+  <input id="reviewSearch" name="q" type="text" value="" placeholder="R-1001, L-200001 or name">
+  <label class="check"><input id="mineOnly" name="mine" type="checkbox" value="9"> Assigned to me</label>
+  <button id="btnFilter" type="submit" class="btn">Apply</button>
+  <a id="btnClearFilters" href="/queue" class="btn btn-link">Xxxxx</a>
+</form>
+<p id="resultCount" class="count">99 xxxxxx(x)</p>
+<table id="queueTable" class="grid">
+  <thead>
+    <tr><th>Review no</th><th>Loan no</th><th>Borrower</th><th>Product</th><th>Status</th><th>Due date</th><th>Assignee</th><th></th></tr>
+  </thead>
+  <tbody>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxx Xxxxxx</td>
+      <td class="product">XXX 9/9</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxx Xxxxxxxx</td>
+      <td class="product">XXX 9/9</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxxx Xxxxxx</td>
+      <td class="product">XXX 9/9</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxxx Xxxxx</td>
+      <td class="product">XX</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxx Xxxxxxxxx</td>
+      <td class="product">Xxxxx Xxxxx 99</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxxx Xxxxxxx</td>
+      <td class="product">Xxxxx 99</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxx Xxxxxx</td>
+      <td class="product">Xxxxx Xxxxx 99</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxx Xxxx</td>
+      <td class="product">Xxxxx 99</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxxx Xxxxxx</td>
+      <td class="product">XXX 9/9</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxx Xxxxx</td>
+      <td class="product">XXX 9/9</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+    <tr class="review-row" data-review-no="X-9999">
+      <td class="review-no">X-9999</td>
+      <td class="loan-no">X-999999</td>
+      <td class="borrower">Xxxxxx Xxxxxxxx</td>
+      <td class="product">Xxxxx 99</td>
+      <td class="status"><span class="badge status-submitted">XXXXXXXXX</span></td>
+      <td class="due-date">9999-99-99</td>
+      <td class="assignee">xxxxxxx9</td>
+      <td><a id="open-R-9999" class="open-review" href="/reviews/{id}">Xxxx</a></td>
+    </tr>
+    
+  </tbody>
+</table>
+
+  </main>
+  <footer class="app-footer">XXX 9.9.9 · xxxxxxxxx xxxxxx xxxx</footer>
+  
+</body>
+</html>

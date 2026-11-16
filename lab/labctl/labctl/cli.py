@@ -16,7 +16,9 @@ from labctl import demand as demand_report
 from labctl import evidence_cli, factory, repo
 from labctl import lab as lab_mod
 from labctl.analyse import uipath
+from labctl.behaviour import cli as behaviour_cli
 from labctl.bindings import BindingError
+from labctl.botlog import cli as botlog_cli
 from labctl.data import cli as data_cli
 from labctl.devin import cli as devin_cli
 from labctl.models import KINDS, Automation
@@ -256,6 +258,10 @@ lab_app = typer.Typer(no_args_is_help=True, help="Run demo apps in the lab (Dock
 app.add_typer(lab_app, name="lab")
 app.add_typer(evidence_cli.app, name="evidence", help="Analyse and record evidence.")
 app.add_typer(realdata_cli.app, name="realdata", help="Slice, mask and load real data (read-only).")
+app.add_typer(
+    botlog_cli.app, name="botlog", help="Robot logs, NetLog, bot traces, calibration, parity."
+)
+app.add_typer(behaviour_cli.app, name="behaviour", help="Behaviour catalog and fidelity replay.")
 data_app.registered_commands.extend(
     data_cli.app.registered_commands
 )  # template, validate, generate
