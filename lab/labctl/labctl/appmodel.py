@@ -107,6 +107,9 @@ class Route(Item):
     body: list[str] = []  # request body fields with their constraints
     tables: list[str] = []
     responses: dict[str, dict] = {}  # status -> response shape (field -> type, "[]" for items)
+    # Field names automations send and read (from their code), `items[].review_no` style.
+    sends: list[str] = []
+    reads: list[str] = []
     timings: Timing | None = None  # recordings: for slowness calibration
 
     @property

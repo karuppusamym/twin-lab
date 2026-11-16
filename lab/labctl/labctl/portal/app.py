@@ -30,6 +30,7 @@ from labctl import bindings as bnd
 from labctl import conformance as conf
 from labctl import factory, repo
 from labctl import lab as lab_mod
+from labctl.analyse import run as analysis
 from labctl.analyse import uipath
 from labctl.appmodel import Flow
 from labctl.models import App, Automation, Condition
@@ -125,6 +126,7 @@ def create_app(root: Path) -> FastAPI:
                 model.model_dump(mode="json", exclude_none=True), sort_keys=False, width=100
             ),
             encoding="utf-8",
+            newline="\n",
         )
 
     def app_model(app_id: str) -> App | None:
@@ -292,25 +294,18 @@ def create_app(root: Path) -> FastAPI:
                     )
                 save_automation(model)
             return _analyse(automation_id)
+        if kind == "python" and any((folder / "project").rglob("*.py")):
+            return _analyse(automation_id)  # fills in the fields each declared route uses
         return back(f"/automations/{automation_id}", "Automation registered")
 
     def _analyse(automation_id: str):
         model = get_automation(automation_id)
-        project = root / "automations" / automation_id / (model.source.path or "project")
         try:
-            result = uipath.analyse(project, model.source.entry, model.bindings)
-        except uipath.AnalysisError as exc:
+            result = analysis.analyse(root / "automations" / automation_id, model)
+        except analysis.AnalysisError as exc:
             return back(f"/automations/{automation_id}", f"Analysis refused: {exc}", "error")
-        data = model.model_dump(mode="json", exclude_none=True)
-        data["touches"] = result.touches
-        data["analysis"] = {
-            "by": uipath.VERSION,
-            "gaps": [g.model_dump() for g in result.gaps],
-            "notes": [n.model_dump() for n in result.notes],
-            "reviewed_by": None,
-        }
         try:
-            save_automation(Automation.model_validate(data))
+            save_automation(Automation.model_validate(result.data))
         except ValidationError as exc:
             return back(f"/automations/{automation_id}", _problems(exc), "error")
         return back(f"/automations/{automation_id}",

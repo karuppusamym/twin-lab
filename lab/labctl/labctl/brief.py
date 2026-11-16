@@ -172,6 +172,23 @@ def build(
     return scope(app, system, model, db_engine)
 
 
+def has_field(shape, path: str) -> bool:
+    """Whether a recorded response shape (`{"[]": item}` for lists) has `items[].review_no`."""
+    node = shape
+    for token in re.findall(r"\[\]|[^.\[\]]+", path):
+        if not isinstance(node, dict):
+            return False
+        if token == "[]":
+            if "[]" not in node:
+                return False
+            node = node["[]"]
+            continue
+        if token not in node:
+            return False
+        node = node[token]
+    return True
+
+
 def scope(app: str, system: str, model: AppModel, db_engine: str | None = None) -> Brief:
     needed = [e.id for e in model.evidence if e.id.startswith(NEED)]
     brief = Brief(app=app, system=system, model=model, needed_by=_by(needed))
@@ -262,6 +279,24 @@ def scope(app: str, system: str, model: AppModel, db_engine: str | None = None) 
         _add(brief.routes, route.key, "health check for the lab agent")
     if not health:
         brief.gaps.append("no health route in the evidence; the demo app must add GET /api/health")
+
+    # Fields a bot's code reads that the recorded answer does not have: the bot would break.
+    for key in brief.routes:
+        route = model.route(key)
+        shape = next(
+            (
+                v
+                for s, v in route.responses.items()
+                if s.startswith("2") and v and "(content)" not in v
+            ),
+            None,
+        )
+        missing = [f for f in route.reads if shape is not None and not has_field(shape, f)]
+        if missing:
+            brief.gaps.append(
+                f"`{key}`: automations read {', '.join(f'`{f}`' for f in missing)}, which the "
+                "recorded answer does not have; check the bot or the recording"
+            )
 
     # Tables behind those routes, tables queried directly, and their parents.
     listed = set(model.complete("tables"))  # evidence that lists every table (source, DDL)
@@ -541,6 +576,11 @@ def render(brief: Brief, repo_root: Path) -> str:
                 fields = ok["[]"] if isinstance(ok.get("[]"), dict) else ok
                 details.append("fields: " + ", ".join(f"`{f}`" for f in fields)
                                + " (shapes in `model.yaml`)")  # fmt: skip
+        if route.sends:
+            details.append("automations send: " + ", ".join(f"`{f}`" for f in route.sends))
+        if route.reads:
+            details.append("automations read: " + ", ".join(f"`{f}`" for f in route.reads)
+                           + " (return every one, with these names)")  # fmt: skip
         if route.timings:
             t = route.timings
             details.append(f"recorded {t.count} call(s): p50 {t.p50_ms} ms, p95 {t.p95_ms} ms, "
@@ -614,7 +654,8 @@ def render(brief: Brief, repo_root: Path) -> str:
         "1. Every element with a selector under *Screens* resolves on its screen (`labctl conformance`, T-07)."
     )
     w("2. Every route under *API routes* answers on the same method and path, with the same request "
-      "and response fields as the evidence shows.")  # fmt: skip
+      "and response fields as the evidence shows. Fields marked *automations read* come from the "
+      "bots' own code: a missing one breaks the bot even when conformance is READY.")  # fmt: skip
     w("3. `db/schema.sql` applies unchanged and the app works on it.")
     w("4. Every rule under *Rules* behaves as stated; each stays `hypothesis` in `app.yaml`.")
     w("5. Nothing under *Out of scope* exists in the demo app.\n")

@@ -87,9 +87,9 @@ def test_sample_yields_every_screen_and_selector_it_uses(sample):
 def test_sample_yields_the_routes_called_from_an_invoked_workflow(sample):
     api = next(t for t in sample.touches if t["via"] == "api")
     assert api["routes"] == [
-        {"method": "POST", "path": "/api/login"},
-        {"method": "POST", "path": "/api/cases/{in_CaseNo}/notes"},
-    ]
+        {"method": "POST", "path": "/api/login", "sends": ["username", "password"], "reads": ["token"]},
+        {"method": "POST", "path": "/api/cases/{in_CaseNo}/notes", "sends": ["text"]},
+    ]  # fmt: skip
     assert sample.files == ["Main.xaml", "AddNoteViaApi.xaml"]
 
 
@@ -114,7 +114,10 @@ def test_registered_sample_file_matches_a_fresh_analysis(sample):
     saved = Automation.model_validate(
         yaml.safe_load((SAMPLE / "automation.yaml").read_text(encoding="utf-8"))
     )
-    assert saved.model_dump(mode="json", exclude_none=True)["touches"] == sample.touches
+    fresh = Automation.model_validate(
+        {**saved.model_dump(mode="json", exclude_none=True), "touches": sample.touches}
+    )  # both through the model, so defaults (`reads: []`) compare equal
+    assert saved.touches == fresh.touches
 
 
 # --- gaps and refusals ---------------------------------------------------------------------------

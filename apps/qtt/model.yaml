@@ -23,7 +23,7 @@ evidence:
   - tables
 - id: automation:python-qtt-sla-report
   kind: automation
-  ref: manual
+  ref: python-fields/1
   complete: []
 - id: automation:uipath-qtt-qc-review
   kind: automation
@@ -2730,6 +2730,8 @@ routes:
   responses:
     '200':
       (content): text/html
+  sends: []
+  reads: []
   timings:
     count: 4
     p50_ms: 2
@@ -2754,6 +2756,8 @@ routes:
       (content): x-unknown
     '401':
       (content): text/html
+  sends: []
+  reads: []
   timings:
     count: 3
     p50_ms: 28
@@ -2776,6 +2780,8 @@ routes:
   responses:
     '200':
       (content): text/html
+  sends: []
+  reads: []
   timings:
     count: 2
     p50_ms: 7
@@ -2796,6 +2802,8 @@ routes:
       (content): text/html
     '404':
       (content): text/html
+  sends: []
+  reads: []
   timings:
     count: 4
     p50_ms: 6
@@ -2815,6 +2823,8 @@ routes:
       detail:
         code: string
         message: string
+  sends: []
+  reads: []
   timings:
     count: 2
     p50_ms: 5
@@ -2900,6 +2910,8 @@ routes:
       detail:
         code: string
         message: string
+  sends: []
+  reads: []
   timings:
     count: 2
     p50_ms: 8
@@ -2920,6 +2932,8 @@ routes:
       detail:
         code: string
         message: string
+  sends: []
+  reads: []
   timings:
     count: 1
     p50_ms: 5
@@ -2937,6 +2951,8 @@ routes:
   responses:
     '200':
       (content): text/html
+  sends: []
+  reads: []
   timings:
     count: 5
     p50_ms: 4
@@ -2953,6 +2969,8 @@ routes:
   responses:
     '200':
       (content): text/html
+  sends: []
+  reads: []
   timings:
     count: 1
     p50_ms: 16
@@ -2968,6 +2986,11 @@ routes:
   body: []
   tables: []
   responses: {}
+  sends:
+  - password
+  - username
+  reads:
+  - token
 - basis: declared
   from:
   - automation:python-qtt-sla-report
@@ -2977,6 +3000,14 @@ routes:
   body: []
   tables: []
   responses: {}
+  sends:
+  - status
+  reads:
+  - items[].assignee
+  - items[].due_date
+  - items[].loan_no
+  - items[].review_no
+  - items[].submitted_at
 - basis: declared
   from:
   - automation:uipath-qtt-qc-review
@@ -2986,6 +3017,9 @@ routes:
   body: []
   tables: []
   responses: {}
+  sends: []
+  reads:
+  - status
 tables:
 - basis: declared
   from:

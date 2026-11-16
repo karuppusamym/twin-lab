@@ -54,7 +54,7 @@
   {% if a.analysis.notes %}<details><summary>Notes ({{ a.analysis.notes | length }})</summary><ul class="small">{% for n in a.analysis.notes %}<li><b>{{ n.where }}</b>: {{ n.what }}</li>{% endfor %}</ul></details>{% endif %}
   <p class="small muted">Analysed by {{ a.analysis.by or "nobody" }} · reviewed by {{ a.analysis.reviewed_by or "nobody yet" }}</p>
   <div class="row">
-    {% if a.type.value == 'uipath' %}<form method="post" action="/automations/{{ a.id }}/analyse"><button type="submit" class="secondary">Analyse again</button></form>{% endif %}
+    {% if a.type.value in ('uipath', 'python') %}<form method="post" action="/automations/{{ a.id }}/analyse"><button type="submit" class="secondary">Analyse again</button></form>{% endif %}
     <form method="post" action="/automations/{{ a.id }}/review" class="row">
       <div><label for="reviewer">Reviewed by</label><input id="reviewer" type="text" name="reviewer" value="{{ a.analysis.reviewed_by or '' }}" placeholder="your name"></div>
       <div><button type="submit" class="secondary">Record review</button></div>

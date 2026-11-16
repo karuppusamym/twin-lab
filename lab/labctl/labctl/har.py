@@ -756,6 +756,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
                 "application's own labels are real; every other text and value is masked "
                 "(letters x/X, digits 9). -->\n" + best.html,
                 encoding="utf-8",
+                newline="\n",  # generated files are LF on every OS (they go into Git and images)
             )
             where = rel(out, repo_root)
             if Path(where).is_absolute():  # never write a machine's absolute paths into the model

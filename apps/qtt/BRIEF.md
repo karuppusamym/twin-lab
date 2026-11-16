@@ -9,12 +9,12 @@ A demo copy of **QTT**, scoped to what registered automations and requested flow
 | Evidence | `har:qc-review` (har, sha256:1f60e78e1626fee0) |
 | Evidence | `har:review-return` (har, sha256:00aef66de51ae037) |
 | Evidence | `ddl:ddl.sql` (ddl, sha256:409b77fa8f28b4f2) |
-| Evidence | `automation:python-qtt-sla-report` (automation, manual) |
+| Evidence | `automation:python-qtt-sla-report` (automation, python-fields/1) |
 | Evidence | `automation:uipath-qtt-qc-review` (automation, uipath-analyser@0.1.0) |
 | Evidence | `flow:qtt-loan-search` (flow, demo team) |
 | Needed by | `python-qtt-sla-report`, `uipath-qtt-qc-review`, `qtt-loan-search` |
 | Mode | **reconstruction**: built from a recording of the real application: real markup and API on the recorded paths; rules only where an error was recorded; nothing beyond what was recorded |
-| Generated | 2026-11-15 |
+| Generated | 2026-11-16 |
 | Reviewed by | *nobody yet* |
 
 Basis, on every item: **observed** (seen in a recording or the real code), **declared** (an automation or a specification says so), **inferred**, **described** (a person said so), **assumed** (nobody said).
@@ -294,6 +294,9 @@ Read: `apps/qtt/pages/loans-item.html`. Reproduce what these files render and do
 - `POST /api/reviews/{id}/return`: body: `reason: string`. responses: `422`. recorded 1 call(s): p50 5 ms, p95 5 ms, max 5 ms
 - `GET /loans`: query: `q`. responses: `200`. fields: `(content)` (shapes in `model.yaml`). recorded 5 call(s): p50 4 ms, p95 17 ms, max 17 ms
 - `GET /loans/{id}`: responses: `200`. fields: `(content)` (shapes in `model.yaml`). recorded 1 call(s): p50 16 ms, p95 16 ms, max 16 ms
+- `POST /api/login`: automations send: `password`, `username`. automations read: `token` (return every one, with these names)
+- `GET /api/reviews`: automations send: `status`. automations read: `items[].assignee`, `items[].due_date`, `items[].loan_no`, `items[].review_no`, `items[].submitted_at` (return every one, with these names)
+- `GET /api/reviews/{in_ReviewNo}`: automations read: `status` (return every one, with these names)
 
 ### Tables
 
@@ -435,7 +438,7 @@ Inferred from the page before and after each recorded step; every rule has evide
 ## Acceptance checks
 
 1. Every element with a selector under *Screens* resolves on its screen (`labctl conformance`, T-07).
-2. Every route under *API routes* answers on the same method and path, with the same request and response fields as the evidence shows.
+2. Every route under *API routes* answers on the same method and path, with the same request and response fields as the evidence shows. Fields marked *automations read* come from the bots' own code: a missing one breaks the bot even when conformance is READY.
 3. `db/schema.sql` applies unchanged and the app works on it.
 4. Every rule under *Rules* behaves as stated; each stays `hypothesis` in `app.yaml`.
 5. Nothing under *Out of scope* exists in the demo app.
