@@ -74,7 +74,7 @@ def brief_digest(repo_root: Path, app_id: str) -> str:
     if ref:
         return ref
     brief = repo_root / "apps" / app_id / "BRIEF.md"
-    return "sha256:" + hashlib.sha256(brief.read_bytes()).hexdigest()[:16]
+    return "sha256:" + hashlib.sha256(_content(brief)).hexdigest()[:16]
 
 
 def _check_inputs(repo_root: Path, app_id: str) -> None:
@@ -293,7 +293,7 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None) 
     task = prompt(repo_root, app_id, repo).encode("utf-8")
     files = _collect(repo_root, app_id)
     entries: list[tuple[str, bytes]] = [(TASK_FILE, task)]
-    entries += [(rel, path.read_bytes()) for rel, path in files]
+    entries += [(rel, _content(path)) for rel, path in files]
     listing = [
         {"path": rel, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
         for rel, data in entries
@@ -327,3 +327,13 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None) 
 def read_manifest(package: Path) -> dict:
     with zipfile.ZipFile(package) as zf:
         return json.loads(zf.read(MANIFEST_FILE))
+
+
+TEXT_SUFFIXES = {".md", ".yaml", ".yml", ".json", ".sql", ".html", ".txt", ".css", ".js"}
+
+
+def _content(path: Path) -> bytes:
+    """File bytes as the repository stores them: text with Unix line endings (a Windows checkout
+    may hold CRLF), so the checksums in MANIFEST.json match the files on GitHub."""
+    data = path.read_bytes()
+    return data.replace(b"\r\n", b"\n") if path.suffix.lower() in TEXT_SUFFIXES else data

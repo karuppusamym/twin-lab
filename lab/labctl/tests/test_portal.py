@@ -134,9 +134,10 @@ def test_evidence_upload_brief_and_package(repo):
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
     names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
     assert "DEVIN_TASK.md" in names and "apps/showcase/BRIEF.md" in names
-    assert (
-        "by hand" in client.get("/apps/showcase").text
-    )  # the download is tracked as a manual build
+    assert "by hand" not in client.get("/apps/showcase").text  # a download records nothing
+    pr = {"pr_url": "https://github.com/example/twin-lab/pull/7"}
+    r = client.post("/apps/showcase/devin/manual", data=pr)
+    assert "Build by hand recorded" in r.text and "pull/7" in r.text
 
 
 def test_devin_build_through_the_api_end_to_end_with_the_mock(repo, monkeypatch):
@@ -211,3 +212,40 @@ def test_parallel_jobs_keep_their_own_logs_and_release_stdout(tmp_path):
     assert (
         getattr(sys.stdout, "local", None) is None or getattr(sys.stdout.local, "log", None) is None
     )
+
+
+def test_cross_site_posts_are_refused(repo):
+    client = TestClient(create_app(repo))
+    r = client.post("/apps/showcase/data/reset", headers={"origin": "https://evil.example"})
+    assert r.status_code == 403
+    r = client.post("/flows", data={"text": "x"}, headers={"origin": "http://testserver"})
+    assert r.status_code == 200  # same site is fine
+
+
+def test_uploads_replace_only_when_asked_and_briefs_are_backed_up(repo):
+    client = TestClient(create_app(repo))
+    files = {"file": ("x.sql", b"CREATE TABLE a (id INTEGER);", "text/plain")}
+    first = client.post("/apps/showcase/evidence", data={"kind": "ddl", "name": "s"}, files=files)
+    assert "Added ddl" in first.text
+    again = client.post("/apps/showcase/evidence", data={"kind": "ddl", "name": "s"}, files=files)
+    assert "already exists" in again.text
+    forced = client.post(
+        "/apps/showcase/evidence", data={"kind": "ddl", "name": "s", "replace": "1"}, files=files
+    )
+    assert "Added ddl" in forced.text
+    (repo / "evidence/showcase/s.sql").unlink()
+
+    form = {"source": "reference/case-workbench", "db_engine": "postgres"}
+    for _ in range(2):
+        r = client.post("/apps/showcase/brief", data=form, follow_redirects=False)
+        assert wait_job(client, r.headers["location"])["status"] == "done"
+    backups = list((repo / ".lab-state/backups/showcase").iterdir())
+    assert len(backups) == 1 and (backups[0] / "BRIEF.md").exists()
+
+
+def test_source_folder_must_be_inside_the_repository(repo, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("elsewhere")
+    client = TestClient(create_app(repo))
+    r = client.post("/apps/showcase/brief", data={"source": str(outside)}, follow_redirects=False)
+    job = wait_job(client, r.headers["location"])
+    assert job["status"] == "failed" and "inside the repository" in job["log"]

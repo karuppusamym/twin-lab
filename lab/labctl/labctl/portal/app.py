@@ -52,6 +52,17 @@ def create_app(root: Path) -> FastAPI:
     password = os.environ.get("TWINLAB_PORTAL_PASSWORD")
 
     @portal.middleware("http")
+    async def same_site_only(request: Request, call_next):
+        """A form posted from another site (a page the user happens to have open) is refused."""
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            from urllib.parse import urlsplit as _split
+
+            source = request.headers.get("origin") or request.headers.get("referer")
+            if source and source != "null" and _split(source).netloc != request.headers.get("host"):
+                return Response("Refused: this request came from another site.", status_code=403)
+        return await call_next(request)
+
+    @portal.middleware("http")
     async def require_password(request: Request, call_next):
         if password and not request.url.path.startswith("/static"):
             header = request.headers.get("authorization", "")
@@ -168,9 +179,20 @@ def create_app(root: Path) -> FastAPI:
         return devin_config.load_config(root)
 
     builds: dict = {}
+    builds_lock = __import__("threading").Lock()
 
     def devin_jobs():
         """One build tracker for the portal's lifetime; unfinished builds resume polling."""
+        with builds_lock:
+            return _devin_jobs()
+
+    def own_job(app_id: str, job_id: str):
+        job = devin_jobs().get(job_id)
+        if job is None or job.app_id != app_id:
+            raise ValueError(f"no build {job_id} for {app_id}")
+        return job
+
+    def _devin_jobs():
         if "jobs" not in builds:
             from labctl.devin import jobs as devin_jobs_mod
             from labctl.devin.client import DevinClient
@@ -456,7 +478,11 @@ def create_app(root: Path) -> FastAPI:
 
     @portal.post("/apps/{app_id}/evidence")
     async def add_evidence(
-        app_id: str, kind: str = Form(...), file: UploadFile = File(...), name: str = Form("")
+        app_id: str,
+        kind: str = Form(...),
+        file: UploadFile = File(...),
+        name: str = Form(""),
+        replace: str = Form(""),
     ):
         app_id = slug(app_id, "app id")
         base = factory.evidence_dir(root, app_id)
@@ -482,7 +508,7 @@ def create_app(root: Path) -> FastAPI:
                         shutil.rmtree(target)
                         return back(f"/apps/{app_id}#evidence", "The zip has no .har file", "error")
             elif kind == "ddl":
-                (base / f"{stem}.sql").write_bytes(data)
+                _put(base / f"{stem}.sql", data, replace)
             elif kind == "openapi":
                 ext = ".json" if filename.lower().endswith(".json") else ".yaml"
                 prefix = (
@@ -496,7 +522,7 @@ def create_app(root: Path) -> FastAPI:
                     if filename.endswith(".postman_collection.json")
                     else f"{prefix}{stem}{ext}"
                 )
-                (base / target_name).write_bytes(data)
+                _put(base / target_name, data, replace)
             elif kind == "screenshot":
                 shots = base / "screenshots"
                 shots.mkdir(exist_ok=True)
@@ -506,7 +532,7 @@ def create_app(root: Path) -> FastAPI:
                     return back(
                         f"/apps/{app_id}#evidence", "Screenshots must be images or PDF", "error"
                     )
-                (shots / filename).write_bytes(data)
+                _put(shots / filename, data, replace)
             else:
                 return back(f"/apps/{app_id}#evidence", f"Unknown evidence kind {kind}", "error")
         except ValueError as exc:
@@ -558,6 +584,8 @@ def create_app(root: Path) -> FastAPI:
                 src_path = root / src_path
             if src_path is not None and not src_path.is_dir():
                 raise FileNotFoundError(f"source folder not found: {src_path}")
+            if src_path is not None and root not in src_path.resolve().parents:
+                raise PermissionError("the source folder must be inside the repository")
             result = factory.generate(
                 root, app_id, system.strip() or None, src_path, db_engine or None, force=True
             )
@@ -618,11 +646,25 @@ def create_app(root: Path) -> FastAPI:
             path = devin_package.build(root, app_id, state / "packages", cfg.github_repo)
         except Exception as exc:  # noqa: BLE001
             return back(f"/apps/{app_id}#build", f"Package not built: {exc}", "error")
-        try:
-            devin_jobs().record_manual(app_id, path)
-        except Exception:  # noqa: BLE001 - tracking is a convenience; the download must still work
-            pass
+        # A download changes nothing: the build is recorded when its pull request is entered.
         return FileResponse(path, filename=path.name, media_type="application/zip")
+
+    @portal.post("/apps/{app_id}/devin/manual")
+    def devin_manual(app_id: str, pr_url: str = Form(...)):
+        app_id = slug(app_id, "app id")
+        if not re.match(r"^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$", pr_url.strip()):
+            return back(f"/apps/{app_id}#build", "That is not a GitHub pull request URL", "error")
+        packages = sorted(
+            (state / "packages").glob(f"twinlab-{app_id}-*.zip"), key=lambda q: q.stat().st_mtime
+        )
+        try:
+            job = devin_jobs().record_manual(
+                app_id, packages[-1] if packages else Path("unknown.zip")
+            )
+            devin_jobs().attach_pr(job.id, pr_url.strip())
+        except Exception as exc:  # noqa: BLE001
+            return back(f"/apps/{app_id}#build", f"Not recorded: {exc}", "error")
+        return back(f"/apps/{app_id}#build", "Build by hand recorded with its pull request")
 
     @portal.post("/apps/{app_id}/devin/start")
     def devin_start(app_id: str, max_acu: str = Form("")):
@@ -641,7 +683,7 @@ def create_app(root: Path) -> FastAPI:
     @portal.post("/apps/{app_id}/devin/{job_id}/message")
     def devin_message(app_id: str, job_id: str, text: str = Form(...)):
         try:
-            devin_jobs().message(job_id, text)
+            devin_jobs().message(own_job(app_id, job_id).id, text)
         except Exception as exc:  # noqa: BLE001
             return back(f"/apps/{app_id}#build", f"Not sent: {exc}", "error")
         return back(f"/apps/{app_id}#build", "Message sent to Devin")
@@ -649,7 +691,7 @@ def create_app(root: Path) -> FastAPI:
     @portal.post("/apps/{app_id}/devin/{job_id}/cancel")
     def devin_cancel(app_id: str, job_id: str):
         try:
-            devin_jobs().cancel(job_id)
+            devin_jobs().cancel(own_job(app_id, job_id).id)
         except Exception as exc:  # noqa: BLE001
             return back(f"/apps/{app_id}#build", f"Not cancelled: {exc}", "error")
         return back(f"/apps/{app_id}#build", "Devin session stopped")
@@ -658,7 +700,10 @@ def create_app(root: Path) -> FastAPI:
     def devin_pr(app_id: str, job_id: str, pr_url: str = Form(...)):
         if not re.match(r"^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$", pr_url.strip()):
             return back(f"/apps/{app_id}#build", "That is not a GitHub pull request URL", "error")
-        devin_jobs().attach_pr(job_id, pr_url.strip())
+        try:
+            devin_jobs().attach_pr(own_job(app_id, job_id).id, pr_url.strip())
+        except Exception as exc:  # noqa: BLE001
+            return back(f"/apps/{app_id}#build", f"Not recorded: {exc}", "error")
         return back(f"/apps/{app_id}#build", "Pull request recorded")
 
     # lab
@@ -972,6 +1017,13 @@ def _problems(exc: ValidationError) -> str:
     return "; ".join(
         f"{'.'.join(str(p) for p in e['loc']) or '-'}: {e['msg']}" for e in exc.errors()
     )[:600]
+
+
+def _put(path: Path, data: bytes, replace: str) -> None:
+    """Write an uploaded file; an existing one is replaced only when the person said so."""
+    if path.exists() and not replace:
+        raise ValueError(f"{path.name} already exists; tick 'Replace' to overwrite it")
+    path.write_bytes(data)
 
 
 def _unzip(data: bytes, target: Path) -> None:

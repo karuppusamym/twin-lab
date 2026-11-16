@@ -142,16 +142,17 @@ def generate(
     schema_file, app_file = out / "db" / "schema.sql", out / "app.yaml"
     if (brief_file.exists() or schema_file.exists() or model_file.exists()) and not force:
         raise FactoryError(f"apps/{app_id} already has a brief; replace it explicitly")
+    backup(root, app_id)
     model = build_model(root, app_id, source)
     result = brief_mod.scope(app_id, system or app_id, model, db_engine)
     schema_file.parent.mkdir(parents=True, exist_ok=True)
-    model_file.write_text(
+    _write(
+        model_file,
         yaml.safe_dump(
             model.model_dump(mode="json", by_alias=True, exclude_none=True),
             sort_keys=False,
             width=100,
         ),
-        encoding="utf-8",
     )
     text = brief_mod.render(result, root)
     behaviours_file = out / "behaviours.json"
@@ -166,14 +167,13 @@ def generate(
             f"{bullet_list}\n\n"
         )
         text = text.replace(marker, section + marker, 1) if marker in text else f"{text}\n{section}"
-    brief_file.write_text(text, encoding="utf-8")
-    schema_file.write_text(brief_mod.schema(result, root), encoding="utf-8")
+    _write(brief_file, text)
+    _write(schema_file, brief_mod.schema(result, root))
     write_workflow(root, app_id)
     kept = app_file.exists()
     if not kept:
-        app_file.write_text(
-            yaml.safe_dump(brief_mod.app_yaml(result, root), sort_keys=False, width=100),
-            encoding="utf-8",
+        _write(
+            app_file, yaml.safe_dump(brief_mod.app_yaml(result, root), sort_keys=False, width=100)
         )
     files = [model_file, brief_file, schema_file, app_file]
     if behaviours_file.exists():
@@ -203,7 +203,7 @@ def write_workflow(root: Path, app_id: str) -> Path | None:
     if path.exists():
         return None
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(WORKFLOW.format(app=app_id), encoding="utf-8")
+    _write(path, WORKFLOW.format(app=app_id))
     return path
 
 
@@ -219,3 +219,34 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
     found = catalog_mod.build(usable, app=app_id)
     catalog_mod.write(found, path)
     return catalog_mod.brief_lines(found)
+
+
+GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "behaviours.json", "pages")
+
+
+def backup(root: Path, app_id: str) -> Path | None:
+    """Copy the generated files about to be replaced to .lab-state/backups/<app>/<time>/."""
+    import shutil
+    from datetime import UTC, datetime
+
+    from labctl.lab import state_dir
+
+    out = root / "apps" / app_id
+    present = [out / name for name in GENERATED if (out / name).exists()]
+    if not present:
+        return None
+    target = state_dir(root) / "backups" / app_id / datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    for path in present:
+        dest = target / path.relative_to(out)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_dir():
+            shutil.copytree(path, dest)
+        else:
+            shutil.copy2(path, dest)
+    return target
+
+
+def _write(path: Path, text: str) -> None:
+    """Generated files always have Unix line endings, on every machine, so their checksums in a
+    Devin package match the copies in the repository."""
+    path.write_bytes(text.replace("\r\n", "\n").encode("utf-8"))
