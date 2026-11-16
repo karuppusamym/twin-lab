@@ -168,7 +168,9 @@ Linking it to the `default` service account is enough. Alternatively set the var
 
 The workflow is `.github/workflows/deploy-ocp.yml`. It runs:
 
-- on every push to `main` that changes `apps/**`, `lab/**` or the workflow itself (all built apps);
+- on every push to `main` that changes `apps/**`, `lab/**` or the workflow itself. A push that
+  changes only `apps/showcase/` deploys only showcase; a change to the lab agent (`lab/**`) or
+  to this workflow deploys every built app; a push that touches no built app deploys nothing;
 - by hand: **Actions** > **deploy-ocp** > **Run workflow**, with an app name, or empty for all.
 
 Its jobs:

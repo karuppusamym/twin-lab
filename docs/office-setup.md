@@ -116,6 +116,11 @@ the portal follows them and shows the pull request. Details: [devin.md](devin.md
 
 ## 5. The everyday flow
 
+New people: open **Start here** (the first link at the top). It explains Twin Lab in four
+boxes, ticks off what is already done, and has one **Do it now** button for the next step. Type
+your name at the top of the page once; it shows who reserved a lab or accepted a change. Every
+app's page starts with its progress and its own next step.
+
 1. **Automations**: register each bot. For UiPath, upload the project as a zip and give the app
    it runs against; its screens, selectors, API calls and SQL are read from the XAML.
 2. **Flows**: for anything with no bot code, write the flow down.
@@ -131,7 +136,10 @@ the portal follows them and shows the pull request. Details: [devin.md](devin.md
    then **Settings > Get the latest from GitHub**.
 6. **App > Lab**: Start. The first start builds images and takes a few minutes. **Fidelity
    replay** replays a recording of the real application against the demo app and lists every
-   screen where it behaves differently.
+   screen where it behaves differently. **Reserve this lab** while you run something that must
+   not be disturbed: everyone else can look, but their changes are refused until it ends.
+   **Evidence > Does the app behave the same in UAT and production?** compares recordings of
+   the same flow from the two places.
 7. **Readiness**: check each automation. READY, or BLOCKED with what is missing.
 8. **App > Data**: load your own Excel data or synthetic data. Reset before each run. **Save
    current data** keeps it as a named pack ("month-end") to load again later; **Earlier
@@ -148,7 +156,8 @@ the portal follows them and shows the pull request. Details: [devin.md](devin.md
     JSON lines). You see each run step by step with its waits. **Make a condition from these
     timings** turns production's slowness into a condition you can apply in the lab.
     **Compare** checks that the bot does the same in the lab as in production: screens, fields,
-    values, requests and row changes (parity).
+    values, requests and row changes (parity). Given the lab run and its session, it also says
+    where every written value came from: typed by the bot, chosen by it, or set by the app.
 12. **Real data** (only when synthetic data is not enough): a masked slice of a replica, loaded
     into the lab with `labctl realdata load`. See [realdata.md](realdata.md).
 
@@ -213,6 +222,28 @@ labctl data baselines <app>
 labctl evidence attach <app> --cdp http://127.0.0.1:9222
 ```
 
+```bash
+labctl lab reserve <app> --minutes 60 --purpose "month-end run"
+```
+
+```bash
+labctl data quarantine <app> <baseline id> --reason "not masked"
+```
+
+```bash
+labctl session provenance <app> <session id> --run <upload>
+```
+
+```bash
+labctl behaviour compare --a evidence/<app>/uat-flow --b evidence/<app>/prod-flow
+```
+
+```bash
+labctl data load-across pack.json --dry-run
+```
+
+To run the labs on OpenShift instead of this machine, see [ocp.md](ocp.md).
+
 The whole harness chain in one command (reset, condition, session, harness bot, robot log,
 verdict, parity, report), for demos and regression:
 
@@ -229,6 +260,9 @@ labctl harness run uipath-case-update --inputs inputs.json --condition slow-data
 | A bot times out | a condition may be active (App > Conditions shows it) |
 | Devin build stuck in `waiting_for_user` | open the session link and answer, or send a message from the app page |
 | A bot is slow even with no condition | its address says `localhost`; use `127.0.0.1` (bindings do) |
+| A change is refused: "… has reserved this lab" | someone reserved it (App > Lab shows who and until when); ask them, or wait. Release it anyway only after asking |
+| Reset or Restore says the baseline is quarantined | someone marked that data unusable (the reason shows under Earlier baselines); load other data, or release the quarantine |
+| "this lab runs an older lab agent" | press Rebuild and restart on the app page, or `labctl lab up <app>` |
 | Reset says `LAB_BASELINE_MISMATCH` | the saved baseline does not match its label; take a baseline again (App > Data) |
 | `labctl devin start` says a build is unfinished | follow or cancel that build first, or add `--force` |
 | The portal says "unknown host name" | open it as http://127.0.0.1:8790, or add the name people use to `TWINLAB_PORTAL_HOSTS` (or set a portal password) |
@@ -248,7 +282,7 @@ labctl harness run uipath-case-update --inputs inputs.json --condition slow-data
   what it needs there, which is not the same as the real application. Each app and screen says
   how it was built (copy, reconstruction, skeleton, backend only, sample).
 - One shared copy per app: people using the same app at the same time share its data and
-  condition.
+  condition. Reserve the lab when that matters.
 - The lab's databases are Postgres. Bots that query SQL Server or Oracle directly need their
   connection pointed at the lab's Postgres address (the bindings give it).
 - A session is judged only once its automation has `expects:`; until then the verdict says

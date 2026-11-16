@@ -30,8 +30,8 @@ On 2026-11-16 an independent audit checked every claim against the code and the 
 | I-09 | Process analyser, bot trace | Done. | portal **Robot runs**, `labctl botlog trace` |
 | I-09a | Behaviour catalog | Done; it goes into every brief and Devin package. All kinds are exercised, `format` included. | `apps/<app>/behaviours.json` |
 | I-10 | Schema inventory from a replica | Done, read-only. Drivers: Postgres and SQLite built in; SQL Server, Oracle and MySQL as extras. | `labctl realdata inventory` |
-| I-11 | Value binding (typed value to column) | **Not built.** Without approval to capture production there is no input for it. Recordings, routes and DDL bind screens to tables instead. | - |
-| I-12 | Read/write provenance per column | **Partly.** Lab sessions record which rows and columns a run changed, and which tables it read or wrote. They do not separate values the bot typed from values the app derived. | portal Sessions |
+| I-11 | Value binding (typed value to column) | Done on lab runs. A bot run is joined with its lab session: each value the bot typed or chose is found in the column it landed in. A chosen label is traced to the code stored for it (`Payments` to `category_id 2`). Binding production runs would need production capture, which is not planned. | `labctl session provenance`, harness report, portal **Robot runs > Compare** |
+| I-12 | Read/write provenance per column | Done on lab runs. Every written column is typed by the bot, chosen by the bot, or set by the app. Values the bot entered that no column holds are listed. Sessions also record the tables read and written. | same as I-11, portal Sessions |
 | I-13 | Subset spec | Done. `draft-spec` writes a first spec from the inventory for a person to change: the seed, child limits, and history tables left out. | `labctl realdata draft-spec` |
 | I-14 | Closure engine | Done. Parents always, children bounded, cycles end. | `labctl realdata extract` |
 | I-15 | App-load trace diff | Done. The tables can come from a lab session: the lab's database link reads each statement and keeps the table names ("Tables used" on the session page). This means something only when the lab schema keeps the real names, as when it was built from the real DDL. | `labctl realdata trace-diff --observed-session` |
@@ -42,10 +42,10 @@ On 2026-11-16 an independent audit checked every claim against the code and the 
 | I-21a | Behaviour runtime in generated apps | **Replaced.** Behaviours are written into the brief. Prod Echo's "unobserved interaction" signal is gone. | brief |
 | I-22 | Package build and deploy | Done: one Dockerfile per app, `labctl lab up`, an app workflow in CI. | `labctl lab up`, `.github/workflows/app-*.yml` |
 | I-22a | Fidelity replay | Done. It replays a recording against the demo app and compares each step's screen. | portal **Lab > Fidelity replay**, `labctl behaviour fidelity` |
-| I-22b | UAT behaviour probing | **Partly.** Recording in UAT uses the same recorder. There is no UAT-versus-production mismatch check. | portal "Record a flow" |
-| I-23 | Runtime API, leases | **Partly.** The lab agent has an admin API. There are no leases: one shared copy per app. | lab agent |
+| I-22b | UAT behaviour probing | Done. Recordings from two places (UAT and production) give two behaviour catalogs, compared rule by rule: only in one, a different outcome, or not comparable because the other side never did it. | `labctl behaviour compare`, portal **Evidence** |
+| I-23 | Runtime API, leases | Done. The lab agent's admin API, and reservations: one person reserves a shared lab for a while, and changes by anyone else are refused until it ends. Still one copy per app, not one per run. | portal **Lab > Reserve**, `labctl lab reserve / release` |
 | I-24 | Parity: a run against the bot trace | Done. A production run is compared with the same bot's run in the lab and that run's session. | portal **Robot runs > Compare**, `labctl botlog parity`, `labctl harness run --golden` |
-| I-25 | Baselines, refresh, reset | Done except quarantine. Every baseline is kept (the newest 20, plus pinned ones) and can be restored. Named data packs save a data set and load it again by name. | portal **Data**, `labctl data baselines / restore / pin / save / use` |
+| I-25 | Baselines, refresh, reset | Done. Every baseline is kept (the newest 20, plus pinned and quarantined ones) and can be restored. A quarantined baseline cannot be restored or reset to, and its reason stays on record. Named data packs save and load a data set by name, also across apps. | portal **Data**, `labctl data baselines / restore / pin / quarantine / save / use / load-across` |
 | I-26 | First real process end to end | **Partly.** On the QTT stand-in: built from recordings and DDL alone, both bots READY, and the Python bot run in the lab under conditions, with a verdict. Prod Echo's definition of done (parity on three real runs, real data) needs the real QTT's evidence. | E-05 |
 | T-26 | Calibrate conditions from robot logs | Done. Robot-log timings become a condition profile. | portal **Robot runs > Make a condition** |
 | - | One command for the whole harness chain | Done. In order: reset, condition, session, harness bot, robot log, verdict, parity, report. The earlier condition is put back afterwards. | `labctl harness run` |
@@ -57,7 +57,7 @@ On 2026-11-16 an independent audit checked every claim against the code and the 
 | UiPath importer, gaps, READY/BLOCKED | Done: the analyser (T-03) and conformance (T-07). The Python analyser also reports SQL tables and page selectors the code uses that `touches` does not list (T-16). |
 | Bindings contract (`ATS_BINDINGS`) | **Partly.** The same envelope (`apps`, `inputs`, `output_path`), but different keys per app (`web`, `api`, `db`, `credentials`). ATS automations need small edits. |
 | Fault injection per call | Done: lab agent conditions (latency, faults), seeded and repeatable. A database link proxy is added. |
-| Isolation per run | **Partly.** Isolation is per app (one Compose project each), not per run; reset is optional before a session. |
+| Isolation per run | **Partly.** Isolation is per app (one Compose project, or one OpenShift deployment, each), with reservations so one person's run is not disturbed. There is no copy per run. |
 | "Nothing else changed" check | Done. An automation declares `expects:` (tables, operations, columns, row counts), usually by accepting a checked session. Every session then gets PASS or FAIL, with each unexpected change named. |
 | Trust rules for AI-authored changes | Done. `tools/guard_ai_changes.py` runs in CI on every pull request. It blocks a self-approved rule, an AI edit to the generated brief, and an AI change to an app together with its checks. |
 | Repeated runs for agent consistency | Done for web steps: `labctl harness run --repeat N` runs the chain N times under the same seeded condition. It is PASS only when every run passed and every session changed the same kinds of rows. An agent that is not the harness bot is repeated by hand and its sessions compared in the portal. |
@@ -65,11 +65,20 @@ On 2026-11-16 an independent audit checked every claim against the code and the 
 | xaml-replay and robot hand-off runners, SDK, scenarios | **Not carried over.** People run the bots; the harness bot replays web steps. |
 | TN3270 and SOAP adapters, YAML twin engine | **Not carried over** (only browser, API and database), or replaced by real demo apps. |
 
-## Open gaps, by value to an office user
+## Also built after the audit
 
-| Gap | Size | What it needs |
-|---|---|---|
-| Baseline quarantine | S | Mark a baseline unusable, for example data later found to be unmasked. |
-| UAT-versus-production behaviour check (I-22b) | M | Two recordings of one flow and a comparison of their behaviour catalogs. |
-| Value binding and typed-versus-derived provenance (I-11, I-12) | M | Approval to capture production; nothing to build on without it. |
-| Synapse job format | - | Agreement with the platform's owner; the adapter is ready to adjust. |
+| What | Where |
+|---|---|
+| Deploy to OpenShift: images to GHCR, one deployment and Route per app, only changed apps | `.github/workflows/deploy-ocp.yml`, `labctl ocp`, [ocp.md](ocp.md) |
+| An agentic bot beside the UiPath one (T-17) | `automations/agentic-case-update` |
+| What each kind of evidence finds (E-04) | [08-evidence-ablation.md](08-evidence-ablation.md) |
+| A Start here page, progress and next step per app, plain glossary | portal |
+
+## Open gaps
+
+| Gap | Why it stays open |
+|---|---|
+| Value binding on production runs | Needs approval to capture production. |
+| A copy of an app per run | One copy per app, with reservations, has been enough; per-run copies cost a database each. |
+| OpenShift tested on a real cluster | No cluster here; images were run as a random user ID like OpenShift does, and every manifest is tested. |
+| Synapse job format, QTT items (T-23 to T-27, I-26) | Left aside on purpose: they need other teams and the real QTT. |

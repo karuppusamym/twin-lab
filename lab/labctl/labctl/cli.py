@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from labctl import bindings as bindings_mod
 from labctl import conformance as conformance_mod
 from labctl import demand as demand_report
-from labctl import evidence_cli, factory, repo
+from labctl import evidence_cli, factory, ocp_cli, repo
 from labctl import lab as lab_mod
 from labctl.analyse import run as analysis
 from labctl.behaviour import cli as behaviour_cli
@@ -256,7 +256,7 @@ data_app.registered_commands.extend(
     data_cli.app.registered_commands
 )  # template, validate, generate
 app.add_typer(devin_cli.app, name="devin", help="Build apps with Devin: package, start, status.")
-app.add_typer(__import__("labctl.ocp_cli").ocp_cli.app, name="ocp")
+app.add_typer(ocp_cli.app, name="ocp")
 
 
 def _automation(automation_id: str) -> Automation:

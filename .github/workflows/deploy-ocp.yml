@@ -33,10 +33,13 @@ jobs:
       registry: ${{ steps.apps.outputs.registry }}
     steps:
       - uses: actions/checkout@v4
-      - name: Which apps (built, with a lab section)
+        with:
+          fetch-depth: 0  # to see what this push changed
+      - name: Which apps (built, with a lab section, and changed by this push)
         id: apps
         env:
           WANTED: ${{ inputs.app }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           built=()
@@ -49,14 +52,33 @@ jobs:
               echo "::error::apps/${WANTED} is not a built app with a lab section (built: ${built[*]})"; exit 1
             fi
             built=("$WANTED")
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${BEFORE:-}" ] \
+               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            # A merge updates only the apps it changed; a change to the lab agent or to this
+            # pipeline updates every app.
+            changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+            if ! grep -qE '^(lab/|\.github/workflows/deploy-ocp\.yml)' <<< "$changed"; then
+              only=()
+              for app in "${built[@]}"; do
+                if grep -q "^apps/${app}/" <<< "$changed"; then only+=("$app"); fi
+              done
+              built=("${only[@]}")
+            fi
           fi
-          echo "apps=$(printf '%s\n' "${built[@]}" | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+          if [ ${#built[@]} -eq 0 ]; then
+            echo "::notice::no built app changed; nothing to deploy"
+          fi
+          # App ids are slugs (a-z, 0-9, -), so they need no JSON escaping.
+          list=""
+          for app in "${built[@]}"; do list="${list:+$list,}\"$app\""; done
+          echo "apps=[$list]" >> "$GITHUB_OUTPUT"
           # GHCR names must be lower case.
           echo "registry=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           echo "Apps: ${built[*]}"
 
   build-agent:
     needs: plan
+    if: needs.plan.outputs.apps != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -82,6 +104,7 @@ jobs:
 
   build-app:
     needs: plan
+    if: needs.plan.outputs.apps != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -110,6 +133,7 @@ jobs:
 
   deploy:
     needs: [plan, build-agent, build-app]
+    if: needs.plan.outputs.apps != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Add required reviewers to the "ocp" environment (Settings > Environments) to approve deploys.
