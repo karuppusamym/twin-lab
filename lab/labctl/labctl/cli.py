@@ -20,6 +20,7 @@ from labctl.bindings import BindingError
 from labctl.data import cli as data_cli
 from labctl.devin import cli as devin_cli
 from labctl.models import KINDS, Automation
+from labctl.realdata import cli as realdata_cli
 from labctl.source import UnsupportedStack
 from labctl.source import sqlalchemy_models as sam
 
@@ -254,6 +255,7 @@ if __name__ == "__main__":
 lab_app = typer.Typer(no_args_is_help=True, help="Run demo apps in the lab (Docker Compose).")
 app.add_typer(lab_app, name="lab")
 app.add_typer(evidence_cli.app, name="evidence", help="Analyse and record evidence.")
+app.add_typer(realdata_cli.app, name="realdata", help="Slice, mask and load real data (read-only).")
 data_app.registered_commands.extend(
     data_cli.app.registered_commands
 )  # template, validate, generate
