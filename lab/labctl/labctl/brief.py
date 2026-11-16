@@ -271,6 +271,23 @@ def scope(app: str, system: str, model: AppModel, db_engine: str | None = None) 
     return brief
 
 
+BASIS_NOTE = {
+    "observed": "observed; column types as recorded",
+    "declared": "declared by an automation or a DDL file",
+    "inferred": "inferred from recorded responses; column types inferred",
+    "described": "described by a person; column types assumed",
+    "assumed": "assumed; column types assumed",
+}
+
+
+def _table_note(table: Table) -> str | None:
+    if table.basis == "declared":
+        if any(e.startswith("ddl:") for e in table.from_):
+            return "declared in a DDL file; column types as declared"
+        return "declared only; column types assumed"
+    return BASIS_NOTE.get(table.basis)
+
+
 def sam_tables(model: AppModel, names: list[str] | None = None) -> list[sam.Table]:
     """Model tables in the form the DDL writer takes."""
     out = []
@@ -282,6 +299,7 @@ def sam_tables(model: AppModel, names: list[str] | None = None) -> list[sam.Tabl
             model=t.model or t.name,
             file=Path(t.at.file) if t.at else None,
             line=t.at.line if t.at else 0,
+            note=None if t.at else _table_note(t),
         )
         table.columns = [
             sam.Column(
@@ -336,15 +354,10 @@ def schema(brief: Brief, repo_root: Path) -> str:
 def app_yaml(brief: Brief, repo_root: Path) -> dict:
     stack: dict = {"db": {"engine": brief.db_engine}}
     front = brief.model.stack.frontend or {}
-    if front.get(
-        "framework"
-    ):  # the fields the app.yaml contract has; the marker stays in the model
+    if front.get("framework"):
         stack["frontend"] = {
-            "framework": front["framework"],
-            "version": front.get("version") or "unknown",
+            k: front[k] for k in ("framework", "version", "ui_library", "marker") if front.get(k)
         }
-        if front.get("ui_library"):
-            stack["frontend"]["ui_library"] = front["ui_library"]
     if brief.model.stack.backend:
         stack["backend"] = brief.model.stack.backend
     source = brief.source

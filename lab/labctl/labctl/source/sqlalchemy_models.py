@@ -37,6 +37,7 @@ class Table:
     file: Path | None
     line: int
     columns: list[Column] = field(default_factory=list)
+    note: str | None = None  # where the table came from, when not from a source file
 
     @property
     def parents(self) -> list[str]:
@@ -249,7 +250,7 @@ def ddl(tables: list[Table], header: str, engine: str = "sqlite") -> str:
         where = (
             f"{table.file.name}:{table.line}"
             if table.file
-            else "declared only; column types assumed"
+            else table.note or "declared only; column types assumed"
         )
         lines.append(f"\n-- {table.model}, {where}")
         lines.append(f"CREATE TABLE {table.name} (\n" + ",\n".join(body) + "\n);")

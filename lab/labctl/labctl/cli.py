@@ -11,11 +11,10 @@ import yaml
 from pydantic import ValidationError
 
 from labctl import bindings as bindings_mod
-from labctl import brief as brief_mod
 from labctl import conformance as conformance_mod
 from labctl import demand as demand_report
+from labctl import evidence_cli, factory, repo
 from labctl import lab as lab_mod
-from labctl import repo
 from labctl.analyse import uipath
 from labctl.bindings import BindingError
 from labctl.data import cli as data_cli
@@ -188,69 +187,44 @@ def brief(
 ) -> None:
     """Write apps/<app>/model.yaml, BRIEF.md, db/schema.sql and a first app.yaml from the evidence."""
     root = _root()
-    automations = [a for a in _automations() if any(t.app == app_id for t in a.touches)]
-    flows = _flows(app_id)
-    if not automations and not flows:
-        typer.echo(
-            f"no registered automation or requested flow needs '{app_id}'; nothing to build",
-            err=True,
-        )
-        raise typer.Exit(1)
     if source is not None and not source.is_dir():
         typer.echo(f"source folder not found: {source}", err=True)
         raise typer.Exit(2)
     if db_engine is not None and db_engine not in sam.ENGINES:
         typer.echo(f"unknown --db-engine; one of {', '.join(sam.ENGINES)}", err=True)
         raise typer.Exit(2)
-    out = root / "apps" / app_id
-    model_file, brief_file = out / "model.yaml", out / "BRIEF.md"
-    schema_file, app_file = out / "db" / "schema.sql", out / "app.yaml"
-    if (brief_file.exists() or schema_file.exists() or model_file.exists()) and not force:
-        typer.echo(f"{out} already has a brief; --force replaces it", err=True)
-        raise typer.Exit(1)
+    found = factory.discover(root, app_id)
+    if found.kinds():
+        typer.echo("evidence: " + ", ".join(f"{len(getattr(found, k))} {k}" for k in found.kinds()))
     try:
-        result = brief_mod.build(
+        done = factory.generate(
+            root,
             app_id,
             system or (source.resolve().name if source else app_id),
-            automations=automations,
-            flows=flows,
-            source=source,
-            repo_root=root,
-            db_engine=db_engine,
+            source,
+            db_engine,
+            force,
         )
+    except factory.FactoryError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
     except UnsupportedStack as exc:
         typer.echo(f"UNSUPPORTED  {exc}", err=True)
         raise typer.Exit(2) from exc
-    schema_file.parent.mkdir(parents=True, exist_ok=True)
-    model_file.write_text(
-        yaml.safe_dump(
-            result.model.model_dump(mode="json", by_alias=True, exclude_none=True),
-            sort_keys=False,
-            width=100,
-        ),
-        encoding="utf-8",
-    )
-    brief_file.write_text(brief_mod.render(result, root), encoding="utf-8")
-    schema_file.write_text(brief_mod.schema(result, root), encoding="utf-8")
-    if app_file.exists():
-        typer.echo(f"kept existing {app_file}; rules in the brief may differ from it")
-    else:
-        app_file.write_text(
-            yaml.safe_dump(brief_mod.app_yaml(result, root), sort_keys=False, width=100),
-            encoding="utf-8",
+    result = done.brief
+    if done.kept_app_yaml:
+        typer.echo(
+            f"kept existing {root / 'apps' / app_id / 'app.yaml'}; rules in the brief may differ from it"
         )
     typer.echo(
         f"{app_id}: {len(result.screens)} screen(s), {len(result.routes)} route(s), "
         f"{len(result.tables)} table(s) in scope; "
         f"left out {len(result.out_screens)} screen(s), {len(result.out_routes)} route(s), "
-        f"{len(result.out_tables)} table(s)"
+        f"{len(result.out_tables)} table(s); mode {result.mode}"
     )
     for gap in result.gaps:
         typer.echo(f"  OPEN  {gap}")
-    typer.echo(
-        f"wrote {model_file.relative_to(root)}, {brief_file.relative_to(root)}, "
-        f"{schema_file.relative_to(root)}"
-    )
+    typer.echo("wrote " + ", ".join(str(p.relative_to(root)) for p in done.files))
 
 
 @app_app.command("list")
@@ -279,6 +253,7 @@ if __name__ == "__main__":
 
 lab_app = typer.Typer(no_args_is_help=True, help="Run demo apps in the lab (Docker Compose).")
 app.add_typer(lab_app, name="lab")
+app.add_typer(evidence_cli.app, name="evidence", help="Analyse and record evidence.")
 data_app.registered_commands.extend(
     data_cli.app.registered_commands
 )  # template, validate, generate

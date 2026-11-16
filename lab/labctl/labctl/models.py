@@ -160,8 +160,9 @@ class Copies(Contract):
 
 class FrontendStack(Contract):
     framework: str
-    version: str
+    version: str | None = None  # unknown for a server-rendered app
     ui_library: str | None = None
+    marker: str | None = None  # what identified the framework in a recording
 
 
 class BackendStack(Contract):
