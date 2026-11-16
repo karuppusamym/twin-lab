@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="application-name" content="QTT">
+  <title>{% block title %}{% endblock %} - Quality Tracking Tool</title>
+  <link rel="stylesheet" href="/static/qtt.css?v={{ version }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <header id="appHeader" class="app-header">
+    <a id="appTitle" class="app-title" href="/queue">QTT <span class="app-sub">Quality Tracking Tool</span></a>
+    {% if user %}
+    <nav id="mainNav" class="main-nav">
+      <a id="navQueue" href="/queue">Work queue</a>
+      <a id="navLoans" href="/loans">Loan search</a>
+      {% if user.role == "REVIEWER" %}<a id="navAdmin" href="/admin/checklist">Checklist templates</a>{% endif %}
+    </nav>
+    <div class="user-box">
+      <span id="currentUser" data-username="{{ user.username }}" data-role="{{ user.role }}">{{ user.full_name }} ({{ user.role | capitalize }})</span>
+      <a id="btnLogout" href="/logout">Sign out</a>
+    </div>
+    {% endif %}
+  </header>
+  <main id="content" class="content">
+{% block content %}{% endblock %}
+  </main>
+  <footer class="app-footer">QTT {{ version }} · synthetic sample data</footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

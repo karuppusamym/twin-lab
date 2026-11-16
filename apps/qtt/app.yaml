@@ -12,7 +12,14 @@ stack:
   frontend:
     framework: server-rendered
     marker: pages arrive with their content; no client framework marker
-run: {}
+run:
+  web:
+    port: 8000
+  api:
+    port: 8000
+    health: /api/health
+  env:
+    database_url: DATABASE_URL
 db:
   schema: db/schema.sql
   derived_from:

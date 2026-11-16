@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Loan search{% endblock %}
+{% block body_class %}page-loans{% endblock %}
+{% block content %}
+<h1>Loan search</h1>
+<form id="loanSearchForm" class="filters" method="get" action="/loans">
+  <label for="loanQuery">Loan number or borrower name</label>
+  <input id="loanQuery" name="q" type="text" value="{{ q }}" placeholder="L-200001 or Holt">
+  <button id="btnSearch" type="submit" class="btn btn-primary">Search</button>
+</form>
+{% if rows is none %}
+<p id="searchHint" class="hint">Enter part of a loan number or a borrower name.</p>
+{% else %}
+<p id="loanCount" class="count">{{ rows | length }} loan(s)</p>
+<table id="loanResults" class="grid">
+  <thead><tr><th>Loan no</th><th>Borrower</th><th>Product</th><th>Amount</th><th>Closing date</th><th>Branch</th></tr></thead>
+  <tbody>
+    {% for l in rows %}
+    <tr class="loan-row">
+      <td class="loan-no"><a id="loan-{{ l.loan_no }}" class="loan-link" href="/loans/{{ l.loan_no }}">{{ l.loan_no }}</a></td>
+      <td class="borrower">{{ l.borrower_name }}</td>
+      <td class="product">{{ product_name(l.product_code) }}</td>
+      <td class="amount">{{ l.loan_amount | money }}</td>
+      <td class="closing-date">{{ l.closing_date }}</td>
+      <td class="branch">{{ l.branch_code }} {{ l.branch_name }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if not rows %}<p id="noResults" class="empty">No loans match "{{ q }}".</p>{% endif %}
+{% endif %}
+{% endblock %}
