@@ -163,6 +163,13 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
         raise LabError(
             f"`docker compose up` failed for {app_id}:\n{(out.stderr or out.stdout)[-3000:]}"
         )
+    # The first time, the app's own starting data becomes the baseline, so Reset works at once.
+    try:
+        lab_agent = agent(root, app_id)
+        if not (lab_agent.info() or {}).get("baseline"):
+            lab_agent.baseline()
+    except LabError:
+        pass  # the app runs; the baseline can be set from the portal
     return out.stdout + out.stderr
 
 
