@@ -151,6 +151,9 @@ def start(
     ),
     wait: bool = typer.Option(False, "--wait", help="Stay and follow the job until it stops."),
     interval: float = typer.Option(30.0, "--interval", min=1.0, help="Seconds between polls."),
+    force: bool = typer.Option(
+        False, "--force", help="Start even though a build of this app is still unfinished."
+    ),
 ) -> None:
     """Start a Devin session through the API (the direct path)."""
     root = _root()
@@ -166,8 +169,9 @@ def start(
     jobs = _jobs(root, cfg)
     jobs.poll_interval = interval
     try:
-        job = jobs.start(app_id, gh or "", max_acu_limit=max_acu)
-    except pkg.PackageError as exc:
+        job = jobs.start(app_id, gh or "", max_acu_limit=max_acu, force=force)
+    except (pkg.PackageError, JobError, DevinError) as exc:
+        jobs.stop()
         _fail(exc)
     _show(job, detail=True)
     if job.state == "failed":

@@ -6,7 +6,7 @@
 <p class="lead">
   Needed by {{ (needed_by + flows) | join(", ") or "nothing yet" }}
   {% if app and app.mode %} · built as <b>{{ app.mode }}</b>{% endif %}
-  {% if status and status.running %} · <a href="http://localhost:{{ app.lab.port }}/" target="_blank" rel="noopener">open the app ↗</a>{% endif %}
+  {% if status and status.running %} · <a href="http://127.0.0.1:{{ app.lab.port }}/" target="_blank" rel="noopener">open the app ↗</a>{% endif %}
 </p>
 <nav class="sectionnav">
   <a href="#evidence">1 Evidence</a><a href="#brief">2 Brief</a><a href="#build">3 Build</a><a href="#lab">4 Lab</a>
@@ -126,7 +126,7 @@
   {% if not app %}<p class="muted">Generate the brief first.</p>
   {% else %}
     {% if app.lab %}
-      <p>Front door <code>http://localhost:{{ app.lab.port }}</code> · database (through the slowdown proxy) <code>localhost:{{ app.lab.db_port }}</code></p>
+      <p>Front door <code>http://127.0.0.1:{{ app.lab.port }}</code> · database (through the slowdown proxy) <code>127.0.0.1:{{ app.lab.db_port }}</code></p>
       {% if status %}
         <p>{% if status.running %}<span class="pill ok">running</span>{% else %}<span class="pill">stopped</span>{% endif %}
           {% for svc, st in status.services.items() %}<span class="pill">{{ svc }}: {{ st }}</span> {% endfor %}

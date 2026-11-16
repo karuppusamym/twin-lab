@@ -184,9 +184,11 @@ The conformance runs above came after that.
    code (`CRD-01`). R8 ("an unknown loan number") and the bot opening "review R-1001" support this.
 2. **Declared routes without shapes:**
    - `POST /api/login` takes JSON or form `username`/`password`. It answers 200
-     `{username, full_name, role}` and sets the session cookie. A wrong password gets 401.
-   - `GET /api/reviews` answers a plain JSON list of review summaries (the top-level scalar fields of
-     the recorded review shape). It also accepts `status`, `q` and `mine` like the queue.
+     `{token, username, full_name, role}` and sets the session cookie. API routes accept the token
+     as `Authorization: Bearer <token>` or the cookie. A wrong password gets 401. (Round 2: the
+     token was added; see "Round 2" below.)
+   - `GET /api/reviews` answers `{items: [review summaries], total}` (round 2; it was a plain list).
+     It also accepts `status`, `q` and `mine` like the queue.
    - `GET /api/reviews/{no}` answers the same shape as the recorded `PUT .../items/{id2}` 200.
    - An unauthenticated API call gets 401 `{"detail":{"code":"NOT_SIGNED_IN",...}}`.
 3. **Success answers that were not recorded.** `submit` and `return` answer 200 with the full review.
@@ -275,6 +277,24 @@ The conformance runs above came after that.
    literally.
 7. **Lab problem, not brief.** The agent's `/state` volume permissions (above) make `lab up` fail on
    a fresh volume.
+
+## Round 2: running the real bots (Twin Lab, 2026-11-15)
+
+Conformance was READY for both automations, but running `python-qtt-sla-report/report.py` itself
+failed: `KeyError: 'token'` after `POST /api/login`. Conformance checks that routes exist, not what
+their bodies hold, and the brief had no shapes for the declared routes (item 4 below).
+
+Reading the automations' own code showed what they expect:
+
+- `report.py` reads `login.json()["token"]`, sends `Authorization: Bearer`, and reads
+  `GET /api/reviews?status=SUBMITTED` as `.json()["items"]`.
+- `CheckReviewViaApi.xaml` parses `("token")` from the login answer and sends `Bearer` too.
+
+Changes in `app/main.py`: `/api/login` also returns `token` (the same signed value as the cookie);
+`current_user` accepts `Authorization: Bearer`; `/api/reviews` answers `{items, total}`.
+
+Factory lesson: when a bot's code is available, the response fields it reads belong in the brief
+next to each declared route, so the builder does not have to guess them.
 
 ---
 

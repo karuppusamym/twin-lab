@@ -112,6 +112,7 @@ class LabAgent:
             except (ValidationError, KeyError, TypeError) as exc:
                 log.error("ignoring unreadable %s: %s", self.state_dir / "condition.json", exc)
         self.baseline = read_json(self.state_dir / BASELINE_META)
+        self._upgrade_baseline_rows()
         self.sessions = SessionStore(self.state_dir, s.app_id, s.app_version)
         self.client = httpx.AsyncClient(
             transport=self.transport,
@@ -320,6 +321,22 @@ class LabAgent:
         write_json(self.state_dir / BASELINE_META, meta)
         self.baseline = meta
         return meta
+
+    def _upgrade_baseline_rows(self) -> None:
+        """Agents before the baseline id wrote `{table: [rows]}`. At startup nothing else is
+        writing, so such a file belongs to the meta beside it: stamp it with that id once, so
+        Reset keeps working after an upgrade instead of asking for a fresh baseline."""
+        path = self.state_dir / BASELINE_ROWS
+        stored = read_json(path)
+        meta_id = self.baseline.get("id") if isinstance(self.baseline, dict) else None
+        if (
+            meta_id
+            and isinstance(stored, dict)
+            and "baseline_id" not in stored
+            and all(isinstance(v, list) for v in stored.values())
+        ):
+            write_json(path, {"baseline_id": meta_id, "rows": stored})
+            log.info("baseline rows upgraded to the current format (%s)", meta_id)
 
     def _read_baseline_rows(self) -> tuple[dict | None, JSONResponse | None]:
         """The baseline rows, checked against the baseline metadata. Call with the lock held."""

@@ -32,10 +32,10 @@ written by `labctl brief` in the dialect named in `app.yaml` (Postgres for every
 ## WP-A: evidence analysers (E-02, E-03 part)
 
 Owns: `labctl/har.py`, `labctl/sanitize.py`, `labctl/openapi.py`, `labctl/model_build.py`
-(adds `from_har`, `from_openapi`), `labctl/brief.py` (mode labels), `labctl/appmodel.py`
+(adds `from_recording`, which reads a HAR with its page snapshots, and `from_openapi`), `labctl/brief.py` (mode labels), `labctl/appmodel.py`
 (new optional fields only), tests `tests/test_har.py`, `tests/test_openapi.py`, `tests/test_modes.py`.
 
-- `from_har(app, har_path, repo_root, pages_dir) -> AppModel`. Screens from captured documents
+- `from_recording(app, path, repo_root, pages_dir) -> AppModel` (`from_har` is the older name). Screens from captured documents
   and the DOM recorded around them, API routes with request and response field shapes, status
   codes, error bodies as `observed` rules, timings, framework markers, code lists (low-cardinality
   values), tables `inferred` from payloads. Drops cookies and credential headers immediately. Never
@@ -118,7 +118,7 @@ Owns: `labctl/devin/` (`package.py`, `client.py`, `jobs.py`, `mock.py`, `cli.py`
 ## WP-F: QTT sample (the black box)
 
 Owns: `reference/qtt-sample/`, `automations/uipath-qtt-*/`, `automations/python-qtt-*/`,
-`flows/qtt-*.yaml`, `tools/record_har.py`.
+`flows/qtt-*.yaml`, `tools/record_qtt.py`.
 
 A realistic stand-in for QTT built in a different style from the showcase (server-rendered pages
 with some fetch-based API calls), so the factory is exercised on something it has no source for.

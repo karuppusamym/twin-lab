@@ -73,9 +73,21 @@ labctl portal --host 0.0.0.0
 ```
 
 On Windows PowerShell use `$env:TWINLAB_PORTAL_PASSWORD = 'choose-a-long-one'`. The portal refuses
-to listen beyond the machine without a password. When bots run on other machines, also set
-`TWINLAB_HOST` to this machine's name so the addresses handed to bots point here, and set
-`TWINLAB_LAB_TOKEN` to protect the lab agents' admin API.
+to listen beyond the machine without a password.
+
+The lab apps listen on this machine only (`127.0.0.1`). When bots run on other machines:
+
+- set `TWINLAB_LAB_BIND=0.0.0.0` so the lab ports listen on the network (add a firewall rule
+  that allows only the bot machines), and
+- set `TWINLAB_HOST` to this machine's name so the addresses handed to bots point here.
+
+The lab agents' admin API (data, reset, conditions, sessions) needs a token. One is generated on
+first use in `.lab-state/lab-token`; the portal and `labctl` send it, bots never need it. Set
+`TWINLAB_LAB_TOKEN` only to choose your own. After changing either variable, run
+`labctl lab up <app>` again so the lab picks it up.
+
+Addresses handed to bots use `127.0.0.1`, not `localhost`. On Windows, `localhost` tries IPv6
+first and each connection then waits about 20 seconds, which looks like a slow app.
 
 ## 4. Devin
 
@@ -145,6 +157,9 @@ labctl bindings <automation> --form uipath
 | Readiness is BLOCKED on a screen step | the record in `test_inputs` may look different in the loaded data (a closed record hides its form); reset the data, or choose another record |
 | A bot times out | a condition may be active (App > Conditions shows it) |
 | Devin build stuck in `waiting_for_user` | open the session link and answer, or send a message from the app page |
+| A bot is slow even with no condition | its address says `localhost`; use `127.0.0.1` (bindings do) |
+| Reset says `LAB_BASELINE_MISMATCH` | the saved baseline does not match its label; take a baseline again (App > Data) |
+| `labctl devin start` says a build is unfinished | follow or cancel that build first, or add `--force` |
 | Port already in use | change `lab:` ports on the app page (Lab > Ports and test sign-in) |
 
 ## 8. What it does not do

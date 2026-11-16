@@ -50,7 +50,7 @@ Without Docker: `pip install -r lab/lab-agent/requirements.txt`, then
 | `DB_PROXY_PORT` | `15432` | DB link proxy port |
 | `ADMIN_DATABASE_URL` | none | Direct Postgres URL for data, reset and sessions |
 | `SCHEMA_PATH` | none | If set, only the tables this DDL creates are read, loaded and reset |
-| `LAB_TOKEN` | none | When set, every `/_lab/*` call needs header `X-Lab-Token` |
+| `LAB_TOKEN` | none | When set, every `/_lab/*` call needs exactly one header `X-Lab-Token` (`labctl` sets it; see `.lab-state/lab-token`) |
 | `APP_VERSION` | `dev` | Written into sessions (`apps[].version`) |
 | `APP_HEALTH_PATH` | `/` | App URL `/_lab/health` checks (ok when status < 500) |
 | `DB_SCHEMA` | `public` | Database schema the tables live in |
@@ -93,7 +93,7 @@ All replies are JSON. Errors are `{"detail": {"code": "LAB_...", "message": ...}
 ```
 
 or a whole profile (`conditions/<id>.yaml` as JSON, with `targets`), of which the target for
-`APP_ID` is used. The condition is kept in `STATE_DIR/condition.json` and survives restarts.
+`APP_ID` is used, or else the target for `app: any`. The condition is kept in `STATE_DIR/condition.json` and survives restarts.
 
 - `match`: `"METHOD /path-glob"`, method optional (`"/api/*"`, `"*"`). `*` matches anything,
   `/` included. Matched against the path, or `path?query` when the glob contains `?`.
@@ -122,6 +122,9 @@ One transaction, all or nothing:
 4. Every identity or serial sequence of those tables moves past `MAX(column)`.
 5. The whole database (every table) is read back in the same transaction; after commit it is
    stored as the baseline in `STATE_DIR/baseline.rows.json` (meta in `baseline.meta.json`).
+   Both files carry the same baseline id; `reset` refuses with 409 `LAB_BASELINE_MISMATCH` when
+   they disagree. A rows file from an older agent (no id) is stamped with the meta's id once, at
+   startup.
 
 When the admin role may, triggers (and FK triggers, already checked in step 1) are off during
 the load (`session_replication_role = replica`, reported as `triggers: "disabled"`), so app
@@ -135,7 +138,11 @@ row, and the sequences, so the same actions afterwards produce the same ids.
 JSON-safe both ways: dates, times and timestamps as ISO 8601 (`timestamptz` read in UTC with
 `+00:00`; a naive one loaded into `timestamptz` is UTC), **numeric always as a string**
 (`"12.50"`; numbers are accepted on load), bytea as base64, uuid and other types as strings,
-json/jsonb as JSON, intervals as `"<seconds> seconds"`, arrays as lists.
+json/jsonb as JSON, intervals exactly as `"<days> days <seconds> seconds"` (e.g.
+`"30 days 1.5 seconds"`), arrays as lists.
+
+A `/_lab/*` request with a body must say `Content-Type: application/json`; anything else gets
+415 `LAB_JSON_REQUIRED`, so a browser form on another site cannot drive the agent.
 
 ### Sessions
 

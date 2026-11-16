@@ -115,6 +115,20 @@ def test_profile_reduces_to_this_app():
     assert parse_condition(profile, "nobody").db is None
 
 
+def test_profile_for_any_app_applies_to_every_app():
+    """The shipped profiles target `app: any`; a named target still wins over it."""
+    profile = {
+        "id": "slow-database",
+        "calibration": "estimate",
+        "targets": [
+            {"app": "any", "db": {"latency_ms": 250, "jitter_ms": 100}},
+            {"app": "showcase", "db": {"latency_ms": 10}},
+        ],
+    }
+    assert parse_condition(profile, "qtt").db.latency_ms == 250
+    assert parse_condition(profile, "showcase").db.latency_ms == 10
+
+
 def test_invalid_condition_rejected():
     with pytest.raises(ValueError):
         parse_condition({"http": [{"match": "GET nope", "latency_ms": {"p50": 1, "p95": 2}}]}, "a")

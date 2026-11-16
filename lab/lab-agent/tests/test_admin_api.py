@@ -213,7 +213,30 @@ def test_baseline_files_share_an_id(tmp_path):
     assert stored["rows"] == rows("a")
 
 
-@pytest.mark.parametrize("damage", ["other_id", "legacy", "meta_changed"])
+def test_rows_from_an_older_agent_are_upgraded_at_startup(tmp_path):
+    """After an upgrade the old `{table: rows}` file is stamped with the meta's id once, at
+    startup, so Reset keeps working without a fresh baseline."""
+    agent = make_agent(tmp_path)
+
+    async def load(c):
+        return await c.post("/_lab/data/load", json={"rows": rows("a"), "label": "a"})
+
+    meta_id = run(agent, load).json()["id"]
+    (tmp_path / BASELINE_ROWS).write_text(json.dumps(rows("a")), encoding="utf-8")  # old format
+
+    restarted = make_agent(tmp_path)
+
+    async def reset(c):
+        return await c.post("/_lab/reset")
+
+    r = run(restarted, reset)
+    assert r.status_code == 200, r.text
+    assert restarted.database.replaced == [rows("a")]
+    stored = json.loads((tmp_path / BASELINE_ROWS).read_text(encoding="utf-8"))
+    assert stored == {"baseline_id": meta_id, "rows": rows("a")}
+
+
+@pytest.mark.parametrize("damage", ["other_id", "meta_changed"])
 def test_reset_refuses_rows_from_another_baseline(tmp_path, damage):
     agent = make_agent(tmp_path)
 
@@ -226,13 +249,11 @@ def test_reset_refuses_rows_from_another_baseline(tmp_path, damage):
     if damage == "other_id":  # a crash between the two writes of a later baseline
         stored = {"baseline_id": "bl_other", "rows": rows("b")}
         rows_path.write_text(json.dumps(stored), encoding="utf-8")
-    elif damage == "legacy":  # rows without an id: cannot be shown to belong
-        rows_path.write_text(json.dumps(rows("b")), encoding="utf-8")
     else:  # metadata replaced on disk behind the agent's back
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         meta_path.write_text(json.dumps({**meta, "id": "bl_other"}), encoding="utf-8")
 
-    second = make_agent(tmp_path) if damage != "meta_changed" else agent
+    second = make_agent(tmp_path) if damage == "other_id" else agent
 
     async def reset(c):
         return await c.post("/_lab/reset")

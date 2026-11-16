@@ -43,7 +43,13 @@ app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 
 def current_user(conn, request: Request) -> dict | None:
-    user_id = auth.read_cookie(request.cookies.get(auth.COOKIE))
+    """The signed-in user, from the session cookie (pages) or `Authorization: Bearer` (API
+    clients such as the SLA report bot, which read `token` from POST /api/login)."""
+    value = request.cookies.get(auth.COOKIE)
+    scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() == "bearer" and bearer.strip():
+        value = bearer.strip()
+    user_id = auth.read_cookie(value)
     if user_id is None:
         return None
     return conn.execute(
@@ -160,12 +166,16 @@ async def api_login(request: Request):
         user = find_user(conn, str(body.get("username", "")).strip(), str(body.get("password", "")))
     if user is None:
         return api_error(401, "INVALID_CREDENTIALS", "Invalid user ID or password.")
+    token = auth.make_cookie(user["user_id"])
     response = JSONResponse(
-        {"username": user["username"], "full_name": user["full_name"], "role": user["role"]}
+        {
+            "token": token,
+            "username": user["username"],
+            "full_name": user["full_name"],
+            "role": user["role"],
+        }
     )
-    response.set_cookie(
-        auth.COOKIE, auth.make_cookie(user["user_id"]), httponly=True, samesite="lax"
-    )
+    response.set_cookie(auth.COOKIE, token, httponly=True, samesite="lax")
     return response
 
 
@@ -219,9 +229,11 @@ def api_reviews(request: Request, status: str = "", q: str = "", mine: str = "")
         user = current_user(conn, request)
         if user is None:
             return unauthorised()
-        return reviews.list_reviews(
+        items = reviews.list_reviews(
             conn, status=status, q=q.strip(), mine_user_id=user["user_id"] if mine else None
         )
+        # The SLA report bot reads `items` (python-qtt-sla-report/report.py).
+        return {"items": items, "total": len(items)}
 
 
 @app.get("/api/reviews/{review_no}")

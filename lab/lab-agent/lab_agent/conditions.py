@@ -71,6 +71,7 @@ def parse_condition(body: Any, app_id: str) -> AgentCondition:
     if "targets" in body or "calibration" in body:
         profile = Condition.model_validate(body)
         target = next((t for t in profile.targets if t.app == app_id), None)
+        target = target or next((t for t in profile.targets if t.app == "any"), None)
         return AgentCondition(
             id=profile.id,
             description=profile.description,

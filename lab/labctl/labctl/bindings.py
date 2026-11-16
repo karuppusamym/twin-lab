@@ -16,7 +16,9 @@ from labctl import repo
 from labctl.models import App, AppBinding, Automation, Bindings
 
 TEMPLATE = re.compile(r"\{\{\s*([\w-]+)((?:\.[\w-]+)+)\s*\}\}")
-LAB_HOST = os.environ.get("TWINLAB_HOST", "localhost")
+# 127.0.0.1, not "localhost": on Windows "localhost" tries IPv6 ::1 first, the lab listens on IPv4
+# only, and each connection then waits ~20 s before falling back. Bots would look slow for no reason.
+LAB_HOST = os.environ.get("TWINLAB_HOST", "127.0.0.1")
 
 
 class BindingError(Exception):

@@ -106,7 +106,10 @@ factory less and less evidence and measuring what is lost.
   access to `reference/`. Review with the same independent checks as T-06.
   DoD: built and running; the review result, the rounds of correction and the differences from
   the source-built app recorded in its `BUILD-LOG.md`.
-  *In progress: QTT stand-in built from its Devin package with no source.*
+  *Done for QTT instead of `showcase-har` (2026-11-15): the stand-in Devin built `apps/qtt/`
+  from its package alone (4 recordings + SQL Server DDL, no source). Both QTT automations are
+  READY, and the Python SLA bot itself runs against it. Round 2 fixed one gap the brief could not
+  carry: the response fields the bots read (`token`, `items`). See `apps/qtt/BUILD-NOTES.md`.*
 
 - [x] **T-07 Conformance check** · M
   `labctl conformance <automation>`: selectors in a headless browser, routes, tables and columns.
@@ -180,6 +183,8 @@ factory less and less evidence and measuring what is lost.
   measure onboarding effort.
   DoD: two apps in different frameworks deployed side by side, each controlled independently; hours
   for the second app recorded against the first.
+  *Partly met: `showcase` (React + FastAPI) and `qtt` (server-rendered FastAPI + Jinja) run side by
+  side, each with its own lab (8720 and 8721); hours not recorded.*
   *In progress: QTT stand-in is server-rendered (FastAPI + Jinja), unlike the React showcase.*
 
 - [ ] **T-19 Cross-app data packs** · M

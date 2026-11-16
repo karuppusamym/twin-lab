@@ -144,7 +144,9 @@ def _docker(args: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
 
 
 def build_agent_image(root: Path) -> str:
-    out = _docker(["build", "-t", AGENT_IMAGE, "-f", "lab/lab-agent/Dockerfile", str(root)])
+    root = Path(root).resolve()
+    dockerfile = root / "lab" / "lab-agent" / "Dockerfile"
+    out = _docker(["build", "-t", AGENT_IMAGE, "-f", str(dockerfile), str(root)])
     if out.returncode != 0:
         raise LabError(f"lab agent image build failed:\n{out.stderr[-3000:]}")
     return AGENT_IMAGE
@@ -152,7 +154,9 @@ def build_agent_image(root: Path) -> str:
 
 def up(root: Path, app_id: str, build: bool = True) -> str:
     """Start (or update) the app's lab. Returns Docker's output."""
-    if build and _docker(["image", "inspect", AGENT_IMAGE]).returncode != 0:
+    # Rebuilt every time (Docker's cache makes an unchanged build quick), so after a `git pull`
+    # the lab runs the agent from this checkout, not an old image.
+    if build and "TWINLAB_AGENT_IMAGE" not in os.environ:
         build_agent_image(root)
     file = compose_file(root, app_id)
     args = ["compose", "-f", str(file), "up", "-d", "--wait", "--wait-timeout", "240"]
@@ -286,5 +290,5 @@ def agent(root: Path, app_id: str, host: str | None = None) -> Agent:
     app = load_app(root, app_id)
     if app.lab is None:
         raise LabError(f"apps/{app_id}/app.yaml has no `lab:` section")
-    host = host or os.environ.get("TWINLAB_HOST", "localhost")
+    host = host or os.environ.get("TWINLAB_HOST", "127.0.0.1")  # see bindings.LAB_HOST
     return Agent(f"http://{host}:{app.lab.port}", lab_token(root))
