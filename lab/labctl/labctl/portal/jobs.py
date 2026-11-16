@@ -19,6 +19,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
+INTERACTIVE = {"record"}  # job kinds that wait on a person
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, subject TEXT,
@@ -77,6 +79,9 @@ class JobRunner:
         self.path = path
         self.lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="twinlab-job")
+        # Jobs that wait on a person (a recording window) get their own worker, so they can
+        # never fill the pool and leave Start, Brief and Conformance queued.
+        self.interactive = ThreadPoolExecutor(max_workers=1, thread_name_prefix="twinlab-person")
         with self._db() as db:
             db.execute(SCHEMA)
             db.execute(
@@ -127,7 +132,7 @@ class JobRunner:
                 log.write(traceback.format_exc()[-4000:])
                 self._set(job_id, status="failed", result=json.dumps({"error": str(exc)}))
 
-        self.pool.submit(run)
+        (self.interactive if kind in INTERACTIVE else self.pool).submit(run)
         return job_id
 
     def get(self, job_id: str) -> dict | None:

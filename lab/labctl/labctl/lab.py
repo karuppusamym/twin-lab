@@ -132,9 +132,14 @@ def compose_file(root: Path, app_id: str) -> Path:
 
 def _docker(args: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(
-            ["docker", *args], capture_output=True, text=True, timeout=timeout, check=False
-        )
+        # UTF-8 with replacement: on Windows the default (cp1252) cannot decode some bytes Docker
+        # prints, the reader thread dies and stdout comes back None instead of the real error.
+        out = subprocess.run(
+            ["docker", *args], capture_output=True, encoding="utf-8", errors="replace",
+            timeout=timeout, check=False,
+        )  # fmt: skip
+        out.stdout, out.stderr = out.stdout or "", out.stderr or ""
+        return out
     except FileNotFoundError as exc:
         raise LabError("Docker is not installed or not on PATH") from exc
     except subprocess.TimeoutExpired as exc:

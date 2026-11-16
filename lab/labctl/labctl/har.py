@@ -554,6 +554,11 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
     for text in dom_text.values():
         known |= sanitize.page(text).values
     for e in entries:
+        # API answers keep no text (resp_text is for documents and scripts), so their values come
+        # from the parsed JSON. A name an API returned is data wherever a page shows it, even as
+        # one title-case word in a heading or option.
+        if e.resp_json is not None and e.status < 400:
+            known |= sanitize.words(e.resp_json)
         if e.resp_text and e.resp_mime == "text/html":
             known |= sanitize.page(e.resp_text).values
         elif e.resp_text and "json" in (e.resp_mime or ""):

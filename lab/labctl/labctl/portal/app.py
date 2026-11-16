@@ -42,6 +42,30 @@ MAX_UPLOAD = 200 * 1024 * 1024
 md = MarkdownIt("commonmark", {"html": False}).enable("table")
 
 
+def _host_name(host: str) -> str:
+    """`127.0.0.1:8790` -> `127.0.0.1`, `[::1]:8790` -> `::1`, lower case."""
+    host = host.strip().lower()
+    if host.startswith("["):
+        return host[1:].split("]", 1)[0]
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def allowed_hosts() -> set[str]:
+    """Names the portal answers to without a password: this machine's own, plus any listed in
+    TWINLAB_PORTAL_HOSTS (comma separated) and TWINLAB_HOST."""
+    import socket
+
+    names = {"127.0.0.1", "localhost", "::1", "testserver"}
+    try:
+        name = socket.gethostname().lower()
+        names |= {name, socket.getfqdn().lower()}
+    except OSError:
+        pass
+    for var in ("TWINLAB_PORTAL_HOSTS", "TWINLAB_HOST"):
+        names |= {n.strip().lower() for n in os.environ.get(var, "").split(",") if n.strip()}
+    return names
+
+
 def create_app(root: Path) -> FastAPI:
     root = root.resolve()
     state = lab_mod.state_dir(root)
@@ -51,6 +75,21 @@ def create_app(root: Path) -> FastAPI:
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.filters["tojson_pretty"] = lambda v: json.dumps(v, indent=2, default=str)
     password = os.environ.get("TWINLAB_PORTAL_PASSWORD")
+    hosts = allowed_hosts()
+
+    @portal.middleware("http")
+    async def known_host_only(request: Request, call_next):
+        """Without a password, answer only to this machine's own names. A page on another site
+        could otherwise point its own domain at 127.0.0.1 (DNS rebinding) and drive the portal.
+        With a password the browser never sends it to that domain, so any name is fine."""
+        if not password:
+            name = _host_name(request.headers.get("host", ""))
+            if name not in hosts:
+                return Response(
+                    f"Refused: unknown host name '{name}'. Add it to TWINLAB_PORTAL_HOSTS.",
+                    status_code=421,
+                )
+        return await call_next(request)
 
     @portal.middleware("http")
     async def same_site_only(request: Request, call_next):
@@ -208,6 +247,7 @@ def create_app(root: Path) -> FastAPI:
                 devin_jobs_mod.JobStore(Path(cfg.state_dir)), client, root,
                 packages_dir=state / "packages",
                 poll_interval=float(os.environ.get("TWINLAB_DEVIN_POLL_SECONDS", "30")),
+                fingerprint=lambda: (lambda c: (c.api_key, c.org_id, c.base_url))(devin()),
             )  # fmt: skip
             if cfg.configured:
                 tracker.resume_unfinished()
@@ -274,14 +314,15 @@ def create_app(root: Path) -> FastAPI:
         except ValidationError as exc:
             return back("/automations", _problems(exc), "error")
         folder.mkdir(parents=True)
-        (folder / "project").mkdir()
-        if project is not None and project.filename:
-            try:
+        try:
+            (folder / "project").mkdir()
+            if project is not None and project.filename:
                 _unzip(await project.read(), folder / "project")
-            except ValueError as exc:
-                shutil.rmtree(folder)
-                return back("/automations", str(exc), "error")
-        save_automation(model)
+            save_automation(model)
+        except (ValueError, OSError) as exc:
+            # Nothing half-registered may stay: it would block a retry and show nowhere.
+            shutil.rmtree(folder, ignore_errors=True)
+            return back("/automations", _file_problem(exc), "error")
         if kind == "uipath":
             if app_id.strip():
                 try:
@@ -530,8 +571,10 @@ def create_app(root: Path) -> FastAPI:
                 _put(shots / filename, data, replace)
             else:
                 return back(f"/apps/{app_id}#evidence", f"Unknown evidence kind {kind}", "error")
-        except ValueError as exc:
-            return back(f"/apps/{app_id}#evidence", str(exc), "error")
+        except (ValueError, OSError) as exc:
+            if kind == "recording" and target.exists() and not list(target.rglob("*.har")):
+                shutil.rmtree(target, ignore_errors=True)  # a half-unpacked recording shows nowhere
+            return back(f"/apps/{app_id}#evidence", _file_problem(exc), "error")
         return back(f"/apps/{app_id}#evidence", f"Added {kind}: {filename}")  # fmt: skip
 
     @portal.post("/apps/{app_id}/evidence/delete")
@@ -548,8 +591,17 @@ def create_app(root: Path) -> FastAPI:
         return back(f"/apps/{app_id}#evidence", f"Removed {path}")
 
     @portal.post("/apps/{app_id}/record")
-    def record(app_id: str, url: str = Form(...), name: str = Form(...)):
+    def record(request: Request, app_id: str, url: str = Form(...), name: str = Form(...)):
         app_id = slug(app_id, "app id")
+        client = request.client.host if request.client else ""
+        if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
+            return back(
+                f"/apps/{app_id}#evidence",
+                "Recording opens a browser window on the Twin Lab machine itself, where you cannot "
+                "see it. Record there, or record in your own browser (developer tools, Save all as "
+                "HAR) and upload the .har here.",
+                "error",
+            )
         target = factory.evidence_dir(root, app_id) / slug(name, "recording name")
         if target.exists():
             return back(f"/apps/{app_id}#evidence", f"{target.name} already exists", "error")
@@ -649,8 +701,10 @@ def create_app(root: Path) -> FastAPI:
         app_id = slug(app_id, "app id")
         if not re.match(r"^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$", pr_url.strip()):
             return back(f"/apps/{app_id}#build", "That is not a GitHub pull request URL", "error")
+        own = re.compile(rf"^twinlab-{re.escape(app_id)}-[0-9a-f]{{8}}\.zip$")  # not qtt-extra's
         packages = sorted(
-            (state / "packages").glob(f"twinlab-{app_id}-*.zip"), key=lambda q: q.stat().st_mtime
+            (p for p in (state / "packages").glob("twinlab-*.zip") if own.match(p.name)),
+            key=lambda q: q.stat().st_mtime,
         )
         try:
             job = devin_jobs().record_manual(
@@ -968,23 +1022,32 @@ def create_app(root: Path) -> FastAPI:
     @portal.post("/settings/git-pull")
     def git_pull():
         def job(log):
-            out = _git(["pull", "--ff-only"])
+            code, out = _git_run(["pull", "--ff-only"])
             print(out)
-            if "fatal" in out.lower() or "error" in out.lower():
-                raise RuntimeError("git pull did not complete; see the log")
+            if code != 0:  # judged by git's exit code, never by words in its output
+                raise RuntimeError(f"git pull did not complete (exit {code}); see the log")
             return {"ok": True}
 
         job_id = jobs.submit("git", "Get the latest from GitHub", job, "settings")
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
-    def _git(args: list[str]) -> str:
+    def _git_run(args: list[str]) -> tuple[int, str]:
+        """git that never waits for a password or passphrase nobody can type (no terminal)."""
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         try:
             out = subprocess.run(
-                ["git", *args], cwd=root, capture_output=True, text=True, timeout=120, check=False
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-            return f"git failed: {exc}"
-        return (out.stdout + out.stderr).strip()
+                ["git", *args], cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+                timeout=120, check=False, env=env,
+            )  # fmt: skip
+        except FileNotFoundError:
+            return 127, "git is not installed or not on PATH"
+        except subprocess.TimeoutExpired:
+            return 124, "git did not finish within 120 s (network or credentials?)"
+        return out.returncode, ((out.stdout or "") + (out.stderr or "")).strip()
+
+    def _git(args: list[str]) -> str:
+        return _git_run(args)[1]
 
     @portal.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException):
@@ -1019,6 +1082,19 @@ def _put(path: Path, data: bytes, replace: str) -> None:
     if path.exists() and not replace:
         raise ValueError(f"{path.name} already exists; tick 'Replace' to overwrite it")
     path.write_bytes(data)
+
+
+def _file_problem(exc: Exception) -> str:
+    """A plain sentence for an upload that could not be written."""
+    if isinstance(exc, ValueError):
+        return str(exc)
+    if os.name == "nt" and isinstance(exc, OSError):
+        return (
+            f"Could not write the files ({exc.__class__.__name__}: {exc}). On Windows this is "
+            "usually a path longer than 260 characters: move the repository to a shorter folder "
+            "(for example C:\\tl) or turn on long paths (LongPathsEnabled)."
+        )
+    return f"Could not write the files: {exc}"
 
 
 def _unzip(data: bytes, target: Path) -> None:

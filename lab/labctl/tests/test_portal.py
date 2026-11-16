@@ -249,3 +249,78 @@ def test_source_folder_must_be_inside_the_repository(repo, tmp_path_factory):
     r = client.post("/apps/showcase/brief", data={"source": str(outside)}, follow_redirects=False)
     job = wait_job(client, r.headers["location"])
     assert job["status"] == "failed" and "inside the repository" in job["log"]
+
+
+def test_regenerating_drops_page_snapshots_of_deleted_evidence(repo):
+    """Review finding 2: a snapshot from evidence that was removed must not stay in pages/."""
+    from labctl import factory
+
+    pages = repo / "apps/showcase/pages"
+    pages.mkdir(parents=True)
+    (pages / "old-screen.html").write_text("<p>from a deleted recording</p>", encoding="utf-8")
+    (repo / "apps/showcase/BRIEF.md").write_text("old", encoding="utf-8")
+    factory.generate(repo, "showcase", source=repo / "reference/case-workbench", force=True)
+    assert not (pages / "old-screen.html").exists()
+    backups = list((repo / ".lab-state/backups/showcase").iterdir())
+    assert (backups[0] / "pages/old-screen.html").exists()  # kept in the backup only
+
+
+def test_unknown_host_names_are_refused_without_a_password(repo, monkeypatch):
+    """Review finding 3: DNS rebinding sends the attacker's own name as Host; refuse it."""
+    client = TestClient(create_app(repo))
+    assert client.get("/", headers={"host": "evil.example:8790"}).status_code == 421
+    assert client.get("/", headers={"host": "127.0.0.1:8790"}).status_code == 200
+    assert client.get("/", headers={"host": "[::1]:8790"}).status_code == 200
+    monkeypatch.setenv("TWINLAB_PORTAL_HOSTS", "twinlab.office.example")
+    client = TestClient(create_app(repo))
+    assert client.get("/", headers={"host": "twinlab.office.example"}).status_code == 200
+    monkeypatch.setenv("TWINLAB_PORTAL_PASSWORD", "s3cret-for-test")
+    client = TestClient(create_app(repo))  # with a password any name works, after sign-in
+    assert (
+        client.get("/", headers={"host": "x.example"}, auth=("a", "s3cret-for-test")).status_code
+        == 200
+    )
+
+
+def test_git_pull_is_judged_by_its_exit_code(repo, monkeypatch):
+    """Review finding 5: a missing git or a hung prompt was reported as up to date."""
+    import subprocess as sp
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(sp, "run", missing)
+    client = TestClient(create_app(repo))
+    r = client.post("/settings/git-pull", follow_redirects=False)
+    job = wait_job(client, r.headers["location"])
+    assert job["status"] == "failed" and "not installed" in job["log"]
+
+
+def test_recording_from_another_machine_explains_instead_of_opening_a_hidden_window(repo):
+    """Review finding 8: the window would open on the server, where the colleague cannot see it."""
+    client = TestClient(create_app(repo), client=("10.1.2.3", 5000))
+    r = client.post("/apps/showcase/record", data={"url": "http://127.0.0.1:8720/", "name": "r1"})
+    assert "opens a browser window on the Twin Lab machine" in r.text
+    assert not (repo / "evidence/showcase/r1").exists()
+
+
+def test_a_manual_build_records_only_its_own_apps_package(repo, tmp_path):
+    """Review finding 12: `twinlab-qtt-*.zip` also matched `twinlab-qtt-extra-...zip`."""
+    packages = repo / ".lab-state/packages"
+    packages.mkdir(parents=True)
+    (repo / "apps/showcase").mkdir(parents=True, exist_ok=True)
+    (repo / "apps/showcase/BRIEF.md").write_text("# Build brief: showcase\n", encoding="utf-8")
+    import json
+
+    for name, app in (("twinlab-showcase-1a2b3c4d.zip", "showcase"),
+                      ("twinlab-showcase-extra-9f8e7d6c.zip", "showcase-extra")):  # fmt: skip
+        with zipfile.ZipFile(packages / name, "w") as z:  # the other app's package is newer
+            z.writestr("MANIFEST.json", json.dumps({"app": app, "package_digest": app}))
+        time.sleep(0.02)
+    client = TestClient(create_app(repo))
+    r = client.post("/apps/showcase/devin/manual", data={"pr_url": "https://github.com/a/b/pull/1"})
+    assert "Build by hand recorded" in r.text, r.text[-800:]
+    from labctl.devin.jobs import JobStore
+
+    jobs = JobStore(repo / ".lab-state").list()
+    assert jobs and jobs[0].package_path.endswith("twinlab-showcase-1a2b3c4d.zip")
