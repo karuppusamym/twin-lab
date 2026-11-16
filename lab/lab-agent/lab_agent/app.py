@@ -1,0 +1,504 @@
+"""The lab agent: front door (HTTP proxy), admin API under /_lab/, and the DB link proxy."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import secrets
+from collections import deque
+from collections.abc import AsyncIterator
+from typing import Any
+
+import httpx
+from pydantic import ValidationError
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
+
+from lab_agent.conditions import NONE, AgentCondition, ConditionEngine, parse_condition
+from lab_agent.config import SLUG, Settings
+from lab_agent.data import Database, DataProblems
+from lab_agent.dbproxy import DbLinkProxy
+from lab_agent.httpproxy import HttpProxy, send_json
+from lab_agent.schema import tables_in_ddl
+from lab_agent.sessions import SessionStore, iso, utcnow
+from lab_agent.store import read_json, remove, write_json
+
+log = logging.getLogger("lab_agent")
+
+RECENT_REQUESTS = 5000
+
+
+def error(status: int, code: str, message: str, **extra: Any) -> JSONResponse:
+    return JSONResponse({"detail": {"code": code, "message": message, **extra}}, status_code=status)
+
+
+class LabAgent:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        start_db_proxy: bool = True,
+    ) -> None:
+        self.settings = settings
+        self.transport = transport
+        self.start_db_proxy = start_db_proxy
+        self.state_dir = settings.state_dir
+        self.engine = ConditionEngine()
+        self.condition_applied_at: str | None = None
+        self.baseline: dict[str, Any] | None = None  # meta only; rows stay on disk
+        self.recent: deque[dict[str, Any]] = deque(maxlen=RECENT_REQUESTS)
+        self.lock = asyncio.Lock()
+        self.client: httpx.AsyncClient | None = None
+        self.db_proxy: DbLinkProxy | None = None
+        self.sessions: SessionStore | None = None
+        only = None
+        if settings.schema_path and settings.schema_path.is_file():
+            only = tables_in_ddl(settings.schema_path) or None
+        self.database = (
+            Database(settings.admin_database_url, settings.db_schema, only)
+            if settings.admin_database_url
+            else None
+        )
+        self.proxy: HttpProxy | None = None
+        self.admin = Starlette(routes=self._routes(), lifespan=self._lifespan)
+
+    # --- lifecycle ---------------------------------------------------------------------------
+
+    @contextlib.asynccontextmanager
+    async def _lifespan(self, _app: Starlette) -> AsyncIterator[None]:
+        await self.startup()
+        try:
+            yield
+        finally:
+            await self.shutdown()
+
+    async def startup(self) -> None:
+        s = self.settings
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        stored = read_json(self.state_dir / "condition.json")
+        if stored:
+            try:
+                self.engine.apply(AgentCondition.model_validate(stored["condition"]))
+                self.condition_applied_at = stored.get("applied_at")
+            except (ValidationError, KeyError, TypeError) as exc:
+                log.error("ignoring unreadable %s: %s", self.state_dir / "condition.json", exc)
+        self.baseline = read_json(self.state_dir / "baseline.meta.json")
+        self.sessions = SessionStore(self.state_dir, s.app_id, s.app_version)
+        self.client = httpx.AsyncClient(
+            transport=self.transport,
+            timeout=httpx.Timeout(s.upstream_timeout_s, connect=10.0),
+            limits=httpx.Limits(max_connections=200, max_keepalive_connections=50),
+            follow_redirects=False,
+            trust_env=False,
+        )
+        self.proxy = HttpProxy(s.app_id, s.app_upstream, self.client, self.engine, self._record)
+        if self.start_db_proxy and s.db_upstream_addr:
+            self.db_proxy = DbLinkProxy(
+                s.db_upstream_addr, lambda: self.engine.db_link, self.engine.db_rng
+            )
+            await self.db_proxy.start("0.0.0.0", s.db_proxy_port)
+            log.info("db link proxy on :%s -> %s", s.db_proxy_port, s.db_upstream)
+        log.info("lab agent for %s: proxying to %s", s.app_id, s.app_upstream)
+
+    async def shutdown(self) -> None:
+        if self.db_proxy is not None:
+            await self.db_proxy.stop()
+        if self.client is not None:
+            await self.client.aclose()
+
+    def _record(self, rec: dict[str, Any]) -> None:
+        self.recent.append(rec)
+        if self.sessions is not None:
+            self.sessions.record(rec)
+
+    # --- ASGI --------------------------------------------------------------------------------
+
+    async def __call__(self, scope, receive, send) -> None:
+        kind = scope["type"]
+        if kind == "lifespan":
+            await self.admin(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if path == "/_lab" or path.startswith("/_lab/"):
+            if kind != "http":
+                return
+            token = self.settings.lab_token
+            if token:
+                given = dict(scope.get("headers") or []).get(b"x-lab-token", b"")
+                if not secrets.compare_digest(given, token.encode()):
+                    await send_json(
+                        send,
+                        401,
+                        {
+                            "detail": {
+                                "code": "LAB_TOKEN_REQUIRED",
+                                "message": "X-Lab-Token missing or wrong",
+                            }
+                        },
+                    )
+                    return
+            await self.admin(scope, receive, send)
+            return
+        if kind == "http":
+            assert self.proxy is not None
+            await self.proxy(scope, receive, send)
+            return
+        if kind == "websocket":
+            await receive()  # websocket.connect
+            await send({"type": "websocket.close", "code": 1011})
+
+    # --- routes ------------------------------------------------------------------------------
+
+    def _routes(self) -> list[Route]:
+        return [
+            Route("/_lab/health", self.health, methods=["GET"]),
+            Route("/_lab/info", self.info, methods=["GET"]),
+            Route("/_lab/data", self.data, methods=["GET"]),
+            Route("/_lab/data/load", self.load, methods=["POST"]),
+            Route("/_lab/data/baseline", self.make_baseline, methods=["POST"]),
+            Route("/_lab/reset", self.reset, methods=["POST"]),
+            Route("/_lab/condition", self.get_condition, methods=["GET"]),
+            Route("/_lab/condition", self.put_condition, methods=["PUT"]),
+            Route("/_lab/condition", self.delete_condition, methods=["DELETE"]),
+            Route("/_lab/condition/rewind", self.rewind_condition, methods=["POST"]),
+            Route("/_lab/session/start", self.session_start, methods=["POST"]),
+            Route("/_lab/session/stop", self.session_stop, methods=["POST"]),
+            Route("/_lab/session/discard", self.session_discard, methods=["POST"]),
+            Route("/_lab/sessions", self.session_list, methods=["GET"]),
+            Route("/_lab/sessions/{session_id}", self.session_get, methods=["GET"]),
+            Route("/_lab/sessions/{session_id}/detail", self.session_detail, methods=["GET"]),
+            Route("/_lab/requests", self.requests, methods=["GET"]),
+        ]
+
+    async def _body(self, request: Request) -> Any:
+        raw = await request.body()
+        if not raw.strip():
+            return {}
+        try:
+            return await request.json()
+        except ValueError:
+            raise ValueError("body is not valid JSON") from None
+
+    def _no_db(self) -> JSONResponse:
+        return error(503, "LAB_NO_DATABASE", "ADMIN_DATABASE_URL is not set")
+
+    def _db_down(self, exc: Exception) -> JSONResponse:
+        log.warning("database error: %s", exc)
+        return error(503, "LAB_DATABASE_DOWN", f"database unreachable: {exc}")
+
+    # health and info
+
+    async def _app_ok(self) -> bool:
+        assert self.client is not None
+        try:
+            r = await self.client.get(
+                self.settings.app_upstream + self.settings.app_health_path, timeout=3.0
+            )
+            return r.status_code < 500
+        except httpx.HTTPError:
+            return False
+
+    async def _db_ok(self) -> str:
+        if self.database is not None:
+            return "ok" if await self.database.ping() else "down"
+        addr = self.settings.db_upstream_addr
+        if addr is None:
+            return "ok"  # an app without a database
+        try:
+            _, w = await asyncio.wait_for(asyncio.open_connection(*addr), 3)
+            w.close()
+            return "ok"
+        except (OSError, TimeoutError):
+            return "down"
+
+    async def health(self, request: Request) -> Response:
+        app_ok, db = await asyncio.gather(self._app_ok(), self._db_ok())
+        body = {"app": "ok" if app_ok else "down", "db": db}
+        return JSONResponse(body, status_code=200 if app_ok and db == "ok" else 503)
+
+    def _baseline_meta(self) -> dict[str, Any] | None:
+        if not self.baseline:
+            return None
+        return {k: self.baseline.get(k) for k in ("id", "loaded_at", "label", "pack", "kind")}
+
+    async def info(self, request: Request) -> Response:
+        s = self.settings
+        tables: list[dict[str, Any]] | None = None
+        db_error = None
+        if self.database is not None:
+            try:
+                schema = await self.database.read_schema()
+                tables = [t.info() for t in schema.tables.values()]
+            except Exception as exc:  # noqa: BLE001
+                db_error = str(exc)
+        assert self.sessions is not None
+        active = self.sessions.active
+        return JSONResponse(
+            {
+                "app": s.app_id,
+                "version": s.app_version,
+                "upstream": s.app_upstream,
+                "tables": tables,
+                "db_error": db_error,
+                "condition": self.engine.condition.id,
+                "baseline": self._baseline_meta(),
+                "session": active.session_id if active else None,
+                "db_proxy": {
+                    "port": s.db_proxy_port,
+                    "upstream": s.db_upstream,
+                    "connections": self.db_proxy.active if self.db_proxy else 0,
+                }
+                if s.db_upstream
+                else None,
+            }
+        )
+
+    # data
+
+    async def data(self, request: Request) -> Response:
+        if self.database is None:
+            return self._no_db()
+        wanted = request.query_params.get("tables")
+        names = [t.strip() for t in wanted.split(",") if t.strip()] if wanted else None
+        try:
+            _, rows = await self.database.snapshot(names)
+        except Exception as exc:  # noqa: BLE001
+            return self._db_down(exc)
+        return JSONResponse(rows)
+
+    def _save_baseline(self, rows: dict, label: str | None, pack: str | None, kind: str) -> dict:
+        now = utcnow()
+        meta = {
+            "id": f"bl_{now.strftime('%Y%m%dT%H%M%SZ')}_{secrets.token_hex(3)}",
+            "loaded_at": iso(now),
+            "label": label,
+            "pack": pack,
+            "kind": kind,
+            "tables": sorted(rows),
+        }
+        write_json(self.state_dir / "baseline.rows.json", rows)
+        write_json(self.state_dir / "baseline.meta.json", meta)
+        self.baseline = meta
+        return meta
+
+    async def load(self, request: Request) -> Response:
+        if self.database is None:
+            return self._no_db()
+        try:
+            body = await self._body(request)
+        except ValueError as exc:
+            return error(400, "LAB_BAD_REQUEST", str(exc))
+        rows = body.get("rows") if isinstance(body, dict) else None
+        if not isinstance(rows, dict) or not rows:
+            return error(422, "LAB_DATA_INVALID", "body needs 'rows': {table: [row, ...]}")
+        label = body.get("label")
+        pack = body.get("pack")
+        if pack is not None and (not isinstance(pack, str) or not SLUG.match(pack)):
+            return error(422, "LAB_DATA_INVALID", "'pack' must be a slug")
+        async with self.lock:
+            try:
+                result = await self.database.replace(rows)
+            except DataProblems as exc:
+                return error(
+                    422,
+                    "LAB_DATA_INVALID",
+                    f"{len(exc.problems)} problem(s); nothing was loaded",
+                    problems=[p.as_dict() for p in exc.problems],
+                )
+            except Exception as exc:  # noqa: BLE001
+                return self._db_down(exc)
+            meta = self._save_baseline(result.snapshot, label, pack, "load")
+        return JSONResponse(
+            {
+                "baseline": self._baseline_meta(),
+                "replaced": result.replaced,
+                "cleared": result.cleared,
+                "counts": result.counts,
+                "triggers": result.triggers,
+                "id": meta["id"],
+            }
+        )
+
+    async def make_baseline(self, request: Request) -> Response:
+        if self.database is None:
+            return self._no_db()
+        try:
+            body = await self._body(request)
+        except ValueError as exc:
+            return error(400, "LAB_BAD_REQUEST", str(exc))
+        label = body.get("label") if isinstance(body, dict) else None
+        async with self.lock:
+            try:
+                _, rows = await self.database.snapshot()
+            except Exception as exc:  # noqa: BLE001
+                return self._db_down(exc)
+            self._save_baseline(rows, label, None, "snapshot")
+        return JSONResponse(
+            {"baseline": self._baseline_meta(), "counts": {t: len(r) for t, r in rows.items()}}
+        )
+
+    async def reset(self, request: Request) -> Response:
+        if self.database is None:
+            return self._no_db()
+        if not self.baseline:
+            return error(409, "LAB_NO_BASELINE", "no baseline yet: load data or take a baseline")
+        rows = read_json(self.state_dir / "baseline.rows.json")
+        if rows is None:
+            return error(409, "LAB_NO_BASELINE", "baseline rows are missing from STATE_DIR")
+        async with self.lock:
+            try:
+                result = await self.database.replace(rows)
+            except DataProblems as exc:
+                return error(
+                    409,
+                    "LAB_BASELINE_MISMATCH",
+                    "the baseline no longer fits the database; nothing was changed",
+                    problems=[p.as_dict() for p in exc.problems],
+                )
+            except Exception as exc:  # noqa: BLE001
+                return self._db_down(exc)
+        return JSONResponse(
+            {"baseline": self._baseline_meta(), "counts": result.counts, "cleared": result.cleared}
+        )
+
+    # condition
+
+    def _condition_body(self) -> dict[str, Any]:
+        return {
+            **self.engine.condition.model_dump(mode="json"),
+            "applied_at": self.condition_applied_at,
+        }
+
+    async def get_condition(self, request: Request) -> Response:
+        return JSONResponse(self._condition_body())
+
+    async def put_condition(self, request: Request) -> Response:
+        try:
+            body = await self._body(request)
+            condition = parse_condition(body or None, self.settings.app_id)
+        except ValidationError as exc:
+            return error(
+                422,
+                "LAB_CONDITION_INVALID",
+                "condition is not valid",
+                errors=[
+                    {"loc": ".".join(str(p) for p in e["loc"]), "message": e["msg"]}
+                    for e in exc.errors()
+                ],
+            )
+        except ValueError as exc:
+            return error(422, "LAB_CONDITION_INVALID", str(exc))
+        self.condition_applied_at = iso(utcnow())
+        write_json(
+            self.state_dir / "condition.json",
+            {
+                "condition": condition.model_dump(mode="json"),
+                "applied_at": self.condition_applied_at,
+            },
+        )
+        self.engine.apply(condition)
+        return JSONResponse(self._condition_body())
+
+    async def delete_condition(self, request: Request) -> Response:
+        remove(self.state_dir / "condition.json")
+        self.engine.apply(NONE)
+        self.condition_applied_at = None
+        return JSONResponse(self._condition_body())
+
+    async def rewind_condition(self, request: Request) -> Response:
+        self.engine.rewind()
+        return JSONResponse(self._condition_body())
+
+    # sessions
+
+    async def session_start(self, request: Request) -> Response:
+        assert self.sessions is not None
+        if self.database is None:
+            return self._no_db()
+        try:
+            body = await self._body(request)
+        except ValueError as exc:
+            return error(400, "LAB_BAD_REQUEST", str(exc))
+        if not isinstance(body, dict):
+            return error(422, "LAB_BAD_REQUEST", "body must be an object")
+        automation = body.get("automation")
+        label = body.get("label")
+        if automation is not None and (
+            not isinstance(automation, str) or not SLUG.match(automation)
+        ):
+            return error(422, "LAB_BAD_REQUEST", "'automation' must be a slug")
+        async with self.lock:
+            if self.sessions.active is not None:
+                return error(
+                    409,
+                    "LAB_SESSION_RUNNING",
+                    f"session {self.sessions.active.session_id} is already running",
+                )
+            try:
+                _, before = await self.database.snapshot()
+            except Exception as exc:  # noqa: BLE001
+                return self._db_down(exc)
+            pack = (self.baseline or {}).get("pack") or (self.baseline or {}).get("label")
+            if not (isinstance(pack, str) and SLUG.match(pack)):
+                pack = None
+            cond = self.engine.condition.id
+            active = self.sessions.start(before, automation, label, cond, pack)
+            self.engine.rewind()  # the same run under the same seeded condition repeats
+        return JSONResponse({"session_id": active.session_id, "started": iso(active.started)})
+
+    async def session_stop(self, request: Request) -> Response:
+        assert self.sessions is not None
+        if self.database is None:
+            return self._no_db()
+        async with self.lock:
+            if self.sessions.active is None:
+                return error(409, "LAB_NO_SESSION", "no session is running")
+            try:
+                schema, after = await self.database.snapshot()
+            except Exception as exc:  # noqa: BLE001
+                return self._db_down(exc)
+            pks = {name: t.primary_key for name, t in schema.tables.items()}
+            doc = self.sessions.stop(after, pks)
+        return JSONResponse(doc)
+
+    async def session_discard(self, request: Request) -> Response:
+        assert self.sessions is not None
+        async with self.lock:
+            if self.sessions.active is None:
+                return error(409, "LAB_NO_SESSION", "no session is running")
+            sid = self.sessions.active.session_id
+            self.sessions.discard()
+        return JSONResponse({"discarded": sid})
+
+    async def session_list(self, request: Request) -> Response:
+        assert self.sessions is not None
+        return JSONResponse(self.sessions.list())
+
+    async def session_get(self, request: Request) -> Response:
+        assert self.sessions is not None
+        doc = self.sessions.get(request.path_params["session_id"])
+        if doc is None:
+            return error(404, "LAB_SESSION_NOT_FOUND", "no such session")
+        return JSONResponse(doc)
+
+    async def session_detail(self, request: Request) -> Response:
+        assert self.sessions is not None
+        doc = self.sessions.detail(request.path_params["session_id"])
+        if doc is None:
+            return error(404, "LAB_SESSION_NOT_FOUND", "no such session")
+        return JSONResponse(doc)
+
+    async def requests(self, request: Request) -> Response:
+        try:
+            limit = max(1, min(RECENT_REQUESTS, int(request.query_params.get("limit", 100))))
+        except ValueError:
+            limit = 100
+        return JSONResponse(list(self.recent)[-limit:])
+
+
+def create_app(settings: Settings | None = None, **kwargs: Any) -> LabAgent:
+    return LabAgent(settings or Settings.from_env(), **kwargs)
