@@ -289,4 +289,12 @@ labctl harness run uipath-case-update --inputs inputs.json --condition slow-data
   connection pointed at the lab's Postgres address (the bindings give it).
 - A session is judged only once its automation has `expects:`; until then the verdict says
   NOT DECLARED.
+- **You do not need an OCR component.** OCR only reads text that a page draws on a `<canvas>`
+  (some charts and grids). Forms, tables, iframes, web components and PDFs are read from their
+  HTML or the file. Canvas data usually also arrives as JSON in the recording's network part. On
+  Windows the OCR engine is built in and used automatically. Elsewhere, canvas text is simply
+  left empty unless Tesseract is installed (`pip install -e ".[ocr]"` and the `tesseract`
+  program).
+- No browser recorder can read Citrix, remote desktops, plug-ins or desktop windows. See
+  [06-evidence.md](06-evidence.md) for what to do instead.
 - Gaps still open, and how large they are: [07-prod-echo-coverage.md](07-prod-echo-coverage.md).

@@ -1,8 +1,10 @@
-# QTT sample (stand-in for the real QTT)
+# QTT sample (an invented stand-in, not the real QTT)
 
-QTT, the Quality Tracking Tool, is where loan quality-control (QC) analysts review closed loan
-files against a checklist and a reviewer approves the review or returns it. We do not have the
-real QTT, so this folder is a realistic stand-in for it. Twin Lab treats it as a **black box**:
+We have neither the real QTT nor a description of it. This folder is an **invented** application
+used to test Twin Lab end to end: its expansion of the name ("Quality Tracking Tool"), its domain
+(loan quality-control analysts reviewing closed loan files against a checklist, a reviewer
+approving or returning the review), its screens and its data were all made up. Nothing here
+describes the real QTT. Twin Lab treats it as a **black box**:
 it records the app, analyses the recordings and the bots written against it, and builds a demo
 copy under `apps/qtt/` **without reading this source**. Keep that in mind when changing it: what
 matters is the markup, the API and the database the outside world sees.
