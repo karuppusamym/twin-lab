@@ -97,6 +97,7 @@ def test_naming_the_real_engine_closes_the_sqlite_question_and_changes_the_diale
 @pytest.mark.skipif(shutil.which("docker") is None, reason="needs Docker for a real Postgres")
 def test_postgres_schema_applies_on_a_real_postgres(tmp_path):
     import subprocess
+    import time
 
     report = demand_report.demand("showcase", [_sample()])
     ddl = brief_mod.schema(brief_mod.build("showcase", "x", REF, report, ROOT, "postgres"), ROOT)
@@ -121,13 +122,18 @@ def test_postgres_schema_applies_on_a_real_postgres(tmp_path):
     if started.returncode != 0:
         pytest.skip(f"cannot start postgres: {started.stderr[:200]}")
     try:
-        for _ in range(60):
+        # Wait over TCP: while the image initialises it runs a temporary server on the Unix
+        # socket only, then restarts, so a socket check can pass just before the restart.
+        for _ in range(90):
             ready = subprocess.run(
-                ["docker", "exec", name, "pg_isready", "-U", "postgres"], capture_output=True
+                ["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"],
+                capture_output=True,
             )
             if ready.returncode == 0:
                 break
-            subprocess.run(["docker", "exec", name, "sleep", "1"], capture_output=True)
+            time.sleep(1)
+        else:
+            pytest.fail("postgres did not accept TCP connections within 90 s")
         out = subprocess.run(
             [
                 "docker",
@@ -135,6 +141,8 @@ def test_postgres_schema_applies_on_a_real_postgres(tmp_path):
                 "-i",
                 name,
                 "psql",
+                "-h",
+                "127.0.0.1",
                 "-U",
                 "postgres",
                 "-v",
