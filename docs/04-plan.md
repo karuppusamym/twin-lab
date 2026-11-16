@@ -11,12 +11,11 @@ Sizes: S (half a day), M (one to two days), L (three to five days).
 Goal: a person registers a UiPath automation, an AI agent builds the app it needs, the portal resets
 it, slows it down and records a run. Uses a showcase app, not QTT.
 
-- [ ] **T-00 Monorepo scaffold** · S
+- [x] **T-00 Monorepo scaffold** · S
   Folder layout from `02-architecture.md`, `labctl` CLI with empty command groups, lint and test
   pipeline for `lab/`.
   DoD: `labctl --help` lists the groups; tests pass on a fresh clone; pipeline green.
-  *Open: fresh clone checked 2026-11-15 (new venv, `pip install -e ".[dev]"`, lint, 90 tests,
-  `labctl validate`). Not ticked: the CI workflow has never run, because there is no GitHub remote yet.*
+  *Done: fresh clone checked 2026-11-15; CI green on `main` after the flaky Postgres test fix.*
 
 - [x] **T-01 Contracts** · S
   Pydantic models and `specs/` examples for `automation.yaml`, `app.yaml`, data pack, condition
