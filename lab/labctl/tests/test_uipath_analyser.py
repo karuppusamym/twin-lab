@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 from labctl import demand as demand_report
 from labctl.analyse import sql, uipath, vb
 from labctl.cli import app
-from labctl.models import Automation
+from labctl.models import Automation, Gap
 
 ROOT = Path(__file__).resolve().parents[3]
 SAMPLE = ROOT / "automations" / "uipath-case-update"
@@ -325,7 +325,7 @@ def test_demand_for_an_app_nobody_touches_says_so():
 
 def test_demand_flags_automations_with_open_gaps():
     auto = _auto("bot-a", "#go")
-    auto.analysis.gaps.append({"where": "x", "what": "y"})
+    auto.analysis.gaps.append(Gap(where="x", what="y"))
     auto = Automation.model_validate(auto.model_dump(mode="json"))
     assert "INCOMPLETE: bot-a has 1 unresolved gap(s)" in demand_report.render(
         demand_report.demand("demo", [auto])
