@@ -256,6 +256,7 @@ data_app.registered_commands.extend(
     data_cli.app.registered_commands
 )  # template, validate, generate
 app.add_typer(devin_cli.app, name="devin", help="Build apps with Devin: package, start, status.")
+app.add_typer(__import__("labctl.ocp_cli").ocp_cli.app, name="ocp")
 
 
 def _automation(automation_id: str) -> Automation:

@@ -8,8 +8,13 @@ COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY db/schema.sql db/schema.sql
 COPY app app
-RUN useradd --create-home --uid 10001 qtt
-USER qtt
+# OpenShift runs the container as an arbitrary UID with group 0. The app writes nothing to disk;
+# its home is group 0 with the owner's rights (g=u) for any library cache. USER is numeric so
+# `runAsNonRoot` can be checked.
+RUN useradd --create-home --uid 10001 --gid 0 qtt \
+    && chown -R 10001:0 /home/qtt && chmod -R g=u /home/qtt
+ENV HOME=/home/qtt
+USER 10001
 ENV QTT_SCHEMA_PATH=/srv/db/schema.sql
 # DATABASE_URL (postgresql://user:password@host:5432/db) is required at start-up; it is not baked in.
 EXPOSE 8000
