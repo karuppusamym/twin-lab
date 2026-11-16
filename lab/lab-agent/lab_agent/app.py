@@ -9,6 +9,7 @@ import re
 import secrets
 from collections import deque
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -33,6 +34,8 @@ RECENT_REQUESTS = 5000
 BASELINE_ROWS = "baseline.rows.json"
 BASELINE_META = "baseline.meta.json"
 KEEP_BASELINES = 20
+LEASE = "lease.json"
+MAX_LEASE_MINUTES = 8 * 60
 BASELINE_ID = re.compile(r"^bl_\d{8}T\d{6}Z_[0-9a-f]{6}$")
 JSON_TYPE = "application/json"
 
@@ -60,6 +63,22 @@ def _not_json(headers: list[tuple[bytes, bytes]]) -> str | None:
     media = ctype.split(b";", 1)[0].strip().lower()
     if media != JSON_TYPE.encode():
         return f"Content-Type must be {JSON_TYPE}, not {media.decode('latin-1')[:80]!r}"
+    return None
+
+
+def _norm_holder(name: str) -> str:
+    return " ".join(str(name).split()).casefold()
+
+
+def _holder(headers) -> str | None:
+    """The `X-Lab-Holder` header (UTF-8, or Latin-1 as HTTP sends it), normalised."""
+    for k, v in headers:
+        if k.lower() == b"x-lab-holder":
+            try:
+                text = v.decode("utf-8")
+            except UnicodeDecodeError:
+                text = v.decode("latin-1")
+            return _norm_holder(text)
     return None
 
 
@@ -201,6 +220,16 @@ class LabAgent:
                     send, 415, {"detail": {"code": "LAB_JSON_REQUIRED", "message": refused}}
                 )
                 return
+            held = self._held_by_other(scope.get("method", "GET"), path, headers)
+            if held is not None:
+                await send_json(send, 423, {"detail": {
+                    "code": "LAB_LEASED",
+                    "message": f"{held['holder']} has reserved this lab until {held['until']}"
+                    + (f" ({held['purpose']})" if held.get("purpose") else "")
+                    + "; changes are refused until then",
+                    "lease": held,
+                }})  # fmt: skip
+                return
             await self.admin(scope, receive, send)
             return
         if kind == "http":
@@ -211,10 +240,81 @@ class LabAgent:
             await receive()  # websocket.connect
             await send({"type": "websocket.close", "code": 1011})
 
+    # --- lease: one person reserves the shared lab for a while ------------------------------
+
+    def _lease(self) -> dict[str, Any] | None:
+        lease = read_json(self.state_dir / LEASE)
+        if not isinstance(lease, dict) or not lease.get("until"):
+            return None
+        if lease["until"] <= iso(utcnow()):
+            return None  # expired: nobody holds the lab
+        return lease
+
+    def _held_by_other(self, method: str, path: str, headers) -> dict[str, Any] | None:
+        """The lease that refuses this change, if any. Reads and the lease calls always pass."""
+        if method in ("GET", "HEAD", "OPTIONS") or path.startswith("/_lab/lease"):
+            return None
+        lease = self._lease()
+        if lease is None:
+            return None
+        return None if _holder(headers) == _norm_holder(lease["holder"]) else lease
+
+    async def get_lease(self, request: Request) -> Response:
+        return JSONResponse({"lease": self._lease()})
+
+    async def take_lease(self, request: Request) -> Response:
+        try:
+            body = await self._body(request)
+        except ValueError as exc:
+            return error(400, "LAB_BAD_REQUEST", str(exc))
+        holder = str((body or {}).get("holder") or "").strip()
+        purpose = str((body or {}).get("purpose") or "").strip()[:200] or None
+        minutes = (body or {}).get("minutes", 60)
+        if not holder or len(holder) > 80:
+            return error(422, "LAB_BAD_REQUEST", "'holder' is a name of 1 to 80 characters")
+        if not isinstance(minutes, int) or not 1 <= minutes <= MAX_LEASE_MINUTES:
+            return error(422, "LAB_BAD_REQUEST", f"'minutes' is 1 to {MAX_LEASE_MINUTES}")
+        async with self.lock:
+            current = self._lease()
+            if current and _norm_holder(current["holder"]) != _norm_holder(holder):
+                return error(409, "LAB_LEASED", f"{current['holder']} holds this lab until "
+                             f"{current['until']}", lease=current)  # fmt: skip
+            now = utcnow()
+            lease = {"holder": holder, "purpose": purpose, "since": (current or {}).get("since") or iso(now),
+                     "until": iso(now + timedelta(minutes=minutes))}  # fmt: skip
+            write_json(self.state_dir / LEASE, lease)
+        return JSONResponse({"lease": lease})
+
+    async def release_lease(self, request: Request) -> Response:
+        """The holder releases; anyone may with `force` (the portal asks before it does)."""
+        try:
+            body = await self._body(request)
+        except ValueError as exc:
+            return error(400, "LAB_BAD_REQUEST", str(exc))
+        async with self.lock:
+            current = self._lease()
+            if current is None:
+                remove(self.state_dir / LEASE)
+                return JSONResponse({"lease": None})
+            mine = _holder(request.headers.raw) == _norm_holder(current["holder"])
+            if not mine and not (isinstance(body, dict) and body.get("force") is True):
+                return error(423, "LAB_LEASED", f"only {current['holder']} can release it, "
+                             "or send force: true", lease=current)  # fmt: skip
+            remove(self.state_dir / LEASE)
+        return JSONResponse({"lease": None, "released": current})
+
     # --- routes ------------------------------------------------------------------------------
 
     def _routes(self) -> list[Route]:
         return [
+            Route("/_lab/lease", self.get_lease, methods=["GET"]),
+            Route("/_lab/lease", self.take_lease, methods=["POST"]),
+            Route("/_lab/lease", self.release_lease, methods=["DELETE"]),
+            Route(
+                "/_lab/baselines/{baseline_id}/quarantine",
+                self.quarantine_baseline,
+                methods=["POST"],
+            ),
             Route("/_lab/health", self.health, methods=["GET"]),
             Route("/_lab/info", self.info, methods=["GET"]),
             Route("/_lab/data", self.data, methods=["GET"]),
@@ -286,7 +386,7 @@ class LabAgent:
     def _baseline_meta(self) -> dict[str, Any] | None:
         if not self.baseline:
             return None
-        keys = ("id", "loaded_at", "label", "pack", "kind", "pinned")
+        keys = ("id", "loaded_at", "label", "pack", "kind", "pinned", "quarantined")
         return {k: self.baseline.get(k) for k in keys}
 
     async def info(self, request: Request) -> Response:
@@ -310,6 +410,7 @@ class LabAgent:
                 "db_error": db_error,
                 "condition": self.engine.condition.id,
                 "baseline": self._baseline_meta(),
+                "lease": self._lease(),
                 "session": active.session_id if active else None,
                 "db_proxy": {
                     "port": s.db_proxy_port,
@@ -378,7 +479,11 @@ class LabAgent:
 
     def _prune_history(self) -> None:
         current = (self.baseline or {}).get("id")
-        unpinned = [m for m in self._history() if not m.get("pinned") and m["id"] != current]
+        unpinned = [
+            m
+            for m in self._history()
+            if not m.get("pinned") and not m.get("quarantined") and m["id"] != current
+        ]
         for meta in unpinned[KEEP_BASELINES - 1 :]:
             remove(self._history_path(meta["id"]))
 
@@ -494,6 +599,9 @@ class LabAgent:
     async def reset(self, request: Request) -> Response:
         if self.database is None:
             return self._no_db()
+        if (self.baseline or {}).get("quarantined"):
+            return error(409, "LAB_BASELINE_QUARANTINED", "the current baseline is quarantined ("
+                         f"{self.baseline['quarantined']}): restore or load other data first")  # fmt: skip
         async with self.lock:  # a load cannot commit between reading the baseline and restoring
             rows, problem = await asyncio.to_thread(self._read_baseline_rows)
             if problem is not None:
@@ -538,6 +646,9 @@ class LabAgent:
             )
             if problem is not None:
                 return problem
+            if doc["meta"].get("quarantined"):
+                return error(409, "LAB_BASELINE_QUARANTINED", "this baseline is quarantined: "
+                             f"{doc['meta']['quarantined']}")  # fmt: skip
             try:
                 result = await self.database.replace(doc["rows"])
             except DataProblems as exc:
@@ -577,6 +688,31 @@ class LabAgent:
             if not pinned:
                 self._prune_history()
         return JSONResponse({"id": baseline_id, "pinned": pinned})
+
+    async def quarantine_baseline(self, request: Request) -> Response:
+        """Mark a baseline unusable (say, data found to be unmasked) with a reason, or release it
+        with `{"release": true}`. A quarantined baseline cannot be restored or reset to, and is
+        kept, so the reason stays on record."""
+        try:
+            body = await self._body(request)
+        except ValueError as exc:
+            return error(400, "LAB_BAD_REQUEST", str(exc))
+        body = body if isinstance(body, dict) else {}
+        reason = str(body.get("reason") or "").strip()[:300]
+        release = body.get("release") is True
+        if not release and not reason:
+            return error(422, "LAB_BAD_REQUEST", "give a 'reason', or 'release': true")
+        baseline_id = request.path_params["baseline_id"]
+        async with self.lock:
+            doc, problem = await asyncio.to_thread(self._stored_baseline, baseline_id)
+            if problem is not None:
+                return problem
+            doc["meta"]["quarantined"] = None if release else reason
+            write_json(self._history_path(baseline_id), doc)
+            if self.baseline and self.baseline.get("id") == baseline_id:
+                self.baseline = {**self.baseline, "quarantined": doc["meta"]["quarantined"]}
+                write_json(self.state_dir / BASELINE_META, self.baseline)
+        return JSONResponse({"id": baseline_id, "quarantined": doc["meta"]["quarantined"]})
 
     # condition
 

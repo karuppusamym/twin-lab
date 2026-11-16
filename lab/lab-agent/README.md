@@ -71,6 +71,10 @@ All replies are JSON. Errors are `{"detail": {"code": "LAB_...", "message": ...}
 | `GET /_lab/baselines` | | every kept baseline, newest first: `[{id, loaded_at, label, pack, kind, pinned, counts, current}]` |
 | `POST /_lab/baselines/{id}/restore` | | puts that baseline's rows back and makes it current; 404 `LAB_BASELINE_NOT_FOUND`, 409 `LAB_BASELINE_MISMATCH` |
 | `POST /_lab/baselines/{id}/pin` | `{pinned: true\|false}` | a pinned baseline is never pruned (the newest 20 unpinned are kept) |
+| `POST /_lab/baselines/{id}/quarantine` | `{reason}` or `{release: true}` | a quarantined baseline cannot be restored (409 `LAB_BASELINE_QUARANTINED`), reset refuses while the current one is quarantined; kept, with its reason |
+| `GET /_lab/lease` | | `{lease: {holder, purpose, since, until} \| null}` |
+| `POST /_lab/lease` | `{holder, minutes (1-480), purpose?}` | reserve or extend; 409 `LAB_LEASED` when someone else holds it |
+| `DELETE /_lab/lease` | `{force?}` | release: the holder (header `X-Lab-Holder`), or anyone with `force: true` |
 | `POST /_lab/reset` | | `{baseline, counts, cleared}`; 409 `LAB_NO_BASELINE` |
 | `GET /_lab/condition` | | `{id, description, seed, http, db, faults, applied_at}` (`id: null` = none) |
 | `PUT /_lab/condition` | condition or profile | as GET; 422 `LAB_CONDITION_INVALID`. `{}` clears |
@@ -162,6 +166,14 @@ queries and Parse messages; never parameter values, and nothing on a TLS connect
 only the table names, with read or write, as `tables_used` in `/detail`. Tables outside the
 app's schema file and system catalogs are left out. This list is in memory, so a session resumed
 after a restart lists only what it saw since.
+
+### Reservations (leases)
+
+While a lease is held, every changing admin call (`POST`, `PUT`, `DELETE` other than the lease
+itself) must carry `X-Lab-Holder` with the holder's name (compared ignoring case and spacing),
+or it gets 423 `LAB_LEASED` naming the holder, until when and why. Reads always pass. `labctl`
+sends the holder from `TWINLAB_HOLDER` or the login name; the portal sends the name a person
+typed. An expired lease holds nothing. The lease is `STATE_DIR/lease.json`.
 
 ### Baseline history
 

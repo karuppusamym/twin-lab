@@ -1,0 +1,208 @@
+# Build the lab agent and every demo app's image, push them to GHCR, then deploy each app's lab
+# to OpenShift with `labctl ocp deploy`. Deploying needs the secrets OCP_SERVER and OCP_TOKEN; when
+# they are missing the images are still pushed and the deploy is skipped with a notice, never a
+# failure. The project comes from the repository variable OCP_NAMESPACE (default: twinlab).
+# Setup and troubleshooting: docs/ocp.md.
+name: deploy-ocp
+on:
+  push:
+    branches: [main]
+    paths: ["apps/**", "lab/**", ".github/workflows/deploy-ocp.yml"]
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "App to build and deploy (folder under apps/). Empty: every built app."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer push waits instead of cancelling a rollout half-way.
+concurrency:
+  group: deploy-ocp
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      apps: ${{ steps.apps.outputs.apps }}
+      registry: ${{ steps.apps.outputs.registry }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # to see what this push changed
+      - name: Which apps (built, with a lab section, and changed by this push)
+        id: apps
+        env:
+          WANTED: ${{ inputs.app }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          built=()
+          for dir in apps/*/; do
+            app=$(basename "$dir")
+            if [ -f "$dir/Dockerfile" ] && grep -q '^lab:' "$dir/app.yaml" 2>/dev/null; then built+=("$app"); fi
+          done
+          if [ -n "${WANTED:-}" ]; then
+            if [[ ! " ${built[*]} " =~ " ${WANTED} " ]]; then
+              echo "::error::apps/${WANTED} is not a built app with a lab section (built: ${built[*]})"; exit 1
+            fi
+            built=("$WANTED")
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${BEFORE:-}" ] \
+               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            # A merge updates only the apps it changed; a change to the lab agent or to this
+            # pipeline updates every app.
+            changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+            if ! grep -qE '^(lab/|\.github/workflows/deploy-ocp\.yml)' <<< "$changed"; then
+              only=()
+              for app in "${built[@]}"; do
+                if grep -q "^apps/${app}/" <<< "$changed"; then only+=("$app"); fi
+              done
+              built=("${only[@]}")
+            fi
+          fi
+          if [ ${#built[@]} -eq 0 ]; then
+            echo "::notice::no built app changed; nothing to deploy"
+          fi
+          # App ids are slugs (a-z, 0-9, -), so they need no JSON escaping.
+          list=""
+          for app in "${built[@]}"; do list="${list:+$list,}\"$app\""; done
+          echo "apps=[$list]" >> "$GITHUB_OUTPUT"
+          # GHCR names must be lower case.
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "Apps: ${built[*]}"
+
+  build-agent:
+    needs: plan
+    if: needs.plan.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push the lab agent
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: lab/lab-agent/Dockerfile
+          push: true
+          tags: ${{ needs.plan.outputs.registry }}/lab-agent:${{ github.sha }}
+          cache-from: type=gha,scope=lab-agent
+          cache-to: type=gha,mode=max,scope=lab-agent
+
+  build-app:
+    needs: plan
+    if: needs.plan.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push ${{ matrix.app }}
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.app }}
+          push: true
+          tags: ${{ needs.plan.outputs.registry }}/${{ matrix.app }}:${{ github.sha }}
+          cache-from: type=gha,scope=app-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=app-${{ matrix.app }}
+
+  deploy:
+    needs: [plan, build-agent, build-app]
+    if: needs.plan.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Add required reviewers to the "ocp" environment (Settings > Environments) to approve deploys.
+    environment: ocp
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.apps) }}
+    env:
+      APP: ${{ matrix.app }}
+      OCP_NAMESPACE: ${{ vars.OCP_NAMESPACE || 'twinlab' }}
+      TWINLAB_REGISTRY: ${{ needs.plan.outputs.registry }}
+      TWINLAB_TAG: ${{ github.sha }}
+      PULL_SECRET: ${{ vars.OCP_PULL_SECRET }}
+      INSECURE_TLS: ${{ vars.OCP_INSECURE_TLS == 'true' }}
+    steps:
+      - name: Is an OpenShift cluster configured?
+        id: ocp
+        env:
+          OCP_SERVER: ${{ secrets.OCP_SERVER }}
+          OCP_TOKEN: ${{ secrets.OCP_TOKEN }}
+        run: |
+          if [ -n "$OCP_SERVER" ] && [ -n "$OCP_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OCP_SERVER or OCP_TOKEN is not set: images were pushed, deploy of $APP skipped (see docs/ocp.md)"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.ocp.outputs.ready == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.ocp.outputs.ready == 'true'
+        with:
+          python-version: "3.13"
+      - name: Install labctl
+        if: steps.ocp.outputs.ready == 'true'
+        run: pip install -e .
+      - name: Install oc
+        if: steps.ocp.outputs.ready == 'true'
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: "4"
+      - name: Log in to OpenShift
+        if: steps.ocp.outputs.ready == 'true'
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ secrets.OCP_SERVER }}
+          openshift_token: ${{ secrets.OCP_TOKEN }}
+          namespace: ${{ env.OCP_NAMESPACE }}
+          insecure_skip_tls_verify: ${{ env.INSECURE_TLS }}
+      - name: Deploy ${{ matrix.app }}
+        if: steps.ocp.outputs.ready == 'true'
+        run: |
+          args=()
+          if [ -n "$PULL_SECRET" ]; then args+=(--pull-secret "$PULL_SECRET"); fi
+          labctl ocp deploy "$APP" --namespace "$OCP_NAMESPACE" --no-smoke "${args[@]}"
+      - name: Smoke check through the Route
+        if: steps.ocp.outputs.ready == 'true'
+        run: |
+          args=()
+          if [ "$INSECURE_TLS" = "true" ]; then args+=(--insecure-tls); fi
+          labctl ocp smoke "$APP" --namespace "$OCP_NAMESPACE" "${args[@]}"
+      - name: What the cluster says, on failure
+        if: failure() && steps.ocp.outputs.ready == 'true'
+        run: |
+          sel="app.kubernetes.io/instance=$APP"
+          oc get pods,jobs,pvc,route -n "$OCP_NAMESPACE" -l "$sel" -o wide || true
+          oc get events -n "$OCP_NAMESPACE" --sort-by=.lastTimestamp | tail -40 || true
+          for c in db agent app; do
+            echo "::group::twinlab-$APP-$c"; oc logs -n "$OCP_NAMESPACE" "deployment/twinlab-$APP-$c" --tail=100 || true; echo "::endgroup::"
+          done
+          oc logs -n "$OCP_NAMESPACE" "job/twinlab-$APP-db-setup" --tail=50 || true

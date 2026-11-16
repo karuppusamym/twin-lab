@@ -37,6 +37,7 @@ from labctl.analyse import uipath
 from labctl.appmodel import Flow
 from labctl.botlog import runs as botruns
 from labctl.models import App, Automation, Condition
+from labctl.portal import guide
 from labctl.portal.jobs import JobRunner
 
 HERE = Path(__file__).parent
@@ -67,6 +68,18 @@ def allowed_hosts() -> set[str]:
     for var in ("TWINLAB_PORTAL_HOSTS", "TWINLAB_HOST"):
         names |= {n.strip().lower() for n in os.environ.get(var, "").split(",") if n.strip()}
     return names
+
+
+ME_COOKIE = "tl_me"
+
+
+def _me(request: Request) -> str | None:
+    """The name this browser gave, if any (letters, digits, spaces, . - ' only)."""
+    from urllib.parse import unquote
+
+    raw = unquote(request.cookies.get(ME_COOKIE, ""))
+    name = " ".join(raw.split())[:60]
+    return name if name and re.fullmatch(r"[\w .'-]+", name) else None
 
 
 def create_app(root: Path) -> FastAPI:
@@ -106,6 +119,17 @@ def create_app(root: Path) -> FastAPI:
         return await call_next(request)
 
     @portal.middleware("http")
+    async def who_is_this(request: Request, call_next):
+        """The name a person gave (cookie) goes with every lab admin call they cause, so a lab
+        they reserved accepts their changes and refuses others'."""
+        name = _me(request)
+        token = lab_mod.current_holder.set(name)
+        try:
+            return await call_next(request)
+        finally:
+            lab_mod.current_holder.reset(token)
+
+    @portal.middleware("http")
     async def require_password(request: Request, call_next):
         if password and not request.url.path.startswith("/static"):
             header = request.headers.get("authorization", "")
@@ -125,6 +149,7 @@ def create_app(root: Path) -> FastAPI:
     # --- helpers ---------------------------------------------------------------------------------
 
     def page(request: Request, name: str, **ctx) -> HTMLResponse:
+        ctx.setdefault("me", _me(request))
         ctx.setdefault("flash", request.query_params.get("msg"))
         ctx.setdefault("flash_kind", request.query_params.get("kind", "ok"))
         return templates.TemplateResponse(request, name, ctx)
@@ -271,16 +296,78 @@ def create_app(root: Path) -> FastAPI:
             ev = factory.discover(root, app_id)
             built = (folder / "Dockerfile").exists()
             users = factory.automations(root, app_id)
+            lab = (
+                lab_mod.status(root, app_id)
+                if built and app_model(app_id) and app_model(app_id).lab
+                else None
+            )
+            ready = [a.id for a in users if verdicts.get(a.id, {}).get("verdict") == "READY"]
+            declared = [a.id for a in users if a.expects is not None]
+            steps = guide.app_steps(
+                app_id,
+                has_evidence=bool(ev.kinds() or users or factory.flows(root, app_id)),
+                has_brief=(folder / "BRIEF.md").exists(),
+                built=built,
+                running=bool(lab and lab.running),
+                automations=[a.id for a in users],
+                ready=ready,
+                has_baseline=bool(lab and lab.running),
+                sessions=len(declared),
+                declared=declared,
+            )
             apps.append({
                 "id": app_id,
                 "evidence": sum(len(getattr(ev, k)) for k in ("recordings", "ddl", "openapi", "screenshots")),
                 "brief": (folder / "BRIEF.md").exists(),
                 "built": built,
                 "automations": [a.id for a in users],
-                "ready": [a.id for a in users if verdicts.get(a.id, {}).get("verdict") == "READY"],
-                "lab": lab_mod.status(root, app_id) if built and app_model(app_id) and app_model(app_id).lab else None,
+                "ready": ready,
+                "lab": lab,
+                "steps": steps,
+                "next": guide.next_step(steps),
             })  # fmt: skip
         return page(request, "overview.html", apps=apps, jobs=jobs.list(limit=8))
+
+    @portal.get("/start", response_class=HTMLResponse)
+    def start(request: Request):
+        autos = [m for _, m, _ in all_automations() if m is not None]
+        app_ids = sorted({p.parent.name for p in (root / "apps").glob("*/app.yaml")}
+                         | set(factory.needed_apps(root)))  # fmt: skip
+        verdicts = latest_verdicts()
+        running = False
+        for app_id in app_ids:
+            model = app_model(app_id)
+            if model and model.lab and (root / "apps" / app_id / "Dockerfile").exists():
+                running = running or lab_mod.status(root, app_id).running
+        first = next((a for a in app_ids if (root / "apps" / a / "Dockerfile").exists()), None)
+        steps = guide.onboarding(
+            named=bool(_me(request)), automations=len(autos),
+            flows=len(list(repo.files_of(root, "flow"))),
+            evidence=any(factory.discover(root, a).kinds() for a in app_ids),
+            briefs=any((root / "apps" / a / "BRIEF.md").exists() for a in app_ids),
+            built=first is not None, running=running,
+            ready=any(v.get("verdict") == "READY" for v in verdicts.values()),
+            declared=any(a.expects is not None for a in autos),
+            first_app=first or (app_ids[0] if app_ids else None),
+        )  # fmt: skip
+        return page(request, "start.html", steps=steps, next=guide.next_step(steps),
+                    glossary=guide.GLOSSARY)  # fmt: skip
+
+    @portal.post("/me")
+    def set_me(request: Request, name: str = Form("")):
+        from urllib.parse import quote, urlsplit
+
+        target = urlsplit(request.headers.get("referer") or "/").path or "/"
+        clean = " ".join(name.split())[:60]
+        if clean and not re.fullmatch(r"[\w .'-]+", clean):
+            return back(target, "Use letters, digits, spaces, dots, dashes or apostrophes", "error")
+        resp = back(target, f"Hello {clean}" if clean else "Name cleared")
+        if clean:
+            resp.set_cookie(ME_COOKIE, quote(clean), max_age=365 * 24 * 3600, httponly=True,
+                            samesite="lax")  # fmt: skip
+        else:
+            resp.delete_cookie(ME_COOKIE)
+        return resp
 
     # --- automations -----------------------------------------------------------------------------
 
@@ -440,6 +527,15 @@ def create_app(root: Path) -> FastAPI:
                     raise botruns.RunsError(f"{app_id} is not an app of {automation_id}")
                 data = lab_mod.agent(root, slug(app_id, "app id")).session(session_id)
             status, report = botruns.parity(state, automation_id, base, other or None, data)
+            if session and other:
+                # The lab run and its session: where each written value came from (I-11, I-12).
+                from labctl import provenance
+
+                agent = lab_mod.agent(root, app_id)
+                detail = agent.session_detail(session_id) or {}
+                prov = provenance.bind(botruns.run(state, automation_id, other),
+                                       detail.get("changes") or [], agent.data())  # fmt: skip
+                report += "\n" + prov.markdown()
         except (botruns.RunsError, lab_mod.LabError, ValidationError) as exc:
             return back(f"/automations/{automation_id}#runs", f"No comparison: {exc}", "error")
         title = f"Parity {status.upper()}: {base.split('/')[-1]} against {(other or session).split('/')[-1]}"
@@ -564,11 +660,33 @@ def create_app(root: Path) -> FastAPI:
             cfg, devin_ok, devin_list = None, False, []
             lab_info = lab_info or {}
             lab_info["devin_error"] = str(exc)
+        users = factory.automations(root, app_id)
+        verdicts = latest_verdicts()
+        listed = sessions if isinstance(sessions, list) else (sessions or {}).get("sessions", [])
+        steps = guide.app_steps(
+            app_id,
+            has_evidence=bool(ev.kinds() or users or factory.flows(root, app_id)),
+            has_brief=(folder / "BRIEF.md").exists(), built=(folder / "Dockerfile").exists(),
+            running=bool(status and status.running), automations=[a.id for a in users],
+            ready=[a.id for a in users if verdicts.get(a.id, {}).get("verdict") == "READY"],
+            has_baseline=bool((lab_info or {}).get("baseline")), sessions=len(listed or []),
+            declared=[a.id for a in users if a.expects is not None],
+        )  # fmt: skip
+        lease = (lab_info or {}).get("lease")
+        me = _me(request)
         return page(
             request,
             "app.html",
             app_id=app_id,
             app=model,
+            steps=steps,
+            next=guide.next_step(steps),
+            lease=lease,
+            lease_mine=bool(
+                lease
+                and me
+                and " ".join(me.split()).casefold() == " ".join(lease["holder"].split()).casefold()
+            ),  # fmt: skip
             evidence=ev,
             replayable=[p.name for p in ev.recordings if (p / "steps.jsonl").exists()],
             has_brief=(folder / "BRIEF.md").exists(),
@@ -1075,8 +1193,53 @@ def create_app(root: Path) -> FastAPI:
             return back(f"/apps/{app_id}#data", str(exc), "error")
         raise HTTPException(404)
 
+    @portal.post("/apps/{app_id}/lease/{action}")
+    def lease_action(
+        request: Request, app_id: str, action: str, minutes: int = Form(60), purpose: str = Form("")
+    ):
+        app_id = slug(app_id, "app id")
+        me = _me(request)
+        agent = lab_mod.agent(root, app_id)
+        try:
+            if action == "take":
+                if not me:
+                    return back(f"/apps/{app_id}#lab", "Say who you are first (top right)", "error")
+                lease = agent.take_lease(me, minutes, purpose.strip() or None)
+                return back(
+                    f"/apps/{app_id}#lab", f"Reserved for you until {lease['until'][:16]} UTC"
+                )
+            if action in ("release", "force"):
+                agent.release_lease(force=action == "force")
+                return back(f"/apps/{app_id}#lab", "The reservation is released")
+        except lab_mod.LabError as exc:
+            return back(f"/apps/{app_id}#lab", str(exc), "error")
+        raise HTTPException(404)
+
+    @portal.post("/apps/{app_id}/behaviour-compare", response_class=HTMLResponse)
+    def behaviour_compare(request: Request, app_id: str, a: list[str] = Form(...),
+                          b: list[str] = Form(...), name_a: str = Form("UAT"),
+                          name_b: str = Form("production")):  # fmt: skip
+        """Does the app behave the same in two places (I-22b)? Recordings of each, compared."""
+        from labctl.behaviour import compare as compare_mod
+
+        app_id = slug(app_id, "app id")
+        base = factory.evidence_dir(root, app_id)
+
+        def folders(names: list[str]) -> list[Path]:
+            out = [base / slug(n, "recording") for n in names]
+            if not all((p / "steps.jsonl").exists() for p in out):
+                raise HTTPException(400, "choose recordings that have steps")
+            return out
+
+        result = compare_mod.compare_recordings(folders(a), folders(b), name_a.strip() or "A",
+                                                name_b.strip() or "B")  # fmt: skip
+        return page(request, "report.html", title=f"Behaviour: {result.status}",
+                    html=md.render(result.markdown()), back=f"/apps/{app_id}#evidence")  # fmt: skip
+
     @portal.post("/apps/{app_id}/baselines/{baseline_id}/{action}")
-    def baseline_action(app_id: str, baseline_id: str, action: str, pinned: str = Form("")):
+    def baseline_action(
+        app_id: str, baseline_id: str, action: str, pinned: str = Form(""), reason: str = Form("")
+    ):
         app_id = slug(app_id, "app id")
         agent = lab_mod.agent(root, app_id)
         try:
@@ -1086,6 +1249,14 @@ def create_app(root: Path) -> FastAPI:
             if action == "pin":
                 agent.pin_baseline(baseline_id, bool(pinned))
                 return back(f"/apps/{app_id}#data", "Pinned" if pinned else "Unpinned")
+            if action == "quarantine":
+                agent.quarantine_baseline(baseline_id, reason.strip() or None)
+                return back(
+                    f"/apps/{app_id}#data", "Quarantined: it cannot be restored or reset to"
+                )
+            if action == "release":
+                agent.quarantine_baseline(baseline_id, None, release=True)
+                return back(f"/apps/{app_id}#data", "Out of quarantine")
         except lab_mod.LabError as exc:
             return back(f"/apps/{app_id}#data", str(exc), "error")
         raise HTTPException(404)

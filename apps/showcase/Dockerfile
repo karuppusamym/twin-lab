@@ -19,8 +19,13 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY db/schema.sql db/schema.sql
 COPY backend/app backend/app
 COPY --from=web /web/dist frontend/dist
-RUN useradd --create-home --uid 10001 showcase
-USER showcase
+# OpenShift runs the container as an arbitrary UID with group 0. The app writes nothing to disk;
+# its home is group 0 with the owner's rights (g=u) for any library cache. USER is numeric so
+# `runAsNonRoot` can be checked.
+RUN useradd --create-home --uid 10001 --gid 0 showcase \
+    && chown -R 10001:0 /home/showcase && chmod -R g=u /home/showcase
+ENV HOME=/home/showcase
+USER 10001
 WORKDIR /app/backend
 # DATABASE_URL (postgresql://user:password@host:5432/db) is required at start-up; it is not baked in.
 EXPOSE 8000

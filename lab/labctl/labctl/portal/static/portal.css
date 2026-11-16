@@ -94,3 +94,49 @@ details summary { cursor: pointer; font-weight: 600; margin: 6px 0; }
 .bar { height: 10px; border-radius: 3px; background: var(--accent); display: inline-block; vertical-align: middle; }
 .bar.injected { background: var(--warn); }
 @media (max-width: 640px) { main { padding: 16px 12px 40px; } th, td { padding: 6px; } }
+
+/* who you are, in the header */
+header.top form.me { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+header.top form.me input { width: 150px; padding: 4px 8px; }
+header.top form.me button { margin: 0; padding: 4px 10px; }
+header.top form.me details { display: inline-flex; align-items: center; gap: 6px; }
+header.top form.me details summary { font-weight: 400; opacity: .8; margin: 0; }
+header.top form.me details[open] { display: inline-flex; }
+
+/* start page: how it works, next step, checklist, glossary */
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 0 0 18px; }
+.flowbox { flex: 1 1 190px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.flowbox b { display: block; margin-bottom: 4px; }
+.flowbox span { color: var(--muted); font-size: 13px; }
+.flowarrow { align-self: center; color: var(--muted); font-size: 20px; }
+.nextcard { border-left: 5px solid var(--accent); }
+.nextcard.done { border-left-color: var(--ok); }
+.nextcard p { margin: 4px 0 0; }
+.nextcard .button { margin-top: 8px; }
+.nexthead { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); font-weight: 700; }
+.checklist { list-style: none; padding: 0; margin: 0; }
+.checklist li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.checklist li:last-child { border-bottom: 0; }
+.checklist .tick { flex: 0 0 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line); display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.checklist li.done .tick { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.checklist li.next .tick { border-color: var(--accent); color: var(--accent); }
+.checklist li.todo, .checklist li.optional { opacity: .75; }
+dl.glossary { display: grid; grid-template-columns: minmax(120px, 180px) 1fr; gap: 6px 16px; margin: 0; }
+dl.glossary dt { font-weight: 700; }
+dl.glossary dd { margin: 0; color: var(--muted); }
+@media (max-width: 640px) { dl.glossary { grid-template-columns: 1fr; } dl.glossary dd { margin-bottom: 8px; } header.top form.me { margin-left: 0; } }
+
+/* an app's progress */
+nav.progress { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+nav.progress a { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px 5px 6px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); color: var(--text); text-decoration: none; font-size: 14px; }
+nav.progress a .tick { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; background: var(--code-bg); color: var(--muted); }
+nav.progress a.done .tick { background: var(--ok-bg); color: var(--ok); }
+nav.progress a.next { border-color: var(--accent); font-weight: 700; }
+nav.progress a.next .tick { background: var(--accent); color: var(--accent-text); }
+nav.progress a.optional { border-style: dashed; }
+.dots { display: inline-flex; gap: 4px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--code-bg); border: 1px solid var(--line); }
+.dot.done { background: var(--ok); border-color: var(--ok); }
+.dot.next { background: var(--accent); border-color: var(--accent); }
+.dot.optional { border-style: dashed; }
+@media (max-width: 640px) { .flowarrow { display: none; } }

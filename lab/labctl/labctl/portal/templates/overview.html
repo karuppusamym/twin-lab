@@ -1,26 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Apps</h1>
-<p class="lead">Each app is a demo copy of a real application, built from evidence for the automations that need it. Work left to right.</p>
-
-<div class="steps">
-  <div class="step"><b>1. Automations and flows</b><span>Register the bots, or write down the flows people need.</span></div>
-  <div class="step"><b>2. Evidence</b><span>Recordings, DDL, API descriptions, screenshots. Source code if any.</span></div>
-  <div class="step"><b>3. Brief and build</b><span>Generate the brief; Devin builds the app and opens a pull request.</span></div>
-  <div class="step"><b>4. Run in the lab</b><span>Start it, load data, set conditions, record sessions, check readiness.</span></div>
-</div>
+<p class="lead">Each app is a safe copy of a real application, built for the bots that need it. Every row says what to do next. New here? <a href="/start">Start here</a>.</p>
 
 <div class="card scroll">
   <table>
-    <thead><tr><th>App</th><th>Needed by</th><th>Evidence</th><th>Brief</th><th>Built</th><th>Lab</th><th>Ready</th></tr></thead>
+    <thead><tr><th>App</th><th>Progress</th><th>Next step</th><th>Needed by</th><th>Lab</th><th>Ready</th></tr></thead>
     <tbody>
     {% for a in apps %}
       <tr>
         <td><a href="/apps/{{ a.id }}"><b>{{ a.id }}</b></a></td>
+        <td><span class="dots" aria-label="progress">{% for s in a.steps %}<span class="dot {{ s.state }}" title="{{ s.title }}: {{ s.state }}"></span>{% endfor %}</span></td>
+        <td>{% if a.next %}<a href="{{ a.next.href }}">{{ a.next.title }}</a>{% else %}<span class="pill ok">all set</span>{% endif %}</td>
         <td class="small">{{ a.automations | join(", ") or "flows only" }}</td>
-        <td>{{ a.evidence }} item(s)</td>
-        <td>{% if a.brief %}<span class="pill ok">yes</span>{% else %}<span class="pill">not yet</span>{% endif %}</td>
-        <td>{% if a.built %}<span class="pill ok">yes</span>{% else %}<span class="pill">not yet</span>{% endif %}</td>
         <td>
           {% if a.lab is none %}<span class="pill">-</span>
           {% elif a.lab.running %}<span class="pill ok">running</span>
@@ -29,7 +21,7 @@
         <td>{% if a.automations %}{{ a.ready | length }} / {{ a.automations | length }}{% else %}-{% endif %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="muted">No app is needed yet. Start by registering an automation or writing a flow.</td></tr>
+      <tr><td colspan="6" class="muted">No app is needed yet. Start by <a href="/automations">registering a bot</a> or <a href="/flows">writing a flow</a>.</td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from labctl import bindings as bindings_mod
 from labctl import conformance as conformance_mod
 from labctl import demand as demand_report
-from labctl import evidence_cli, factory, repo
+from labctl import evidence_cli, factory, ocp_cli, repo
 from labctl import lab as lab_mod
 from labctl.analyse import run as analysis
 from labctl.behaviour import cli as behaviour_cli
@@ -256,6 +256,7 @@ data_app.registered_commands.extend(
     data_cli.app.registered_commands
 )  # template, validate, generate
 app.add_typer(devin_cli.app, name="devin", help="Build apps with Devin: package, start, status.")
+app.add_typer(ocp_cli.app, name="ocp")
 
 
 def _automation(automation_id: str) -> Automation:
@@ -388,6 +389,44 @@ def session_verdict(
             typer.echo(f"  {c['table']} {c['op']} {c['key']}: {c['why']}")
     if v.status == verdict_mod.FAIL:
         raise typer.Exit(1)
+
+
+@session_app.command("provenance")
+def session_provenance(
+    app_id: str,
+    session_id: str,
+    run: str = typer.Option(
+        ...,
+        "--run",
+        help="The bot's run in that session: <upload> or <upload>/<run id> (Robot runs).",
+    ),
+    automation: str = typer.Option(None, "--automation", help="Default: the session's own."),
+) -> None:
+    """Which written column got its value from the bot (typed or chosen) and which from the app."""
+    from labctl import provenance
+    from labctl.botlog import runs as botruns
+
+    root = _root()
+    agent = lab_mod.agent(root, app_id)
+    session = _lab_call(lambda: agent.session(session_id))
+    auto = automation or session.get("automation")
+    if not auto:
+        typer.echo("the session names no automation; give --automation", err=True)
+        raise typer.Exit(2)
+    upload, _, run_id = run.partition("/")
+    try:
+        traces = botruns.traces(lab_mod.state_dir(root), auto, upload)
+    except botruns.RunsError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    if run_id:
+        traces = [t for t in traces if t.run_id == run_id]
+    if not traces:
+        typer.echo(f"no run {run_id} in {upload}", err=True)
+        raise typer.Exit(1)
+    detail = _lab_call(lambda: agent.session_detail(session_id)) or {}
+    prov = provenance.bind(provenance.combined(traces), detail.get("changes") or [], agent.data())
+    typer.echo(prov.markdown())
 
 
 @session_app.command("accept")
@@ -523,6 +562,81 @@ def data_restore(app_id: str, baseline_id: str) -> None:
     typer.echo(
         f"restored {baseline_id}: " + ", ".join(f"{t} {n}" for t, n in reply["counts"].items())
     )
+
+
+@data_app.command("load-across")
+def data_load_across(
+    pack: Path = typer.Argument(..., help='JSON: {"apps": {"<app>": {"<table>": [rows]}}}'),
+    label: str = typer.Option(None, "--label"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only check the links."),
+) -> None:
+    """Load one data pack into several apps' labs. The same customer (or any linked record)
+    must exist in every app, as each app.yaml's `links` say; otherwise nothing is loaded."""
+    from labctl import crossapp
+    from labctl.bindings import load_app
+
+    root = _root()
+    try:
+        parts = crossapp.read_pack(pack)
+        problems = crossapp.check(parts, {a: load_app(root, a) for a in parts})
+        if problems:
+            for p in problems[:50]:
+                typer.echo(f"refused: {p}")
+            typer.echo(f"{len(problems)} key(s) do not match across apps; nothing was loaded")
+            raise typer.Exit(1)
+        if dry_run:
+            typer.echo(f"links match across {', '.join(parts)}; nothing loaded (--dry-run)")
+            return
+        done = crossapp.load(root, parts, label or pack.stem)
+    except (crossapp.CrossAppError, BindingError, lab_mod.LabError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    for app_id, reply in done.items():
+        counts = ", ".join(f"{t} {n}" for t, n in (reply.get("counts") or {}).items())
+        typer.echo(f"{app_id}: loaded {counts}")
+
+
+@data_app.command("quarantine")
+def data_quarantine(
+    app_id: str,
+    baseline_id: str,
+    reason: str = typer.Option(None, "--reason", help="Why it must not be used again."),
+    release: bool = typer.Option(False, "--release", help="Take it out of quarantine."),
+) -> None:
+    """Mark a baseline unusable (it can no longer be restored or reset to), or release it."""
+    if not release and not reason:
+        typer.echo("give --reason, or --release", err=True)
+        raise typer.Exit(2)
+    _lab_call(
+        lambda: lab_mod.agent(_root(), app_id).quarantine_baseline(baseline_id, reason, release)
+    )
+    typer.echo(f"{baseline_id}: {'released' if release else 'quarantined: ' + reason}")
+
+
+@lab_app.command("reserve")
+def lab_reserve(
+    app_id: str,
+    minutes: int = typer.Option(60, "--minutes", min=1, max=480),
+    purpose: str = typer.Option(None, "--purpose", help="What for, shown to others."),
+) -> None:
+    """Reserve an app's lab: others can look, but their changes are refused until it ends.
+    You are TWINLAB_HOLDER, else your login name."""
+    who = lab_mod.holder()
+    if not who:
+        typer.echo("set TWINLAB_HOLDER to your name", err=True)
+        raise typer.Exit(2)
+    lease = _lab_call(lambda: lab_mod.agent(_root(), app_id).take_lease(who, minutes, purpose))
+    typer.echo(f"{app_id}: reserved by {lease['holder']} until {lease['until']}")
+
+
+@lab_app.command("release")
+def lab_release(
+    app_id: str, force: bool = typer.Option(False, "--force", help="Release someone else's.")
+) -> None:
+    """Release a reservation (your own, or anyone's with --force)."""
+    reply = _lab_call(lambda: lab_mod.agent(_root(), app_id).release_lease(force))
+    was = (reply or {}).get("released")
+    typer.echo(f"{app_id}: released" + (f" ({was['holder']}'s)" if was else " (it was free)"))
 
 
 @data_app.command("pin")

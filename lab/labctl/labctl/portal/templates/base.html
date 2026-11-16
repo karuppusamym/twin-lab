@@ -8,15 +8,21 @@
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="/">Twin Lab</a>
+  <a class="brand" href="/start">Twin Lab</a>
   <nav>
     {% set here = request.url.path %}
+    <a href="/start" class="{{ 'on' if here.startswith('/start') }}">Start here</a>
     <a href="/" class="{{ 'on' if here == '/' or here.startswith('/apps') }}">Apps</a>
-    <a href="/automations" class="{{ 'on' if here.startswith('/automations') }}">Automations</a>
+    <a href="/automations" class="{{ 'on' if here.startswith('/automations') }}">Bots</a>
     <a href="/flows" class="{{ 'on' if here.startswith('/flows') }}">Flows</a>
     <a href="/mapping" class="{{ 'on' if here.startswith('/mapping') }}">Readiness</a>
     <a href="/settings" class="{{ 'on' if here.startswith('/settings') }}">Settings</a>
   </nav>
+  <form method="post" action="/me" class="me" id="you" title="Your name shows who reserved a lab or accepted a change">
+    {% if me %}<span>You are <b>{{ me }}</b></span>
+      <details><summary>change</summary><input type="text" name="name" value="{{ me }}" aria-label="Your name" maxlength="60"><button type="submit" class="secondary">Save</button></details>
+    {% else %}<input type="text" name="name" placeholder="Your name" aria-label="Your name" maxlength="60" required><button type="submit" class="secondary">Save</button>{% endif %}
+  </form>
 </header>
 <main>
   {% if flash %}<div class="flash {{ 'error' if flash_kind == 'error' else 'ok' }}" role="status">{{ flash }}</div>{% endif %}

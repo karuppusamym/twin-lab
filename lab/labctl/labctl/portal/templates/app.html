@@ -8,10 +8,20 @@
   {% if app and app.mode %} · built as <b>{{ app.mode }}</b>{% endif %}
   {% if status and status.running %} · <a href="http://127.0.0.1:{{ app.lab.port }}/" target="_blank" rel="noopener">open the app ↗</a>{% endif %}
 </p>
-<nav class="sectionnav">
-  <a href="#evidence">1 Evidence</a><a href="#brief">2 Brief</a><a href="#build">3 Build</a><a href="#lab">4 Lab</a>
-  <a href="#data">5 Data</a><a href="#conditions">6 Conditions</a><a href="#sessions">7 Sessions</a>
+<nav class="progress" aria-label="Progress of {{ app_id }}">
+  {% for s in steps %}<a href="{{ s.href }}" class="{{ s.state }}" title="{{ s.hint }}"><span class="tick" aria-hidden="true">{{ "✓" if s.state == "done" else loop.index }}</span>{{ s.title }}</a>{% endfor %}
 </nav>
+{% if lease and not lease_mine %}
+<div class="flash error" role="status"><b>{{ lease.holder }}</b> has reserved this lab until {{ lease.until[:16] | replace("T", " ") }} UTC{% if lease.purpose %} ({{ lease.purpose }}){% endif %}. You can look, but changes are refused until then.</div>
+{% elif lease %}
+<div class="flash ok" role="status">You have reserved this lab until {{ lease.until[:16] | replace("T", " ") }} UTC. Others can look but not change it.</div>
+{% endif %}
+{% if next %}
+<div class="card nextcard">
+  <div class="nexthead">Next step</div>
+  <p><b>{{ next.title }}:</b> {{ next.hint }} <a class="button" href="{{ next.href }}">Go</a></p>
+</div>
+{% endif %}
 
 <section class="card" id="evidence">
   <h2>1 · Evidence</h2>
@@ -59,6 +69,20 @@
       <div><button type="submit" class="secondary">Stop recording</button></div>
     </form>
   </div>
+  {% if replayable | length > 1 %}
+  <details><summary>Does the app behave the same in UAT and production?</summary>
+    <p class="small muted">Record the same flow in both places, then compare. A demo app built from UAT is only trustworthy for production where they agree.</p>
+    <form method="post" action="/apps/{{ app_id }}/behaviour-compare">
+      <div class="row">
+        <div><label for="cmpa">Recordings of</label><input id="cmpa" type="text" name="name_a" value="UAT">
+          <select name="a" multiple size="4" aria-label="Recordings of the first place">{% for r in replayable %}<option>{{ r }}</option>{% endfor %}</select></div>
+        <div><label for="cmpb">against recordings of</label><input id="cmpb" type="text" name="name_b" value="production">
+          <select name="b" multiple size="4" aria-label="Recordings of the second place">{% for r in replayable %}<option>{{ r }}</option>{% endfor %}</select></div>
+      </div>
+      <button type="submit" class="secondary">Compare behaviour</button>
+    </form>
+  </details>
+  {% endif %}
 </section>
 
 <section class="card" id="brief">
@@ -145,6 +169,20 @@
       {% if built %}
       <form method="post" action="/apps/{{ app_id }}/lab/up" class="inline"><button type="submit">{{ "Rebuild and restart" if status and status.running else "Start" }}</button></form>
       <form method="post" action="/apps/{{ app_id }}/lab/down" class="inline" data-confirm="Stop {{ app_id }}? Its data is kept."><button type="submit" class="secondary">Stop</button></form>
+      {% if status and status.running %}
+      <details {{ 'open' if lease }}><summary>Reserve this lab ({{ "reserved by " ~ lease.holder if lease else "free" }})</summary>
+        <p class="small muted">Everyone shares one copy of each app. Reserve it while you run something that must not be disturbed: others can look, but their changes (data, conditions, sessions) are refused until it ends.</p>
+        {% if not lease or lease_mine %}
+        <form method="post" action="/apps/{{ app_id }}/lease/take" class="row">
+          <div><label for="lmin">For (minutes)</label><input id="lmin" type="number" name="minutes" value="60" min="1" max="480"></div>
+          <div><label for="lwhy">What for</label><input id="lwhy" type="text" name="purpose" placeholder="month-end regression"></div>
+          <div><button type="submit">{{ "Extend" if lease_mine else "Reserve" }}</button></div>
+        </form>
+        {% endif %}
+        {% if lease_mine %}<form method="post" action="/apps/{{ app_id }}/lease/release" class="inline"><button type="submit" class="secondary">Release</button></form>
+        {% elif lease %}<form method="post" action="/apps/{{ app_id }}/lease/force" class="inline" data-confirm="Release {{ lease.holder }}'s reservation? Only do this after asking them."><button type="submit" class="danger">Release it anyway</button></form>{% endif %}
+      </details>
+      {% endif %}
       {% else %}<p class="muted">Not built yet: the app's code arrives with the build's pull request.</p>{% endif %}
       {% if status and status.running and replayable %}
       <details><summary>Fidelity replay: does the demo app behave like the recording?</summary>
@@ -221,12 +259,14 @@
   </div>
   {% if baselines %}
   <details><summary>Earlier baselines ({{ baselines | length }})</summary>
-    <p class="small muted">Every load and every "becomes the baseline" is kept: the newest 20, plus any you pin. Restore puts that data back and makes it the baseline again.</p>
-    <div class="scroll"><table class="small"><thead><tr><th>Taken</th><th>From</th><th>Rows</th><th></th><th></th></tr></thead><tbody>
-    {% for b in baselines %}<tr><td>{{ b.loaded_at }}{% if b.current %} <span class="pill ok">current</span>{% endif %}{% if b.pinned %} <span class="pill">pinned</span>{% endif %}</td>
+    <p class="small muted">Every load and every "becomes the baseline" is kept: the newest 20, plus any you pin. Restore puts that data back and makes it the baseline again. Quarantine one that must not be used again (say, it turned out not to be masked); the reason stays on record.</p>
+    <div class="scroll"><table class="small"><thead><tr><th>Taken</th><th>From</th><th>Rows</th><th></th><th></th><th></th></tr></thead><tbody>
+    {% for b in baselines %}<tr><td>{{ b.loaded_at }}{% if b.current %} <span class="pill ok">current</span>{% endif %}{% if b.pinned %} <span class="pill">pinned</span>{% endif %}{% if b.quarantined %} <span class="pill err" title="{{ b.quarantined }}">quarantined</span><div class="small muted">{{ b.quarantined }}</div>{% endif %}</td>
       <td>{{ b.pack or b.label or b.kind }}</td><td>{{ (b.counts or {}).values() | sum }}</td>
-      <td>{% if not b.current %}<form method="post" action="/apps/{{ app_id }}/baselines/{{ b.id }}/restore" data-confirm="Replace the lab's data with this baseline?"><button type="submit" class="secondary">Restore</button></form>{% endif %}</td>
-      <td><form method="post" action="/apps/{{ app_id }}/baselines/{{ b.id }}/pin"><input type="hidden" name="pinned" value="{{ '' if b.pinned else '1' }}"><button type="submit" class="secondary">{{ 'Unpin' if b.pinned else 'Pin' }}</button></form></td></tr>{% endfor %}
+      <td>{% if not b.current and not b.quarantined %}<form method="post" action="/apps/{{ app_id }}/baselines/{{ b.id }}/restore" data-confirm="Replace the lab's data with this baseline?"><button type="submit" class="secondary">Restore</button></form>{% endif %}</td>
+      <td><form method="post" action="/apps/{{ app_id }}/baselines/{{ b.id }}/pin"><input type="hidden" name="pinned" value="{{ '' if b.pinned else '1' }}"><button type="submit" class="secondary">{{ 'Unpin' if b.pinned else 'Pin' }}</button></form></td>
+      <td>{% if b.quarantined %}<form method="post" action="/apps/{{ app_id }}/baselines/{{ b.id }}/release"><button type="submit" class="secondary">Release</button></form>
+        {% else %}<details><summary>Quarantine</summary><form method="post" action="/apps/{{ app_id }}/baselines/{{ b.id }}/quarantine"><input type="text" name="reason" placeholder="why" required><button type="submit" class="danger">Quarantine</button></form></details>{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
   </details>{% endif %}
   {% if lab_info and lab_info.tables %}

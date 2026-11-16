@@ -2,6 +2,42 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-16 — Round 5: a portal anyone can start with, OpenShift, the rest of Prod Echo
+QTT and Synapse are left aside on purpose; everything else from Prod Echo is built.
+
+- **Portal for newcomers:**
+  - **Start here** explains Twin Lab in four boxes and ticks off what is done. It has one
+    **Do it now** button for the next step, and a glossary in plain words.
+  - Each app shows its progress and its next step, on the Apps list and at the top of its
+    page.
+  - People type their name once.
+  - Errors from the lab read as sentences.
+- **OpenShift** ([ocp.md](ocp.md)):
+  - `labctl ocp render / deploy / smoke`.
+  - Pipeline `deploy-ocp.yml`: it builds the agent and app images to GHCR, then deploys each
+    app (database, setup job, lab agent, app, Route) when `OCP_SERVER` and `OCP_TOKEN` are
+    set. A push deploys only the apps it changed, or all of them when the lab agent changed.
+  - The images now run as a random user ID, as OpenShift requires. This was checked locally
+    for both apps. It has not run against a real cluster.
+- **Where each value came from (I-11, I-12).** A bot run is joined with its lab session; each
+  written column is typed by the bot, chosen by it, or set by the app, and codes are traced
+  back to the chosen label. Tried on the showcase:
+  - typed `C-1013` became `case_id 13`;
+  - the chosen "Payments" became `category_id 2`;
+  - `updated_at` was set by the app.
+- **Reservations (I-23).** Reserve a shared lab: others can look, but their changes are refused
+  with who and until when. Tried live in the portal.
+- **Baseline quarantine.** Mark data unusable, with a reason; it can no longer be restored or
+  reset to.
+- **UAT against production (I-22b).** Compare the behaviour of recordings from two places.
+- **T-17.** `agentic-case-update`, a triage agent that works out the category from the case and
+  explains it in a note. It is READY beside the UiPath bot, with sessions under normal and
+  slow-database, both PASS.
+- **T-19.** `labctl data load-across` loads one pack into several apps. A linked key missing on
+  either side refuses the pack, naming the key; if one app fails, the others are put back.
+- **E-04.** [08-evidence-ablation.md](08-evidence-ablation.md) measures what each kind of
+  evidence finds against the source.
+
 ## 2026-11-16 — Public repository, required checks
 The repository is public. `main` accepts a pull request only when `guard` and `test` have passed.
 `test` now runs on every pull request; before, a change outside the code paths skipped it.

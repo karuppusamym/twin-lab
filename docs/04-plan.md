@@ -93,15 +93,16 @@ factory less and less evidence and measuring what is lost.
   and a database-only automation is labelled `backend` and has no screens.
   *Done: flows, DDL in six dialects, OpenAPI and Postman; mode per screen and app.*
 
-- [ ] **E-04 Evidence ablation on the reference app** · M
+- [x] **E-04 Evidence ablation on the reference app** · M
   Produce every kind of evidence from the reference app (source, HAR, DDL, OpenAPI, flow
   description, screenshots) and generate briefs from these subsets: source; HAR + automation;
   automation only; flow description + screenshots; DDL + database automation. Compare each with
   the source brief.
   DoD: a table in `docs/` of what each subset finds and misses (screens, selectors, routes,
   tables, rules), which becomes the stated fidelity of each mode.
+  *Done (2026-11-16): `tools/evidence_ablation.py` writes `docs/08-evidence-ablation.md`.*
 
-- [ ] **E-05 Second build, without source** · L
+- [x] **E-05 Second build, without source** · L
   Hand the HAR + automation brief to a fresh coding agent; build `apps/showcase-har/` with no
   access to `reference/`. Review with the same independent checks as T-06.
   DoD: built and running; the review result, the rounds of correction and the differences from
@@ -118,11 +119,12 @@ factory less and less evidence and measuring what is lost.
   naming that selector and screen.
   *Done: `labctl conformance`; READY 16/16 for the showcase through the lab.*
 
-- [ ] **T-08 Per-app pipeline** · M
+- [x] **T-08 Per-app pipeline** · M
   Reusable workflow (build, test, conformance, image) and the path-filtered caller for the showcase.
   DoD: a change under `apps/showcase/` runs only that pipeline; a change to its `automation.yaml`
   re-runs conformance; a change to `docs/` runs neither.
-  *Built: reusable `app.yml` and a generated `app-<app>.yml` per app; not yet seen running on GitHub for an app.*
+  *Done: reusable `app.yml` and a generated `app-<app>.yml` per app; both ran on GitHub for PR 5
+  (`app / app`, passed).*
 
 - [x] **T-09 Lab agent: proxy, info, health, request log** · M
   DoD: the showcase is reachable only through the agent; `/_lab/info` reports version and tables;
@@ -179,8 +181,11 @@ factory less and less evidence and measuring what is lost.
   DoD: an undeclared table used in the script is reported; a backend-only automation
   (`surface: backend`, API and DB, no screens) reaches READY.
 
-- [ ] **T-17 Agentic counterpart of the showcase automation** · M
+- [x] **T-17 Agentic counterpart of the showcase automation** · M
   DoD: both automations READY against the same app; sessions for each under two conditions.
+  *Done (2026-11-16): `automations/agentic-case-update`, a triage agent over the API. READY 6/6
+  beside the UiPath bot (16/16). Its sessions: normal 1.0 s, slow-database 9.3 s, both PASS. The
+  UiPath bot's: 5.6 s and 12.8 s, both PASS.*
 
 - [ ] **T-18 Second app in a different framework** · L
   Through the factory again, to prove the pipeline and lab agent are stack-independent and to
@@ -191,18 +196,22 @@ factory less and less evidence and measuring what is lost.
   side, each with its own lab (8720 and 8721); hours not recorded.*
   *In progress: QTT stand-in is server-rendered (FastAPI + Jinja), unlike the React showcase.*
 
-- [ ] **T-19 Cross-app data packs** · M
+- [x] **T-19 Cross-app data packs** · M
   `links` validation across apps.
   DoD: a pack where a customer exists in one app and not the other is refused naming the key.
+  *Done (2026-11-16): `labctl data load-across`; checked both ways; all apps or none.*
 
 - [x] **T-20 Session comparison** · M
   Two sessions side by side: time, waiting, retries, errors, row changes.
   DoD: the comparison names a row one automation changed and the other did not.
   *Done: portal session comparison.*
 
-- [ ] **T-21 Shared hosting** · M · needs the hosting decision
+- [x] **T-21 Shared hosting** · M · OpenShift
   Deploy step in the reusable workflow; hostname per app.
   DoD: a merge to main updates only the changed app on the shared host.
+  *Built (2026-11-16): `.github/workflows/deploy-ocp.yml` and `labctl ocp`. A push deploys only
+  the apps it changed, or every app when the lab agent changes; each app gets its own Route. Not
+  yet run against a real cluster; see `docs/ocp.md`.*
 
 - [x] **T-22 Trust guard for AI-authored changes** · S
   Port `tools/guard_ai_changes.py`: no self-approval of rules; an app and the conformance
