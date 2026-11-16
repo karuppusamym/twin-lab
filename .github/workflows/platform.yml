@@ -2,8 +2,9 @@ name: platform
 on:
   push:
     paths: ["lab/**", "reference/**", "tools/**", "specs/**", "automations/**", "flows/**", "conditions/**", "data-packs/**", "apps/**", "pyproject.toml", ".github/workflows/platform.yml"]
+  # Every pull request runs the tests: `test` is a required check on main, and a required check
+  # that a path filter skips would block the merge for good.
   pull_request:
-    paths: ["lab/**", "reference/**", "tools/**", "specs/**", "automations/**", "flows/**", "conditions/**", "data-packs/**", "apps/**", "pyproject.toml", ".github/workflows/platform.yml"]
 jobs:
   test:
     runs-on: ubuntu-latest

@@ -2,6 +2,10 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-16 — Public repository, required checks
+The repository is public. `main` accepts a pull request only when `guard` and `test` have passed.
+`test` now runs on every pull request; before, a change outside the code paths skipped it.
+
 ## 2026-11-16 — Round 4: the open gaps closed
 PR 4 was merged. Round 4 builds what round 3 left open, and each piece was tried on the
 running labs.
