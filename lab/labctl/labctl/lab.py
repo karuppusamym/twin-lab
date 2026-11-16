@@ -35,26 +35,68 @@ def state_dir(root: Path) -> Path:
     return path
 
 
-def lab_token(root: Path) -> str:
-    """The admin token for every lab agent: TWINLAB_LAB_TOKEN, or one generated once and kept in
-    the state folder (Git-ignored). Bots never need it; only the portal and labctl do."""
-    token = os.environ.get("TWINLAB_LAB_TOKEN", "")
-    if token:
-        return token
-    path = state_dir(root) / "lab-token"
-    if path.exists():
-        return path.read_text(encoding="utf-8").strip()
+def _secret(root: Path, name: str, env: str | None = None) -> str:
+    """A value kept in the state folder (Git-ignored), generated once. An environment variable,
+    when given and set, wins and is written back, so every process on the machine agrees."""
     import secrets
 
-    token = secrets.token_urlsafe(32)
-    path.write_text(token, encoding="utf-8")
-    return token
+    path = state_dir(root) / name
+    given = os.environ.get(env, "") if env else ""
+    if given:
+        if not path.exists() or path.read_text(encoding="utf-8").strip() != given:
+            path.write_text(given, encoding="utf-8")
+        return given
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    value = secrets.token_urlsafe(24)
+    path.write_text(value, encoding="utf-8")
+    return value
 
 
-def bind_address() -> str:
+def lab_token(root: Path) -> str:
+    """The admin token for every lab agent: TWINLAB_LAB_TOKEN, or one generated once and kept in
+    the state folder. Bots never need it; only the portal and labctl do."""
+    return _secret(root, "lab-token", "TWINLAB_LAB_TOKEN")
+
+
+def db_password(root: Path) -> str:
+    """The lab database's owner password (the app and the agent use it; bots never see it)."""
+    return _secret(root, "lab-db-password")
+
+
+def bot_password(root: Path) -> str:
+    """The password of `bot`, the database login handed to automations: rows only, no DDL."""
+    return _secret(root, "lab-bot-password")
+
+
+SETTINGS = {"bind": ("TWINLAB_LAB_BIND", "127.0.0.1"), "host": ("TWINLAB_HOST", "127.0.0.1")}
+
+
+def setting(root: Path, key: str) -> str:
+    """A lab setting: the environment variable if set (and then remembered in
+    `.lab-state/lab.yaml`), else the remembered value, else the default. So `labctl lab up` in one
+    shell and the portal started from another use the same bind address and host name."""
+    var, default = SETTINGS[key]
+    path = state_dir(root) / "lab.yaml"
+    try:
+        saved = yaml.safe_load(path.read_text(encoding="utf-8")) or {} if path.exists() else {}
+    except (OSError, yaml.YAMLError):
+        saved = {}
+    # Every lab variable set in this process is remembered, whichever one is being read.
+    seen = {k: os.environ.get(v, "").strip() for k, (v, _) in SETTINGS.items()}
+    changed = {k: v for k, v in seen.items() if v and saved.get(k) != v}
+    if changed:
+        saved.update(changed)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(yaml.safe_dump(saved, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
+    return seen[key] or str(saved.get(key) or default)
+
+
+def bind_address(root: Path) -> str:
     """Where the lab's ports listen: this machine only, unless TWINLAB_LAB_BIND says otherwise
     (0.0.0.0 when bots on other machines must reach the apps; then set a firewall rule)."""
-    return os.environ.get("TWINLAB_LAB_BIND", "127.0.0.1")
+    return setting(root, "bind")
 
 
 def compose(root: Path, app_id: str) -> dict:
@@ -68,7 +110,8 @@ def compose(root: Path, app_id: str) -> dict:
     db_env = app.run.env.database_url
     schema = (root / "apps" / app_id / "db" / "schema.sql").resolve()
     token = lab_token(root)
-    bind = bind_address()
+    bind = bind_address(root)
+    pw = db_password(root)  # not "lab": the DB port can be reachable from the network
     return {
         "name": project(app_id),
         "services": {
@@ -76,7 +119,7 @@ def compose(root: Path, app_id: str) -> dict:
                 "image": POSTGRES_IMAGE,
                 "environment": {
                     "POSTGRES_USER": "lab",
-                    "POSTGRES_PASSWORD": "lab",
+                    "POSTGRES_PASSWORD": pw,
                     "POSTGRES_DB": app_id,
                 },
                 "volumes": ["db:/var/lib/postgresql/data"],
@@ -95,7 +138,7 @@ def compose(root: Path, app_id: str) -> dict:
                     "APP_UPSTREAM": f"http://app:{app_port}",
                     "DB_UPSTREAM": "db:5432",
                     "DB_PROXY_PORT": "15432",
-                    "ADMIN_DATABASE_URL": f"postgresql://lab:lab@db:5432/{app_id}",
+                    "ADMIN_DATABASE_URL": f"postgresql://lab:{pw}@db:5432/{app_id}",
                     "SCHEMA_PATH": "/lab/schema.sql",
                     "STATE_DIR": "/var/lib/twinlab",
                     "LAB_PORT": "9000",
@@ -109,7 +152,7 @@ def compose(root: Path, app_id: str) -> dict:
             "app": {
                 "image": f"twinlab/{app_id}:dev",
                 "build": {"context": (root / "apps" / app_id).resolve().as_posix()},
-                "environment": {db_env: f"postgresql://lab:lab@agent:15432/{app_id}"},
+                "environment": {db_env: f"postgresql://lab:{pw}@agent:15432/{app_id}"},
                 "depends_on": ["agent"],
                 "restart": "unless-stopped",
             },
@@ -157,6 +200,44 @@ def build_agent_image(root: Path) -> str:
     return AGENT_IMAGE
 
 
+def _roles_sql(app_id: str, owner_pw: str, bot_pw: str) -> str:
+    """The owner gets this machine's password; `bot` (for automations) may read and change rows
+    but is no superuser, so it cannot run programs, read files or drop tables."""
+    q = lambda s: "'" + s.replace("'", "''") + "'"  # noqa: E731
+    return f"""
+ALTER ROLE lab PASSWORD {q(owner_pw)};
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'bot') THEN
+    CREATE ROLE bot LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  END IF;
+END $$;
+ALTER ROLE bot PASSWORD {q(bot_pw)};
+GRANT CONNECT ON DATABASE "{app_id}" TO bot;
+GRANT USAGE ON SCHEMA public TO bot;
+ALTER DEFAULT PRIVILEGES FOR ROLE lab IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO bot;
+ALTER DEFAULT PRIVILEGES FOR ROLE lab IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO bot;
+""" + _grants_sql()
+
+
+def _grants_sql() -> str:
+    return (
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bot;\n"
+        "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bot;\n"
+    )
+
+
+def _psql(file: Path, app_id: str, sql: str) -> None:
+    """Run SQL as the owner inside the db container (local socket: no password needed)."""
+    out = _docker(
+        ["compose", "-f", str(file), "exec", "-T", "db", "psql", "-v", "ON_ERROR_STOP=1",
+         "-U", "lab", "-d", app_id, "-q", "-c", sql],
+        timeout=120,
+    )  # fmt: skip
+    if out.returncode != 0:
+        raise LabError(f"setting up the database logins of {app_id} failed:\n{out.stderr[-2000:]}")
+
+
 def up(root: Path, app_id: str, build: bool = True) -> str:
     """Start (or update) the app's lab. Returns Docker's output."""
     # Rebuilt every time (Docker's cache makes an unchanged build quick), so after a `git pull`
@@ -164,6 +245,15 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
     if build and "TWINLAB_AGENT_IMAGE" not in os.environ:
         build_agent_image(root)
     file = compose_file(root, app_id)
+    # 1. The database alone, so its logins match this machine's passwords before the app and the
+    #    agent connect with them (a volume made earlier keeps the password it was created with).
+    first = _docker(
+        ["compose", "-f", str(file), "up", "-d", "--wait", "--wait-timeout", "240", "db"]
+    )
+    if first.returncode != 0:
+        raise LabError(f"the database of {app_id} did not start:\n{first.stderr[-3000:]}")
+    _psql(file, app_id, _roles_sql(app_id, db_password(root), bot_password(root)))
+    # 2. Everything.
     args = ["compose", "-f", str(file), "up", "-d", "--wait", "--wait-timeout", "240"]
     if build:
         args.append("--build")
@@ -172,6 +262,7 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
         raise LabError(
             f"`docker compose up` failed for {app_id}:\n{(out.stderr or out.stdout)[-3000:]}"
         )
+    _psql(file, app_id, _grants_sql())  # tables the app created on start
     # The first time, the app's own starting data becomes the baseline, so Reset works at once.
     try:
         lab_agent = agent(root, app_id)
@@ -295,5 +386,7 @@ def agent(root: Path, app_id: str, host: str | None = None) -> Agent:
     app = load_app(root, app_id)
     if app.lab is None:
         raise LabError(f"apps/{app_id}/app.yaml has no `lab:` section")
-    host = host or os.environ.get("TWINLAB_HOST", "127.0.0.1")  # see bindings.LAB_HOST
+    # Admin calls come from this machine, so they go to 127.0.0.1 whatever TWINLAB_HOST says (that
+    # name is for the addresses handed to bots elsewhere, and need not be bound or resolve to IPv4).
+    host = host or "127.0.0.1"
     return Agent(f"http://{host}:{app.lab.port}", lab_token(root))

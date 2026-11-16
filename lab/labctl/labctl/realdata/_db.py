@@ -44,11 +44,35 @@ def scrub(message: str, url: str) -> str:
     return message
 
 
-def _guard(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001
+_QUOTED = re.compile(r"'(?:[^']|'')*'")
+_CHANGES = re.compile(
+    # Verbs that change data or schema. Function and column names such as replace() or
+    # comment or delete_rule (catalog queries use them) are not in the list.
+    r"\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|CALL|"
+    r"INTO)\b",
+    re.I,
+)
+
+
+def check_read_only(statement: str) -> None:
+    """Refuse anything but one reading statement. The first word alone is not enough: SQL Server
+    runs `SELECT ...; DELETE ...` as one batch, `WITH c AS (...) DELETE FROM c` starts like a read,
+    and `SELECT ... INTO` creates a table."""
     head = _LEADING.sub("", statement)
     verb = head.split(None, 1)[0].upper() if head.strip() else ""
     if verb not in READ_VERBS or (verb == "PRAGMA" and "=" in head):
         raise WriteRefused(f"refused a non-read statement on a replica: {verb or '(empty)'}")
+    bare = _QUOTED.sub("''", head)  # words inside string literals do not count
+    if ";" in bare.rstrip().rstrip(";"):
+        raise WriteRefused("refused more than one statement in one call on a replica")
+    if "--" in bare or "/*" in bare:
+        raise WriteRefused("refused a statement with comments inside it on a replica")
+    if verb in ("SELECT", "WITH", "VALUES") and (found := _CHANGES.search(bare)):
+        raise WriteRefused(f"refused a statement that contains {found.group(1).upper()}")
+
+
+def _guard(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001
+    check_read_only(statement)
 
 
 def _sqlite_readonly(url: URL) -> Engine:
@@ -84,7 +108,16 @@ def open_readonly(url: str) -> Engine:
                 connect_args["options"] = "-c default_transaction_read_only=on"
             elif backend in ("mysql", "mariadb"):
                 connect_args["init_command"] = "SET SESSION TRANSACTION READ ONLY"
+            elif backend == "mssql" and "ApplicationIntent" not in parsed.query:
+                # Routes to a readable secondary where there is one; it is not enforcement, so a
+                # read-only login (db_datareader) is still required: see docs/realdata.md.
+                parsed = parsed.update_query_dict({"ApplicationIntent": "ReadOnly"})
             engine = create_engine(parsed, connect_args=connect_args, poolclass=NullPool)
+            if backend == "oracle":
+                # Every transaction read only, from its first statement.
+                event.listen(
+                    engine, "begin", lambda c: c.exec_driver_sql("SET TRANSACTION READ ONLY")
+                )
     except (SQLAlchemyError, ImportError, ValueError) as exc:
         raise RealDataError(scrub(f"cannot open {safe_url(url)}: {exc}", url)) from None
     event.listen(engine, "before_cursor_execute", _guard)
