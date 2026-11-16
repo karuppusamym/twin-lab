@@ -240,3 +240,99 @@ def test_store_is_thread_safe(tmp_path):
 )
 def test_status_mapping(status, detail, state):
     assert map_status(status, detail)[0] == state
+
+
+def test_start_refuses_a_second_unfinished_direct_build(server, repo, tmp_path):
+    state = tmp_path / "state"
+    jobs = jobs_for(server, repo, state)
+    other = jobs_for(server, repo, state)  # another process sharing the state directory
+    try:
+        first = jobs.start("asker", "acme/twin-lab")
+        assert not first.terminal
+        sessions = len(server.state.mock.sessions)
+        with pytest.raises(JobError, match=rf"already in progress \(job {first.id}"):
+            jobs.start("asker", "acme/twin-lab")
+        with pytest.raises(JobError, match="already in progress"):
+            other.start("asker", "acme/twin-lab")
+        assert len(server.state.mock.sessions) == sessions  # no second session created
+        assert [j.id for j in jobs.list("asker")] == [first.id]
+        # Another app is not affected, and force starts a second build anyway.
+        assert jobs.start("demo", "acme/twin-lab").state != "failed"
+        forced = jobs.start("asker", "acme/twin-lab", force=True)
+        assert forced.id != first.id and not forced.terminal
+        jobs.cancel(first.id)
+        jobs.cancel(forced.id)
+        again = jobs.start("asker", "acme/twin-lab")  # nothing unfinished: allowed
+        assert again.id not in (first.id, forced.id)
+    finally:
+        jobs.stop()
+        other.stop()
+
+
+def test_update_writes_only_the_fields_given(tmp_path):
+    from labctl.devin.jobs import Job
+
+    state = tmp_path / "state"
+    a, b = JobStore(state), JobStore(state)
+    a.save(Job(id="j1", app_id="app", mode="manual", state="running"))
+    stale = a.get("j1")
+    # Process B attaches a pull request while process A holds an older copy of the row.
+    pr = [{"pr_url": "https://github.com/acme/x/pull/1", "pr_state": "open"}]
+    b.update("j1", pull_requests=pr, state="finished")
+    a.get = lambda job_id: stale if job_id == "j1" else None  # A still sees the old row
+    try:
+        a.update("j1", last_error="note from A")
+    finally:
+        del a.get
+    got = b.get("j1")
+    assert got.pull_requests == pr and got.state == "finished" and got.last_error == "note from A"
+
+
+def test_a_stale_poll_never_overwrites_a_terminal_state(tmp_path):
+    from labctl.devin.jobs import Job
+
+    store = JobStore(tmp_path / "state")
+    for state in ("cancelled", "finished", "failed"):
+        store.save(Job(id=state, app_id="app", mode="direct", state=state, devin_id="devin-x"))
+        got = store.update(state, from_poller=True, state="running", status="running")
+        assert got.state == state and got.status is None
+    # A poll may still record a terminal result over a terminal state, but never over cancelled.
+    assert store.update("finished", from_poller=True, state="failed").state == "failed"
+    assert store.update("cancelled", from_poller=True, state="finished").state == "cancelled"
+    # Writes that are not from a poller (a person's message, resuming) still apply.
+    assert store.update("finished", state="running").state == "running"
+
+
+def test_poller_with_a_stale_read_cannot_undo_a_cancel(server, repo, tmp_path):
+    from labctl.devin.jobs import Job
+
+    state = tmp_path / "state"
+    jobs = jobs_for(server, repo, state)
+    jobs.store.save(Job(id="j2", app_id="demo", mode="direct", state="running", devin_id="d"))
+    stale = jobs.store.get("j2")
+    JobStore(state).update("j2", state="cancelled", finished_at="2026-11-15T00:00:00Z")  # the CLI
+    jobs._require = lambda job_id: stale  # the tracker read the row before the cancel
+    job = jobs._record("j2", {"status": "running", "status_detail": "working"})
+    assert job.state == "cancelled" and job.finished_at == "2026-11-15T00:00:00Z"
+
+
+def test_poll_keeps_a_pull_request_attached_by_hand(server, repo, tmp_path):
+    from labctl.devin.jobs import Job
+
+    jobs = jobs_for(server, repo, tmp_path / "state")
+    jobs.store.save(Job(id="j3", app_id="demo", mode="direct", state="running", devin_id="d"))
+    jobs.attach_pr("j3", "https://github.com/acme/x/pull/9")
+    job = jobs._record("j3", {"status": "running", "status_detail": "working", "pull_requests": []})
+    assert job.pr_urls == ["https://github.com/acme/x/pull/9"]
+
+
+def test_get_for_app_checks_the_app(tmp_path):
+    from labctl.devin.jobs import Job
+
+    jobs = BuildJobs(JobStore(tmp_path / "state"), lambda: None, tmp_path)
+    jobs.store.save(Job(id="abc123", app_id="demo", mode="manual", state="running"))
+    assert jobs.get_for_app("abc123", "demo").id == "abc123"
+    with pytest.raises(JobError, match="belongs to demo, not other"):
+        jobs.get_for_app("abc123", "other")
+    with pytest.raises(JobError, match="no job"):
+        jobs.get_for_app("nope", "demo")

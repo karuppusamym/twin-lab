@@ -494,3 +494,36 @@ def test_09_restart_keeps_baseline_and_condition(stack: Lab):
     assert r.status_code == 200, r.text
     assert stack.lab("GET", "/_lab/data").json() == data
     stack.lab("DELETE", "/_lab/condition")
+
+
+def test_10_intervals_survive_postgres_and_reset_exactly(stack: Lab):
+    psycopg = pytest.importorskip("psycopg")
+    from lab_agent.values import to_json
+
+    values = [
+        dt.timedelta(days=30, seconds=1),
+        dt.timedelta(days=30, seconds=1, microseconds=1),
+        dt.timedelta(days=12345, seconds=86399, microseconds=999999),
+        dt.timedelta(microseconds=-1),
+        dt.timedelta(days=-30, seconds=-1, microseconds=-250000),
+        dt.timedelta(0),
+    ]
+    with psycopg.connect(DB_PROXY, connect_timeout=10, autocommit=True) as conn:
+        # Postgres parses the text to_json writes back to the identical interval.
+        for v in values:
+            assert conn.execute("SELECT %s::interval", (to_json(v),)).fetchone()[0] == v
+        conn.execute("CREATE TABLE interval_probe (id int PRIMARY KEY, d interval NOT NULL)")
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO interval_probe VALUES (%s, %s)", list(enumerate(values))
+                )
+            r = stack.lab("POST", "/_lab/data/baseline", json={"label": "intervals"})
+            assert r.status_code == 200, r.text
+            conn.execute("UPDATE interval_probe SET d = '0'")
+            r = stack.lab("POST", "/_lab/reset")
+            assert r.status_code == 200, r.text
+            got = conn.execute("SELECT d FROM interval_probe ORDER BY id").fetchall()
+            assert [g[0] for g in got] == values
+        finally:
+            conn.execute("DROP TABLE interval_probe")

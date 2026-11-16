@@ -20,12 +20,13 @@ from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 import yaml
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pydantic import Field, field_validator, model_validator
 
 from labctl.models import Contract
 from labctl.realdata import inventory
 from labctl.realdata.dictionaries import DICTIONARIES, FULL_NAMES, WITH_NUMBER
-from labctl.realdata.ff1 import FF1
+from labctl.realdata.ff1 import FF1, MIN_DOMAIN
 from labctl.source.sqlalchemy_models import Table
 
 Rows = dict[str, list[dict[str, Any]]]
@@ -43,6 +44,9 @@ ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DEFAULT_KEY_ENV = "TWINLAB_MASK_KEY"
 MIN_KEY_BYTES = 16
 MAX_TRIES = 1000
+FF1_MIN_DIGITS = next(n for n in range(1, 20) if 10**n >= MIN_DOMAIN)  # 6
+# Techniques that map distinct source values to distinct masked values (sanitize checks it).
+ONE_TO_ONE = frozenset({"ff1_digits", "ff1_ssn_valid", "luhn", "ff1_keep_area", "hmac_local_part"})
 
 
 class MaskError(Exception):
@@ -183,6 +187,7 @@ class Masker:
         self._key = key
         self._sub: dict[str, bytes] = {}
         self._ff1: dict[str, FF1] = {}
+        self._perms: dict[tuple[str, int], list[int]] = {}
 
     def subkey(self, label: str) -> bytes:
         if label not in self._sub:
@@ -200,20 +205,66 @@ class Masker:
             self._ff1[label] = FF1(self.subkey(label), 10)
         return self._ff1[label]
 
+    def _perm(self, label: str, length: int) -> list[int]:
+        """A keyed permutation of 0..10**length-1, for lengths too short for FF1.
+
+        Sattolo's variant of the Fisher-Yates shuffle: one cycle through the whole domain, so it
+        is a bijection with no fixed point. Randomness is AES-256-CTR under a key derived from
+        `label`, so it is the same in every run and every Python version.
+        """
+        cache_key = (label, length)
+        if cache_key not in self._perms:
+            size = 10**length
+            key = self.subkey(f"{label}:perm")
+            nonce = hashlib.sha256(f"perm:{length}".encode()).digest()[:16]
+            stream = Cipher(algorithms.AES(key), modes.CTR(nonce)).encryptor()
+            perm = list(range(size))
+            buf, pos = b"", 0
+            for i in range(size - 1, 0, -1):
+                limit = (1 << 64) - (1 << 64) % i  # rejection sampling: j uniform in [0, i)
+                while True:
+                    if pos + 8 > len(buf):
+                        buf, pos = stream.update(bytes(8 * 4096)), 0
+                    r = int.from_bytes(buf[pos : pos + 8], "big")
+                    pos += 8
+                    if r < limit:
+                        break
+                j = r % i
+                perm[i], perm[j] = perm[j], perm[i]
+            self._perms[cache_key] = perm
+        return self._perms[cache_key]
+
     # digits ------------------------------------------------------------------------------------
 
     def _cycle(self, label: str, digits: str, accept=lambda d: True) -> str:
-        """FF1 (or, under 6 digits, HMAC) with an incremented tweak until accepted and changed."""
-        for attempt in range(MAX_TRIES):
-            tweak = b"" if attempt == 0 else attempt.to_bytes(4, "big")
-            if len(digits) >= 6:
-                out = self._fpe(label).encrypt(digits, tweak)
-            else:
-                n = self._int(label + ":short", f"{attempt}:{digits}") % 10 ** len(digits)
-                out = str(n).zfill(len(digits))
-            if out != digits and accept(out):
+        """A keyed permutation of all digit strings of this length, cycle-walked until accepted.
+
+        FF1 (radix 10) from FF1_MIN_DIGITS digits, the shortest length NIST allows; below that a
+        keyed shuffle of the whole domain. Re-applying the same permutation until the output is
+        accepted keeps the mapping one-to-one on the accepted values.
+        """
+        n = len(digits)
+        if n >= FF1_MIN_DIGITS:
+            fpe = self._fpe(label)
+            step, limit = (lambda s: fpe.encrypt(s)), MAX_TRIES
+        else:
+            perm = self._perm(label, n)
+            step, limit = (lambda s: str(perm[int(s)]).zfill(n)), 10**n
+        out = digits
+        for _ in range(limit):
+            out = step(out)
+            if out == digits:
+                break  # back at the start: a fixed point, or nothing else is acceptable
+            if accept(out):
                 return out
-        raise MaskError(f"{label}: no acceptable value after {MAX_TRIES} tries")
+        if n >= FF1_MIN_DIGITS:
+            # An FF1 fixed point (about one per 10**n values). Fall back to another tweak; this
+            # one value is not guaranteed unique, and sanitize() reports it if it collides.
+            for attempt in range(1, MAX_TRIES):
+                out = self._fpe(label).encrypt(digits, attempt.to_bytes(4, "big"))
+                if out != digits and accept(out):
+                    return out
+        raise MaskError(f"{label}: no acceptable value for a {n}-digit value")
 
     @staticmethod
     def _put_digits(template: str, digits: str) -> str:
@@ -260,9 +311,26 @@ class Masker:
 
     # text --------------------------------------------------------------------------------------
 
+    @staticmethod
+    def email_key(value: Any) -> tuple[str, str]:
+        """(local part, domain) as compared: trimmed and case-folded, domain empty if none."""
+        local, at, domain = str(value).strip().rpartition("@")
+        if not at:
+            local, domain = domain, ""
+        return local.casefold(), domain.casefold()
+
     def hmac_local_part(self, value: Any) -> str:
-        local = str(value).rsplit("@", 1)[0].strip().casefold()
-        code = base64.b32encode(self._h("hmac_local_part", local)).decode("ascii")
+        """`<12 base32 chars>@test.invalid` from a keyed hash of the whole address.
+
+        Local part and domain are hashed together but length-prefixed, so `a@b.c` and `a@b.d`
+        differ, and no split of one address can look like another.
+        """
+        local, domain = self.email_key(value)
+        message = b"".join(
+            len(part).to_bytes(4, "big") + part for part in (local.encode(), domain.encode())
+        )
+        digest = hmac.new(self.subkey("hmac_local_part:v2"), message, hashlib.sha256).digest()
+        code = base64.b32encode(digest).decode("ascii")
         return f"{code[:12].lower()}@test.invalid"
 
     def dict_hmac(self, value: Any, dictionary: str) -> str:
@@ -427,6 +495,13 @@ def sanitize(
                 bad = sum(1 for _, d in pairs if not str(d).endswith("@test.invalid"))
                 if bad:
                     problems.append(f"{table}.{col}: {bad} masked emails are deliverable")
+            if rule.technique in ONE_TO_ONE:
+                merged = _collisions(pairs, rule.technique)
+                if merged:
+                    problems.append(
+                        f"{table}.{col}: {merged} masked values each stand for more than one "
+                        "distinct source value (masking was not one-to-one)"
+                    )
     for t in tables:
         for fk in inventory.foreign_keys(t):
             if t.name not in source_rows or fk.parent not in source_rows:
@@ -440,6 +515,15 @@ def sanitize(
                 )
     problems += _remask(source_rows, masked_rows, manifest, key, sample_rate)
     return problems
+
+
+def _collisions(pairs: list[tuple[Any, Any]], technique: str) -> int:
+    """How many masked values came from two or more distinct source values."""
+    sources: dict[str, set] = {}
+    for s, d in pairs:
+        norm = Masker.email_key(s) if technique == "hmac_local_part" else str(s)
+        sources.setdefault(str(d), set()).add(norm)
+    return sum(1 for found in sources.values() if len(found) > 1)
 
 
 def _remask(source: Rows, masked: Rows, manifest: MaskManifest, key, rate: float) -> list[str]:

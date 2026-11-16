@@ -336,3 +336,87 @@ def test_extracted_rows_mask_and_sanitize_with_a_draft(tmp_path):
     draft = m.draft_manifest(tables)
     out = m.mask(src, draft, KEY, allow_unreviewed=True)
     assert m.sanitize(src, out, draft, tables, key=KEY) == []
+
+
+# -- one-to-one masking ---------------------------------------------------------------------------
+
+
+def synthetic_emails(count: int = 10_000) -> list[str]:
+    """Realistic synthetic addresses; many share a local part across domains."""
+    from labctl.realdata.dictionaries import DICTIONARIES
+
+    firsts, lasts = DICTIONARIES["first_names_v1"], DICTIONARIES["last_names_v1"]
+    domains = ["gmail.com", "yahoo.com", "outlook.com", "example.org", "mail.example.net"]
+    out: list[str] = []
+    for i in range(count):
+        f, last = firsts[i % len(firsts)].lower(), lasts[(i // len(firsts)) % len(lasts)].lower()
+        local = [f"{f}.{last}", f"{f}{last}", f"{f[0]}{last}{i % 7}"][i % 3]
+        out.append(f"{local}@{domains[(i // 3) % len(domains)]}")
+    return out
+
+
+def test_email_masking_keeps_the_domain_apart():
+    masker = m.Masker(KEY)
+    gmail = masker.hmac_local_part("john.smith@gmail.com")
+    yahoo = masker.hmac_local_part("john.smith@yahoo.com")
+    assert gmail != yahoo
+    assert gmail.endswith("@test.invalid") and yahoo.endswith("@test.invalid")
+    assert masker.hmac_local_part("john.smith@gmail.com") == gmail  # deterministic
+    assert masker.hmac_local_part(" John.Smith@GMAIL.com ") == gmail  # same address
+    # Length-prefixed: moving the "@" never gives the same input to the hash.
+    assert masker.hmac_local_part("a@b.c") != masker.hmac_local_part("a@bc")
+
+
+def test_ten_thousand_synthetic_emails_mask_without_a_collision():
+    emails = synthetic_emails()
+    assert len({e.casefold() for e in emails}) == len(emails) == 10_000
+    masker = m.Masker(KEY)
+    masked = [masker.hmac_local_part(e) for e in emails]
+    assert len(set(masked)) == len(emails)
+    assert all(x.endswith("@test.invalid") and len(x.split("@")[0]) == 12 for x in masked)
+
+
+@pytest.mark.parametrize("length", [1, 2, 3, 4, 5])
+def test_every_short_digit_domain_maps_one_to_one(length):
+    masker = m.Masker(KEY)
+    values = [str(v).zfill(length) for v in range(10**length)]
+    out = [masker.ff1_digits(v) for v in values]
+    assert len(set(out)) == 10**length  # a bijection of the whole domain
+    assert all(len(o) == length and o.isdigit() for o in out)
+    assert all(o != v for o, v in zip(out, values, strict=True))  # nothing left as it was
+    assert [m.Masker(KEY).ff1_digits(v) for v in values[:50]] == out[:50]  # deterministic
+
+
+def test_six_digits_and_up_use_ff1():
+    masker = m.Masker(KEY)
+    assert m.FF1_MIN_DIGITS == 6
+    assert masker.ff1_digits("123456") == masker._fpe("ff1_digits").encrypt("123456")
+    sample = [str(v).zfill(6) for v in range(0, 10**6, 97)]
+    assert len({masker.ff1_digits(v) for v in sample}) == len(sample)
+
+
+def test_valid_ssns_stay_one_to_one():
+    masker = m.Masker(KEY)
+    ssns = [
+        f"{a:03d}{g:02d}{s:04d}" for a in (1, 123, 665, 899) for g in (1, 50) for s in range(1, 400)
+    ]
+    out = [masker.ff1_ssn_valid(s) for s in ssns]
+    assert all(m.ssn_valid(o) for o in out)
+    assert len(set(out)) == len(ssns)
+
+
+def test_sanitize_reports_distinct_values_that_became_equal():
+    src = rows()
+    out = m.mask(src, manifest(), KEY)
+    assert m.sanitize(src, out, manifest(), [], key=KEY) == []
+    merged = json.loads(json.dumps(out))
+    merged["customers"][1]["email"] = merged["customers"][0]["email"]
+    merged["accounts"][3]["account_no"] = merged["accounts"][2]["account_no"]
+    problems = "\n".join(m.sanitize(src, merged, manifest(), [], key=KEY))
+    assert "customers.email: 1 masked values each stand for more than one" in problems
+    assert "accounts.account_no: 1 masked values each stand for more than one" in problems
+    # The same source value masking to the same value twice is fine, and so are dictionaries.
+    same = {"customers": src["customers"] + [dict(src["customers"][0], id=99)]}
+    man = manifest()
+    out2 = m.mask(same, man, KEY)
+    assert not [p for p in m.sanitize(same, out2, man, [], key=KEY) if "more than one" in p]
