@@ -20,24 +20,174 @@ INTERACTIVE = {"input", "select", "textarea", "button"}
 FORM_TAGS = {"input", "select", "textarea"}
 TEXT_CAP = 200
 
-# JavaScript run in the page before reading outerHTML, so values and selections are in the markup.
-# Password values are never written.
-SYNC_JS = """() => {
-  for (const el of document.querySelectorAll('input, textarea, select')) {
-    if (el.tagName === 'SELECT') {
-      for (const o of el.options) {
-        if (o.selected) o.setAttribute('selected', ''); else o.removeAttribute('selected');
-      }
-    } else if (el.type === 'checkbox' || el.type === 'radio') {
-      if (el.checked) el.setAttribute('checked', ''); else el.removeAttribute('checked');
-    } else if (el.type === 'password') {
-      el.removeAttribute('value');
-    } else {
-      el.setAttribute('value', el.value);
-    }
+# Run as an init script before the page's own code: remembers every shadow root, closed ones
+# included (page code cannot reach a closed root afterwards, and neither could a recorder).
+SHADOW_HOOK_JS = r"""(() => {
+  if (window.__tlShadows) return;
+  const roots = new WeakMap();
+  const list = [];
+  Object.defineProperty(window, "__tlShadows", { value: roots });
+  Object.defineProperty(window, "__tlShadowList", { value: list });
+  const attach = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function (init) {
+    const root = attach.call(this, init);
+    roots.set(this, root);
+    list.push(root);
+    if (window.__tlOnShadow) window.__tlOnShadow(root);  // the recorder listens inside it
+    return root;
+  };
+})();"""
+
+# The page as HTML, with what outerHTML leaves out written in as ordinary elements, so every
+# reader of a snapshot (behaviour catalog, page snapshots, fidelity) sees it:
+# - a shadow root (open, or closed when SHADOW_HOOK_JS ran) as <tl-shadow data-tl-mode> inside
+#   its host;
+# - a frame's document as <tl-frame data-tl-frame="iframe#x"> right after the <iframe>; a
+#   cross-origin frame cannot be read from here, so it is left as data-tl-pending="fN" for the
+#   recorder to fill in (fill_frames);
+# - a <canvas> marked data-tl-canvas="cN" (a picture and its text are added by the recorder);
+# - an embedded PDF marked data-tl-document="pdf".
+# With {values: true} live form values are written into the markup (fidelity, harness); without,
+# values stay as the page's own attributes. Password values are never written.
+SERIALIZE_FN = r"""(opts) => {
+  opts = opts || {};
+  const values = !!opts.values;
+  const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+                        "meta", "source", "track", "wbr"]);
+  const RAW = new Set(["script", "style"]);
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const escA = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  function sel(el) {
+    const tag = el.localName;
+    if (el.id) return tag + "#" + CSS.escape(el.id);
+    const name = el.getAttribute("name");
+    if (name) return tag + '[name="' + name + '"]';
+    const classes = Array.from(el.classList).slice(0, 2).map((c) => "." + CSS.escape(c)).join("");
+    return tag + classes;
   }
-  return '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+  function mark(el, attr, prefix, counter) {
+    let id = el.getAttribute(attr);
+    if (!id) {
+      const w = el.ownerDocument.defaultView || window;
+      w[counter] = (w[counter] || 0) + 1;
+      id = prefix + w[counter];
+      el.setAttribute(attr, id);
+    }
+    return id;
+  }
+  function isPdf(el) {
+    const t = (el.getAttribute("type") || "").toLowerCase();
+    const src = (el.getAttribute("src") || el.getAttribute("data") || "").toLowerCase();
+    return t === "application/pdf" || /\.pdf($|[?#])/.test(src);
+  }
+  function attrs(el) {
+    let out = "";
+    const tag = el.localName;
+    for (const a of Array.from(el.attributes)) {
+      if (a.name.startsWith("data-tl-")) continue;  // markers set on the live page
+      if (tag === "input" && el.type === "password" && a.name === "value") continue;
+      if (values && ((a.name === "value" && (tag === "input" || tag === "textarea"))
+                     || (a.name === "selected" && tag === "option") || a.name === "checked")) continue;
+      out += " " + a.name + (a.value === "" ? "" : '="' + escA(a.value) + '"');
+    }
+    if (values) {
+      if (tag === "input") {
+        if (el.type === "checkbox" || el.type === "radio") { if (el.checked) out += " checked"; }
+        else if (el.type !== "password") out += ' value="' + escA(el.value) + '"';
+      } else if (tag === "textarea") out += ' value="' + escA(el.value) + '"';
+      else if (tag === "option" && el.selected) out += " selected";
+    }
+    if (tag === "canvas") {
+      out += ' data-tl-canvas="' + mark(el, "data-tl-canvas-id", "c", "__tlCanvasSeq") + '"';
+    }
+    if ((tag === "embed" || tag === "object" || tag === "iframe") && isPdf(el)) {
+      out += ' data-tl-document="pdf"';
+    }
+    return out;
+  }
+  function shadowOf(el) {
+    if (el.shadowRoot) return [el.shadowRoot, "open"];
+    const w = el.ownerDocument.defaultView;
+    const root = w && w.__tlShadows ? w.__tlShadows.get(el) : null;
+    return root ? [root, root.mode || "closed"] : null;
+  }
+  function kids(node) {
+    let s = "";
+    for (const c of node.childNodes) s += ser(c);
+    return s;
+  }
+  function frame(el) {
+    const path = sel(el);
+    let doc = null;
+    try { doc = el.contentDocument; } catch (e) { doc = null; }
+    if (doc && doc.documentElement) {
+      return '<tl-frame data-tl-frame="' + escA(path) + '">' + kids(doc.body || doc.documentElement) + "</tl-frame>";
+    }
+    const id = mark(el, "data-tl-frame-id", "f", "__tlFrameSeq");
+    return '<tl-frame data-tl-frame="' + escA(path) + '" data-tl-pending="' + id + '"></tl-frame>';
+  }
+  function ser(node) {
+    if (node.nodeType === 3) {
+      const p = node.parentNode;
+      return p && p.localName && RAW.has(p.localName) ? node.data : esc(node.data);
+    }
+    if (node.nodeType !== 1) return "";
+    const tag = node.localName;
+    let s = "<" + tag + attrs(node) + ">";
+    if (VOID.has(tag)) return s;
+    const root = shadowOf(node);
+    if (root) s += '<tl-shadow data-tl-mode="' + root[1] + '">' + kids(root[0]) + "</tl-shadow>";
+    s += tag === "template" && node.content ? kids(node.content) : kids(node);
+    s += "</" + tag + ">";
+    if ((tag === "iframe" || tag === "frame") && !isPdf(node)) s += frame(node);
+    return s;
+  }
+  if (opts.body) return kids(document.body || document.documentElement);
+  return "<!DOCTYPE html>\n" + ser(document.documentElement);
 }"""
+
+# The page with live values, for comparing a replay with a recording.
+SYNC_JS = "() => (" + SERIALIZE_FN + ")({values: true})"
+FRAME_BODY_JS = "(values) => (" + SERIALIZE_FN + ")({values: values, body: true})"
+PENDING = re.compile(r'<tl-frame data-tl-frame="([^"]*)" data-tl-pending="(f\d+)"></tl-frame>')
+
+
+def fill_frames(page, html: str, values: bool = True, rounds: int = 4) -> str:
+    """Write the documents of cross-origin frames into a serialized page. Playwright reaches every
+    frame; the page's own script cannot. Frames that cannot be read stay marked as pending."""
+    for _ in range(rounds):
+        pending = dict((fid, path) for path, fid in PENDING.findall(html))
+        if not pending:
+            return html
+        filled = False
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            try:
+                element = frame.frame_element()
+                fid = element.get_attribute("data-tl-frame-id")
+            except Exception:  # noqa: BLE001 - a frame that went away while we looked
+                continue
+            if fid not in pending:
+                continue
+            try:
+                body = frame.evaluate(FRAME_BODY_JS, values)
+            except Exception:  # noqa: BLE001
+                continue
+            marker = f'<tl-frame data-tl-frame="{pending[fid]}" data-tl-pending="{fid}"></tl-frame>'
+            html = html.replace(
+                marker, f'<tl-frame data-tl-frame="{pending[fid]}">{body}</tl-frame>'
+            )
+            filled = True
+        if not filled:
+            break
+    return html
+
+
+def page_html(page, values: bool = True) -> str:
+    """The page with its frames and shadow roots, for the harness bot and fidelity replay."""
+    return fill_frames(page, page.evaluate(SYNC_JS if values else
+                                           "() => (" + SERIALIZE_FN + ")({values: false})"), values)  # fmt: skip
 
 
 @dataclass

@@ -301,7 +301,39 @@ def from_recording(app: str, path: Path, repo_root: Path, pages_dir: Path | None
     """
     from labctl import har
 
-    return har.analyse(app, Path(path), Path(repo_root), pages_dir)
+    model = har.analyse(app, Path(path), Path(repo_root), pages_dir)
+    _documents(model, Path(path))
+    return model
+
+
+def _documents(model: AppModel, path: Path) -> None:
+    """PDFs the recording showed (the recorder's docs/documents.json) become screens of their own:
+    the builder sees the document's address and the names of its form fields, never values."""
+    import json
+    from urllib.parse import urlsplit
+
+    from labctl import sanitize
+
+    index = path / "docs" / "documents.json" if path.is_dir() else None
+    if index is None or not index.exists():
+        return
+    try:
+        docs = json.loads(index.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    ev = model.evidence[0].id if model.evidence else f"recording:{path.name}"
+    for doc in docs:
+        route = sanitize.route_pattern(urlsplit(doc.get("url") or "").path or "/")
+        fields = [f.get("name") for f in doc.get("fields") or [] if f.get("name")]
+        model.screens.append(Screen(
+            name=f"document {route}", path=route, basis="observed", from_=[ev], snapshots=0,
+            elements=[Element(selector=None, label=f, basis="observed", from_=[ev]) for f in fields],
+        ))  # fmt: skip
+        pages = doc.get("pages")
+        model.problems.append(
+            f"{route} is a PDF document ({pages or '?'} page(s), {len(fields)} form field(s)): "
+            "the demo app must serve a PDF there; its text is in the recording's docs/ folder"
+        )
 
 
 from_har = from_recording  # the name docs/dev/integration.md uses

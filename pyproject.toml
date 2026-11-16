@@ -22,10 +22,14 @@ dependencies = [
     "SQLAlchemy>=2.0",
     "cryptography>=42",
     "playwright>=1.44",
+    "pypdf>=4.0",  # text and form fields of PDFs an app shows (recorder)
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff==0.12.11", "starlette>=0.37", "asyncpg>=0.29"]
+dev = ["pytest>=8.0", "ruff==0.12.11", "starlette>=0.37", "asyncpg>=0.29", "pymupdf>=1.24"]
+# OCR of drawn screens (canvas) with Tesseract, on machines without Windows' built-in OCR:
+# also needs the `tesseract` program installed.
+ocr = ["pytesseract>=0.3", "pillow>=10"]
 # Drivers for reading a real replica (labctl realdata); see docs/realdata.md.
 mssql = ["pyodbc>=5.0"]       # also needs "ODBC Driver 18 for SQL Server" installed
 oracle = ["oracledb>=2.0"]

@@ -127,7 +127,9 @@ app's page starts with its progress and its own next step.
 3. **App > Evidence**: add what you have. A recording is the most useful: **Record a flow** opens
    a browser on this machine against the real application (UAT or production, as your rules
    allow); go through the flow once and close the window. Each step keeps the page before and
-   after the action and a picture; what you type is never kept. To record what a robot does in
+   after the action and a picture; what you type is never kept. Iframes, web components,
+   charts drawn on a canvas and embedded PDFs are captured too ([06-evidence.md](06-evidence.md)
+   says how, and what no web recorder can read, such as Citrix). To record what a robot does in
    its own browser, start that Chrome or Edge with `--remote-debugging-port=9222` and fill in
    **Or record a browser that is already running**. Add the DBA's DDL and any API description.
    Raw evidence stays in `evidence/` on this machine and is never committed.
