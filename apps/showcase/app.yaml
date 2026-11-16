@@ -78,3 +78,9 @@ rules:
   where: POST /api/cases/{case_no}/notes
   rule: 'request body text: str, min_length=1, max_length=500'
   verification: hypothesis
+lab:
+  port: 8720
+  db_port: 15420
+  credentials:
+    username: demo.user
+    password: workbench-demo

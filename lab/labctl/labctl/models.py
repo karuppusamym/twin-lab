@@ -126,6 +126,7 @@ class Automation(Contract):
     replaced_by: Slug | None = None
     touches: list[Touch] = []
     bindings: dict[str, str] = {}
+    test_inputs: dict[str, str] = {}  # values for the conformance check, e.g. in_CaseNo: C-1003
     analysis: Analysis = Analysis()
 
     @model_validator(mode="after")
@@ -219,6 +220,14 @@ class Link(Contract):
     table: str | None = None
 
 
+class Lab(Contract):
+    """How the lab runs this app: host ports and the test sign-in the data provides."""
+
+    port: int = Field(gt=0, lt=65536)  # the lab agent: the app's front door
+    db_port: int = Field(gt=0, lt=65536)  # the database, through the slowdown proxy
+    credentials: dict[str, str] = {}  # test values only, e.g. username/password from the seed
+
+
 class App(Contract):
     id: Slug
     name: str
@@ -229,6 +238,7 @@ class App(Contract):
     built_for: list[Slug] = []
     rules: list[Rule] = []
     links: list[Link] = []
+    lab: Lab | None = None
 
 
 # --- data pack ---------------------------------------------------------------------------------

@@ -9,10 +9,14 @@ import typer
 import yaml
 from pydantic import ValidationError
 
+from labctl import bindings as bindings_mod
 from labctl import brief as brief_mod
+from labctl import conformance as conformance_mod
 from labctl import demand as demand_report
+from labctl import lab as lab_mod
 from labctl import repo
 from labctl.analyse import uipath
+from labctl.bindings import BindingError
 from labctl.models import KINDS, Automation
 from labctl.source import UnsupportedStack
 from labctl.source import sqlalchemy_models as sam
@@ -266,3 +270,91 @@ def condition_list() -> None:
 
 if __name__ == "__main__":
     app()
+
+
+# --- lab, bindings, conformance ------------------------------------------------------------------
+
+lab_app = typer.Typer(no_args_is_help=True, help="Run demo apps in the lab (Docker Compose).")
+app.add_typer(lab_app, name="lab")
+
+
+def _automation(automation_id: str) -> Automation:
+    path = _root() / "automations" / automation_id / "automation.yaml"
+    model, problems = repo.load(path, "automation")
+    if model is None:
+        for problem in problems:
+            typer.echo(str(problem), err=True)
+        raise typer.Exit(1)
+    return model
+
+
+@lab_app.command("up")
+def lab_up(
+    app_id: str,
+    no_build: bool = typer.Option(False, "--no-build", help="Use the images already built."),
+) -> None:
+    """Start an app with its database and lab agent; waits until healthy."""
+    try:
+        lab_mod.up(_root(), app_id, build=not no_build)
+        state = lab_mod.status(_root(), app_id)
+    except (lab_mod.LabError, BindingError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{app_id}: {'running' if state.running else 'NOT running'} {state.services}")
+    if state.health is not None:
+        typer.echo(f"  health {state.health}")
+
+
+@lab_app.command("down")
+def lab_down(
+    app_id: str, wipe: bool = typer.Option(False, "--wipe", help="Delete its database too.")
+) -> None:
+    """Stop an app's lab."""
+    try:
+        lab_mod.down(_root(), app_id, wipe)
+    except (lab_mod.LabError, BindingError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{app_id}: stopped" + (" and wiped" if wipe else ""))
+
+
+@lab_app.command("status")
+def lab_status(app_id: str) -> None:
+    """Containers and health of an app's lab."""
+    state = lab_mod.status(_root(), app_id)
+    typer.echo(f"{app_id}: {'running' if state.running else 'not running'} {state.services or ''}")
+    if state.health is not None:
+        typer.echo(f"  health {state.health}")
+    if state.error:
+        typer.echo(f"  {state.error}")
+
+
+@app.command()
+def bindings(
+    automation_id: str,
+    form: str = typer.Option(
+        "json", help="json (ATS_BINDINGS), env, uipath (input arguments) or yaml."
+    ),
+) -> None:
+    """What an automation needs to run against the lab: addresses, test sign-in, inputs."""
+    auto = _automation(automation_id)
+    try:
+        b = bindings_mod.for_automation(_root(), auto)
+        typer.echo(bindings_mod.render(auto, b, form))
+    except BindingError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def conformance(
+    automation_id: str,
+    as_json: bool = typer.Option(False, "--json", help="Print the report as JSON."),
+) -> None:
+    """Check an automation against the running demo apps: READY or BLOCKED."""
+    report = conformance_mod.check(_root(), _automation(automation_id))
+    typer.echo(
+        json.dumps(report.to_dict(), indent=2) if as_json else conformance_mod.render(report)
+    )
+    if report.verdict != "READY":
+        raise typer.Exit(1)
