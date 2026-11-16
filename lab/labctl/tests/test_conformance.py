@@ -122,7 +122,7 @@ def test_ready_when_every_step_resolves_including_a_late_cascade(tmp_path, serve
     )
     report = conformance.check(root, auto, host="127.0.0.1")
     assert report.verdict == "READY", conformance.render(report)
-    assert report.counts() == {"ok": 8}
+    assert report.counts() == {"ok": 8, "unchecked": 1}  # no fidelity replay yet: noted only
 
 
 def test_blocked_names_the_missing_selector_and_the_missing_route(tmp_path, served):
@@ -145,7 +145,7 @@ def test_a_selector_css_cannot_express_is_listed_not_checked(tmp_path, served):
     root, auto = make_repo(tmp_path, uses, [])
     report = conformance.check(root, auto, host="127.0.0.1")
     assert report.verdict == "READY"
-    assert report.counts()["unchecked"] == 1
+    assert sum(1 for i in report.items if i.kind == "screen" and i.status == "unchecked") == 1
 
 
 def test_missing_lab_settings_block_with_a_clear_reason(tmp_path):

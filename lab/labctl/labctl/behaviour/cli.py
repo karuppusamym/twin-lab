@@ -56,6 +56,9 @@ def fidelity(
     headed: bool = typer.Option(False, "--headed"),
     json_out: Path | None = typer.Option(None, "--json", help="write the report as JSON"),
     md_out: Path | None = typer.Option(None, "--md", help="write the report as Markdown"),
+    app_id: str | None = typer.Option(
+        None, "--app", help="keep the report for this app (portal, and the readiness gate)"
+    ),
 ) -> None:
     """Replay a recording against a running app and compare each step's DOM. Exit 1 on fail."""
     if recording.is_file():
@@ -72,6 +75,10 @@ def fidelity(
         json_out.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
     if md_out:
         md_out.write_text(report.markdown(), encoding="utf-8")
+    if app_id:
+        from labctl.cli import _root
+
+        typer.echo(f"kept as {fidelity_mod.save(_root(), app_id, report)}")
     typer.echo(report.markdown())
     if report.status == "fail":
         raise typer.Exit(1)

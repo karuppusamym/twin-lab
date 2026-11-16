@@ -399,12 +399,16 @@ class AppBinding(Contract):
     db_engine: str | None = None  # postgresql | mssql | oracle
     db_connection_string: str | None = None  # ADO.NET style, for UiPath and .NET bots
     credentials: dict[str, str] = {}
+    # Application Twin Studio's names, so ATS automations (ats/sdk.py Twin.http) run unchanged:
+    http: str | None = None  # = api
+    auth: dict[str, str] | None = None  # {"bearer": ...} when the app takes a fixed token
 
 
 class Bindings(Contract):
     apps: dict[Slug, AppBinding]
     inputs: dict[str, str] = {}
     output_path: str | None = None
+    arguments: dict[str, str] = {}  # the automation's `bindings:` with every template resolved
 
 
 KINDS: dict[str, type[Contract]] = {

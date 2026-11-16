@@ -2,6 +2,23 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-16 — The "partly" items closed; end to end in one command
+- **A lab copy per run.** `labctl lab copy <app>` starts `<app>.run-1`: its own database, agent
+  and app on free ports, from the app lab's baseline (or `--data current|app|<pack>`), with the
+  app's image. `labctl lab copies`, `labctl lab drop`. `harness run --copy` makes one for the run
+  and drops it; `bindings` and `conformance` take `--on <app>.<copy>`. Copies need Twin Lab's own
+  database (postgres or sqlserver), not a DBA's server.
+- **Fidelity replay is a gate.** Readiness reads the app's newest replay: BLOCKED when it differs
+  on an element the bot uses, noted when it differs elsewhere, not counted when the app changed
+  after it. `--require-fidelity` also blocks when there is none. `behaviour fidelity --app` keeps
+  a command-line replay where the portal and readiness find it.
+- **Bindings readable by Application Twin Studio automations**: each app also has `http`, and
+  the file has `arguments` (resolved) and `output_path`.
+- **`labctl e2e <automation>`**: contracts, lab, copy, readiness, bot run under a condition
+  (session, verdict, parity with `--golden`), fidelity replay, cleanup, in one report. The
+  `e2e` workflow runs it on GitHub for `uipath-case-update` under `slow-database`.
+- The lab agent answers `GET /_lab/data/baseline` (the rows Reset would put back).
+
 ## 2026-11-16 — Demo databases on SQL Server, Oracle or Postgres
 Until now every demo database was a Postgres container. Now each app chooses:
 

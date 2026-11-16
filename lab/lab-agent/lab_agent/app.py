@@ -325,6 +325,7 @@ class LabAgent:
             Route("/_lab/data", self.data, methods=["GET"]),
             Route("/_lab/data/load", self.load, methods=["POST"]),
             Route("/_lab/data/baseline", self.make_baseline, methods=["POST"]),
+            Route("/_lab/data/baseline", self.baseline_rows, methods=["GET"]),
             Route("/_lab/baselines", self.baselines, methods=["GET"]),
             Route("/_lab/baselines/{baseline_id}/restore", self.restore_baseline, methods=["POST"]),
             Route("/_lab/baselines/{baseline_id}/pin", self.pin_baseline, methods=["POST"]),
@@ -579,6 +580,16 @@ class LabAgent:
                 "id": meta["id"],
             }
         )
+
+    async def baseline_rows(self, request: Request) -> Response:
+        """The rows of the current baseline: what Reset would put back (a copy of this lab
+        starts from them). `tables` is null when no baseline was taken."""
+        if not self.baseline:
+            return JSONResponse({"baseline": None, "tables": None})
+        rows, problem = await asyncio.to_thread(self._read_baseline_rows)
+        if problem is not None:
+            return problem
+        return JSONResponse({"baseline": self._baseline_meta(), "tables": rows})
 
     async def make_baseline(self, request: Request) -> Response:
         if self.database is None:

@@ -30,7 +30,7 @@ STEP_TIMEOUT_MS = 8000
 
 @dataclass
 class Item:
-    kind: str  # screen | route | table
+    kind: str  # screen | route | table | fidelity
     app: str
     what: str  # e.g. "input#caseNo on /cases (type)"
     status: str  # ok | failed | unchecked | skipped
@@ -355,23 +355,96 @@ def _reset(root: Path, apps: list[str], report: Report, when: str) -> None:
 
     for app_id in apps:
         try:
-            lab_mod.agent(root, app_id).reset()
+            lab_mod.agent(root, app_id).reset()  # app id or a copy's lab id
         except Exception as exc:  # noqa: BLE001 - a check still runs without a baseline
             report.errors.append(f"{app_id}: data not reset {when} the check ({_short(exc)})")
 
 
+def _app_changed_at(root: Path, app_id: str) -> float:
+    """When the app's own files last changed (its build), to tell a replay made before it."""
+    folder = root / "apps" / app_id
+    skip = {"node_modules", ".venv", "__pycache__", "dist", "build"}
+    newest = 0.0
+    for path in folder.rglob("*"):
+        if path.is_file() and not skip.intersection(path.relative_to(folder).parts):
+            newest = max(newest, path.stat().st_mtime)
+    return newest
+
+
+def _check_fidelity(root: Path, automation: Automation, report: Report, require: bool) -> None:
+    """Fidelity replay as a gate. For each app the bot uses on screen, the newest replay of a
+    recording of the real application against the demo app (Lab > Fidelity replay):
+
+    - it failed on an element this bot uses: BLOCKED (the demo app differs where the bot looks);
+    - it failed only on other elements: noted, not blocking;
+    - it passed: ok;
+    - none, or made before the app last changed: not checked (BLOCKED with `require`).
+    """
+    from datetime import UTC, datetime
+
+    from labctl.behaviour import fidelity
+
+    used: dict[str, set[str]] = {}
+    for touch in automation.touches:
+        if isinstance(touch, WebTouch):
+            sels = used.setdefault(touch.app, set())
+            for screen in touch.screens:
+                sels |= {u.selector for u in screen.uses}
+    for app_id, selectors in used.items():
+        found = fidelity.latest(root, app_id)
+        missing = "failed" if require else "unchecked"
+        if found is None:
+            report.items.append(Item("fidelity", app_id, "replay of a real recording", missing,
+                                     "no fidelity replay yet (Lab > Fidelity replay)"))  # fmt: skip
+            continue
+        name, rep = found
+        stamp = name.rsplit("--", 1)[-1]
+        when = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+        what = f"replay of {rep.recording} ({when:%Y-%m-%d %H:%M} UTC)"
+        if when.timestamp() + 2 < _app_changed_at(root, app_id):  # the stamp is whole seconds
+            report.items.append(Item("fidelity", app_id, what, missing,
+                                     "the app changed after this replay: replay again"))  # fmt: skip
+            continue
+        failed = [s for s in rep.steps if s.status == "fail"]
+        if not failed:
+            report.items.append(Item("fidelity", app_id, what, "ok"))
+            continue
+        elements = {s.selector for s in failed if s.selector} | {
+            d.element for s in failed for d in s.differences
+        }
+        hit = sorted(e for e in elements if any(e == sel or e in sel or sel in e
+                                                for sel in selectors))  # fmt: skip
+        if hit:
+            report.items.append(Item("fidelity", app_id, what, "failed",
+                                     f"differs on what this bot uses: {', '.join(hit[:5])}"))  # fmt: skip
+        else:
+            report.items.append(Item("fidelity", app_id, what, "ok",
+                                     f"{len(failed)} step(s) differ, none on what this bot uses"))  # fmt: skip
+            report.errors.append(
+                f"{app_id}: the fidelity replay differs on {len(failed)} step(s) this bot does not "
+                f"use; see /apps/{app_id}/fidelity/{name}"
+            )
+
+
 def check(
-    root: Path, automation: Automation, host: str | None = None, reset: bool = True
+    root: Path,
+    automation: Automation,
+    host: str | None = None,
+    reset: bool = True,
+    labs: dict | None = None,
+    require_fidelity: bool = False,
 ) -> Report:
     """Run the check. With `reset`, each app's data is put back to its baseline before and after,
-    because replaying a bot clicks its buttons and the route checks send real requests."""
+    because replaying a bot clicks its buttons and the route checks send real requests. `labs`
+    checks against copies of the apps' labs (`{"showcase": "showcase.run-1"}`)."""
     report = Report(automation.id)
+    labs = labs or {}
     if automation.analysis.gaps:
         report.errors.append(
             f"{len(automation.analysis.gaps)} unresolved analysis gap(s) in automation.yaml"
         )
     try:
-        b = bnd.for_automation(root, automation, host or bnd.LAB_HOST)  # checked from here
+        b = bnd.for_automation(root, automation, host or bnd.LAB_HOST, labs)  # checked from here
         args = bnd.arguments(automation, b)
     except bnd.BindingError as exc:
         report.verdict = "BLOCKED"
@@ -395,15 +468,17 @@ def check(
                 "steps time out. Check readiness under normal conditions."
             )
     values = {**args, **automation.test_inputs}
+    lab_ids = [labs.get(a, a) for a in b.apps]
     if reset:
-        _reset(root, list(b.apps), report, "before")
+        _reset(root, lab_ids, report, "before")
     try:
         _check_screens(automation, b, args, report, basis_by_app)
         _check_routes(automation, b, values, report, basis_by_app)
         _check_tables(automation, b, report, basis_by_app)
     finally:
         if reset:
-            _reset(root, list(b.apps), report, "after")
+            _reset(root, lab_ids, report, "after")
+    _check_fidelity(root, automation, report, require_fidelity)
     if any(i.status == "failed" for i in report.items) or automation.analysis.gaps:
         report.verdict = "BLOCKED"
     if any(i.kind == "screen" and i.status == "failed" for i in report.items):

@@ -182,6 +182,17 @@
         {% if lease_mine %}<form method="post" action="/apps/{{ app_id }}/lease/release" class="inline"><button type="submit" class="secondary">Release</button></form>
         {% elif lease %}<form method="post" action="/apps/{{ app_id }}/lease/force" class="inline" data-confirm="Release {{ lease.holder }}'s reservation? Only do this after asking them."><button type="submit" class="danger">Release it anyway</button></form>{% endif %}
       </details>
+      <details {{ 'open' if lab_copies }}><summary>Copies for a run ({{ lab_copies|length }} running)</summary>
+        <p class="small muted">A copy is this lab again, with its own data, on its own ports: nobody's run disturbs it, and it disturbs nobody. Point a bot at it with <code>labctl bindings &lt;automation&gt; --on {{ app_id }}.run-1</code>, then drop it.</p>
+        {% for c in lab_copies %}
+        <div><code>{{ c.lab }}</code> on <a href="http://127.0.0.1:{{ c.port }}" target="_blank" rel="noopener">port {{ c.port }}</a>, database port {{ c.db_port }}, data: {{ c.data }}
+          <form method="post" action="/apps/{{ app_id }}/copies/{{ c.name }}/drop" class="inline" data-confirm="Drop {{ c.lab }} and its data?"><button type="submit" class="secondary">Drop</button></form></div>
+        {% endfor %}
+        <form method="post" action="/apps/{{ app_id }}/copies" class="row">
+          <div><label for="cdata">Start it with</label><select id="cdata" name="data"><option value="baseline">this lab's baseline</option><option value="current">this lab's data as it is now</option><option value="app">the app's own starting data</option></select></div>
+          <div><button type="submit">Start a copy</button></div>
+        </form>
+      </details>
       {% endif %}
       {% else %}<p class="muted">Not built yet: the app's code arrives with the build's pull request.</p>{% endif %}
       {% if status and status.running and replayable %}

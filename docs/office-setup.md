@@ -284,6 +284,22 @@ labctl data load-across pack.json --dry-run
 ```
 
 ```bash
+labctl e2e uipath-case-update --condition slow-database
+```
+
+```bash
+labctl lab copy showcase
+```
+
+```bash
+labctl harness run uipath-case-update --copy
+```
+
+```bash
+labctl conformance uipath-case-update --require-fidelity
+```
+
+```bash
 labctl db list
 ```
 
@@ -336,8 +352,9 @@ labctl harness run uipath-case-update --inputs inputs.json --condition slow-data
 - A demo app is a copy built from evidence. A bot that is READY against it has been shown to find
   what it needs there, which is not the same as the real application. Each app and screen says
   how it was built (copy, reconstruction, skeleton, backend only, sample).
-- One shared copy per app: people using the same app at the same time share its data and
-  condition. Reserve the lab when that matters.
+- One shared lab per app in the portal: people using the same app at the same time share its
+  data and condition. Reserve the lab when that matters, or give a run its own copy
+  (`labctl lab copy <app>`, `labctl harness run <automation> --copy`, `labctl e2e`).
 - It does not copy views' logic, stored procedures, functions or triggers: views become tables,
   the rest is listed as not created.
 - The `sqlserver` container is for the local lab; on OpenShift use a DBA's server. Oracle has no
