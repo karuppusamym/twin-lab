@@ -15,10 +15,15 @@ RUN pip install --no-cache-dir --require-hashes --no-deps -r lab-agent/requireme
     || pip install --no-cache-dir --no-deps -r lab-agent/requirements.txt
 COPY lab/labctl/labctl labctl/labctl
 COPY lab/lab-agent/lab_agent lab-agent/lab_agent
-RUN useradd --create-home --uid 10002 labagent \
-    && mkdir -p /var/lib/twinlab && chown labagent:labagent /var/lib/twinlab \
+# OpenShift runs the container as an arbitrary UID with group 0, so what the agent writes belongs
+# to group 0 with the owner's rights (g=u). USER is numeric so `runAsNonRoot` can be checked.
+RUN useradd --create-home --uid 10002 --gid 0 labagent \
+    && mkdir -p /var/lib/twinlab \
+    && chown -R 10002:0 /var/lib/twinlab /home/labagent \
+    && chmod -R g=u /var/lib/twinlab /home/labagent \
     && python -c "import lab_agent.app, labctl.models"
-USER labagent
+ENV HOME=/home/labagent
+USER 10002
 VOLUME ["/var/lib/twinlab"]
 EXPOSE 9000 15432
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=3 \
