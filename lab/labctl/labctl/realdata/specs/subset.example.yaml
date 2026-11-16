@@ -1,0 +1,22 @@
+# Subset spec for one database (Prod Echo docs/04, I-13). Synthetic example on the demo replica
+# built by labctl.realdata.demo. `db` is the NAME of an environment variable, never a URL.
+process: account_review
+version: 2026-11-15
+app: showcase
+db: SHOWCASE_REPLICA_URL
+entities:
+  - {name: customer, table: customers, key: id, side: read}
+  - {name: account, table: accounts, key: id, side: read}
+seeds:
+  - {table: customers, values: [1, 3]}
+  - table: customers
+    where: "updated_at >= :since"
+    params: {since: "2026-10-01"}
+    limit: 2
+closure:
+  associations:
+    # addresses.customer_ref holds a customer id, but no foreign key says so
+    - {child: addresses, column: customer_ref, parent: customers, column_parent: id, inferred_from: load_trace}
+  limits: {accounts: 2, transactions: 10, addresses: 5}
+  exclude: []
+  max_rows: 10000
