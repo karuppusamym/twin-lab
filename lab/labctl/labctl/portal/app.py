@@ -183,6 +183,7 @@ def create_app(root: Path) -> FastAPI:
             tracker = devin_jobs_mod.BuildJobs(
                 devin_jobs_mod.JobStore(Path(cfg.state_dir)), client, root,
                 packages_dir=state / "packages",
+                poll_interval=float(os.environ.get("TWINLAB_DEVIN_POLL_SECONDS", "30")),
             )  # fmt: skip
             if cfg.configured:
                 tracker.resume_unfinished()

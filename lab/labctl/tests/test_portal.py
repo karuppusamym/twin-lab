@@ -145,6 +145,7 @@ def test_devin_build_through_the_api_end_to_end_with_the_mock(repo, monkeypatch)
         monkeypatch.setenv("DEVIN_ORG_ID", "org-test")
         monkeypatch.setenv("DEVIN_BASE_URL", base)
         monkeypatch.setenv("GITHUB_REPO", "example/twin-lab")
+        monkeypatch.setenv("TWINLAB_DEVIN_POLL_SECONDS", "0.5")
         app = create_app(repo)
         client = TestClient(app)
         r = client.post("/apps/showcase/brief", data={"source": "reference/case-workbench", "db_engine": "postgres"},
