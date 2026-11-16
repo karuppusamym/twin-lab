@@ -155,6 +155,7 @@ def generate(
     )
     brief_file.write_text(brief_mod.render(result, root), encoding="utf-8")
     schema_file.write_text(brief_mod.schema(result, root), encoding="utf-8")
+    write_workflow(root, app_id)
     kept = app_file.exists()
     if not kept:
         app_file.write_text(
@@ -162,3 +163,29 @@ def generate(
             encoding="utf-8",
         )
     return Result(result, [model_file, brief_file, schema_file, app_file], kept)
+
+
+WORKFLOW = """# Pipeline for the {app} demo app (written by labctl brief). The steps are in app.yml.
+name: app-{app}
+on:
+  push:
+    branches: [main]
+    paths: ["apps/{app}/**", "automations/**", "lab/**", ".github/workflows/app.yml", ".github/workflows/app-{app}.yml"]
+  pull_request:
+    paths: ["apps/{app}/**", "automations/**", "lab/**", ".github/workflows/app.yml", ".github/workflows/app-{app}.yml"]
+jobs:
+  app:
+    uses: ./.github/workflows/app.yml
+    with:
+      app: {app}
+"""
+
+
+def write_workflow(root: Path, app_id: str) -> Path | None:
+    """One small workflow per app calling the reusable one; never overwrites an edited file."""
+    path = root / ".github" / "workflows" / f"app-{app_id}.yml"
+    if path.exists():
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(WORKFLOW.format(app=app_id), encoding="utf-8")
+    return path

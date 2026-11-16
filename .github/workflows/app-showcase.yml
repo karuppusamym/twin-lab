@@ -1,0 +1,13 @@
+# Pipeline for the showcase demo app (written by labctl brief). The steps are in app.yml.
+name: app-showcase
+on:
+  push:
+    branches: [main]
+    paths: ["apps/showcase/**", "automations/**", "lab/**", ".github/workflows/app.yml", ".github/workflows/app-showcase.yml"]
+  pull_request:
+    paths: ["apps/showcase/**", "automations/**", "lab/**", ".github/workflows/app.yml", ".github/workflows/app-showcase.yml"]
+jobs:
+  app:
+    uses: ./.github/workflows/app.yml
+    with:
+      app: showcase
