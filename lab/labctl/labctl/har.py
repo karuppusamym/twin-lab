@@ -543,6 +543,25 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
     # Screens from the steps and their snapshots, and the actions taken on them.
     # A step's address and snapshot are those after it; its action was taken on the page the
     # previous snapshot showed.
+    # First pass: every word the recording shows as data (masked page text, typed values, response
+    # bodies). A heading or option that repeats one of these words is showing data, not a label.
+    dom_text = {
+        id(step): step.dom.read_text(encoding="utf-8", errors="replace")
+        for step in rec.steps
+        if step.dom is not None
+    }
+    known: set[str] = set()
+    for text in dom_text.values():
+        known |= sanitize.page(text).values
+    for e in entries:
+        if e.resp_text and e.resp_mime == "text/html":
+            known |= sanitize.page(e.resp_text).values
+        elif e.resp_text and "json" in (e.resp_mime or ""):
+            try:
+                known |= sanitize.words(json.loads(e.resp_text))
+            except ValueError:
+                pass
+
     timeline: list[tuple[datetime, str]] = []
     before: str | None = None
     for step in rec.steps:
@@ -558,7 +577,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             if step.action not in acts:
                 acts.append(step.action)
         if step.dom is not None:
-            acc.pages.append(sanitize.page(step.dom.read_text(encoding="utf-8", errors="replace")))
+            acc.pages.append(sanitize.page(dom_text[id(step)], known))
             before = acc.pattern
 
     # Screens from the HTML documents; empty single-page-app shells give an address only.
@@ -568,7 +587,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             continue
         if e.resp_mime != "text/html" or e.resp_text is None:
             continue
-        info = sanitize.page(e.resp_text)
+        info = sanitize.page(e.resp_text, known)
         if e.started:
             timeline.append((e.started, sanitize.route_pattern(e.path)))
         if info.has_content:
@@ -728,7 +747,10 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         if acc.pages and pages_dir is not None:
             best = max(enumerate(acc.pages), key=lambda p: (len(p[1].ids), p[0]))[1]
             pages_dir.mkdir(parents=True, exist_ok=True)
-            out = pages_dir / f"{name}.html"
+            safe_name = re.sub(r"[^A-Za-z0-9.-]+", "-", name).strip("-.")[:80] or "page"
+            out = (
+                pages_dir / f"{safe_name}.html"
+            )  # no ; : or other characters a file system mangles
             out.write_text(
                 f"<!-- {acc.pattern}: value-free snapshot from {ev}. Structure, ids, classes and the "
                 "application's own labels are real; every other text and value is masked "

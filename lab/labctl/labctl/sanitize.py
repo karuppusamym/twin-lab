@@ -85,9 +85,11 @@ VERSION_SEGMENT = re.compile(r"^v\d+(\.\d+)*$", re.IGNORECASE)
 
 
 def is_id_segment(segment: str) -> bool:
-    """Whether a path segment is a value (a number, UUID, hash or code with digits)."""
+    """Whether a path segment is a value (a number, UUID, hash, code with digits, e-mail, key)."""
     if not segment or segment.startswith("{") or VERSION_SEGMENT.match(segment):
         return False
+    if any(c in segment for c in "@:,=;"):  # jane@bank.com, 1234:close, a=b: never a route name
+        return True
     if re.search(r"\.(js|css|html?|png|jpe?g|gif|svg|ico|woff2?|map|json)$", segment, re.I):
         return False
     return bool(ID_SEGMENT.match(segment))
@@ -98,6 +100,7 @@ def route_pattern(path: str) -> str:
     path = urlsplit(path).path or "/"
     out, n = [], 0
     for seg in path.split("/"):
+        seg = seg.split(";", 1)[0]  # matrix parameters such as ;jsessionid=... are dropped
         if is_id_segment(seg):
             n += 1
             out.append("{id}" if n == 1 else f"{{id{n}}}")
@@ -123,6 +126,41 @@ def words(value) -> set[str]:
         for v in value[:500]:
             out |= words(v)
     return out
+
+
+EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
+NAME_WORD = re.compile(r"^[A-Z][a-z'’-]+$")  # Title-case word: how names are written
+
+
+def app_text(text: str, known: set[str] = frozenset(), names: bool = True) -> str:
+    """Text the page presents as the application's own words (labels, headings, titles, options),
+    with anything that looks like data masked:
+
+    - e-mail addresses, and parts with 3 or more digits (record numbers);
+    - what follows a colon in a label-value heading (`Customer: Jane Doe`);
+    - Title-case words the same recording shows elsewhere as data;
+    - with `names` (headings, titles, options, tooltips): any run of two or more Title-case words,
+      which is how names and addresses are written ("Jane Doe", "Elm Street"). Button, label and
+      column-header text is passed with `names=False`: that is where an app's own Title Case lives.
+    """
+    text = EMAIL.sub(lambda m: mask(m.group()), text)
+    text = mask_identifiers(text)
+    head, sep, tail = text.partition(":")
+    if sep and tail.strip() and len(head.split()) <= 4 and not tail.strip().startswith("//"):
+        text = head + sep + mask(tail)
+    parts = re.split(r"(\s+)", text)
+    bare = [re.sub(r"[^\w'’-]", "", p) for p in parts]
+    title = [bool(NAME_WORD.match(b)) for b in bare]
+    out = []
+    for i, part in enumerate(parts):
+        if part.isspace() or not part:
+            out.append(part)
+            continue
+        neighbours = [j for j in (i - 2, i + 2) if 0 <= j < len(parts)]
+        in_run = names and title[i] and any(title[j] for j in neighbours)
+        seen = title[i] and bare[i].lower() in known
+        out.append(mask(part) if in_run or seen else part)
+    return "".join(out)
 
 
 def mask_message(text: str, values: set[str] = frozenset()) -> str:
@@ -168,8 +206,9 @@ URL_ATTRS = {"href", "src", "action", "formaction", "poster", "data"}
 class _Page(HTMLParser):
     """Rebuilds a page without values, and collects what the model needs from it."""
 
-    def __init__(self):
+    def __init__(self, known: set[str] = frozenset()):
         super().__init__(convert_charrefs=True)
+        self.known = known  # words the recording shows as data elsewhere (lower-case)
         self.out: list[str] = []
         self.stack: list[str] = []
         self.with_id: list[bool] = []  # per open element: has an id (then its text is a value)
@@ -207,9 +246,14 @@ class _Page(HTMLParser):
             elif name in URL_ATTRS:
                 value = _safe_url(value)
             elif name == "content" and tag == "meta":
-                value = (
-                    value if len(value) < 80 and not re.search(r"\d{4,}", value) else mask(value)
-                )
+                meta = dict(attrs)
+                kind_ = (meta.get("name") or meta.get("http-equiv") or "").lower()
+                # Only harmless metadata stays: tokens (csrf), user names and the like go.
+                value = value if kind_ in ("viewport", "generator", "content-type") else ""
+            elif name in ("title", "aria-label", "placeholder", "alt"):
+                value = app_text(value, self.known)
+            elif name == "style":
+                value = re.sub(r"url\([^)]*\)", "url(#)", value)  # no recorded addresses or tokens
             elif name not in KEEP_ATTRS:
                 self.values |= words(value)
                 value = mask(value)
@@ -260,7 +304,9 @@ class _Page(HTMLParser):
         self.out.append(f"<{tag}{self._attrs(tag, attrs)}{' /' if closed else ''}>")
         if tag not in VOID and not closed:
             self.stack.append(tag)
-            self.with_id.append(bool(a.get("id")) and tag not in KEEP_TEXT)
+            row_header = tag == "th" and (a.get("scope") == "row" or "tbody" in self.stack)
+            # A row header (or any element with an id) holds a value, not the app's words.
+            self.with_id.append(row_header or (bool(a.get("id")) and tag not in KEEP_TEXT))
 
     def _element(self, tag: str, a: dict[str, str]) -> None:
         kind = a.get("type", "").lower()
@@ -274,6 +320,8 @@ class _Page(HTMLParser):
                   "options": [], "text": []}  # fmt: skip
             if tag == "input" and kind in BUTTON_TYPES and a.get("value"):
                 el["label"] = a["value"]
+            if el["label"]:  # the same masking as the attribute gets in the page itself
+                el["label"] = app_text(el["label"], self.known)
             self.elements.append(el)
             if self.open_label and self.open_label[-1]["wraps"] is None:
                 self.open_label[-1]["wraps"] = el
@@ -327,23 +375,27 @@ class _Page(HTMLParser):
             return
         keep = self._kept()
         if keep:
-            data = mask_identifiers(
-                data
-            )  # "Loan L-200001" in a title or heading is a record number
+            own = next((t for t in reversed(self.stack) if t in KEEP_TEXT), "")
+            # names, e-mails and record numbers in headings, titles and options are data
+            data = app_text(data, self.known, names=own not in ("button", "label", "th", "legend"))
             for label in self.open_label:
                 label["text"].append(data)
             for item in self.open_text:
                 item["text"].append(data)
             if self.option is not None:
                 self.option.append(data)
-        if not keep:
-            self.values |= words(data)
+        if not keep and self._data_cell():
+            self.values |= words(data)  # only text where records are shown counts as data
         self.out.append(escape(data if keep else mask(data), quote=False))
+
+    def _data_cell(self) -> bool:
+        """Inside a table or description cell, or an element with an id: where records show."""
+        return any(t in ("td", "dd") for t in self.stack) or bool(self.with_id and self.with_id[-1])
 
     def _kept(self) -> bool:
         """Text is the application's own words only directly inside a label, heading, button..."""
         for tag, has_id in zip(reversed(self.stack), reversed(self.with_id), strict=True):
-            if tag in KEEP_TEXT or tag == "style":
+            if (tag in KEEP_TEXT and not (tag == "th" and has_id)) or tag == "style":
                 return True
             if has_id or tag not in PASS_THROUGH:
                 return False
@@ -369,6 +421,8 @@ def _safe_url(value: str) -> str:
     parts = urlsplit(value)
     if parts.scheme in ("javascript", "data"):
         return "#"
+    if parts.scheme in ("mailto", "tel", "sms"):
+        return f"{parts.scheme}:{mask(value.split(':', 1)[1])}"
     path = route_pattern(parts.path) if parts.path else ""
     query = "&".join(f"{q.split('=', 1)[0]}=" for q in parts.query.split("&") if q)
     fragment = (
@@ -398,9 +452,16 @@ class PageInfo:
         )
 
 
-def page(html: str) -> PageInfo:
-    """Parse a recorded page. The result holds no recorded value."""
-    parser = _Page()
+def page(html: str, known: set[str] = frozenset()) -> PageInfo:
+    """Parse a recorded page. The result holds no recorded value.
+
+    `known` is every word the same recording shows as data elsewhere; headings and options that
+    repeat one are masked too.
+    """
+    first = _Page(known)  # first pass: what this page itself shows as data
+    first.feed(html)
+    first.close()
+    parser = _Page(set(known) | first.values)
     parser.feed(html)
     parser.close()
     return PageInfo(parser)
