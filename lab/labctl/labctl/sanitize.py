@@ -191,6 +191,10 @@ PASS_THROUGH = {"span", "b", "strong", "i", "em", "small", "abbr", "u", "sup", "
 INTERACTIVE = {"input", "select", "textarea", "button", "a", "form"}
 BUTTON_TYPES = {"submit", "button", "reset"}
 KEEP_ATTRS = {
+    # Twin Lab's own markers in a snapshot: where a frame, a shadow root, a canvas or a document is
+    # (structure, never data; the text OCR read from a canvas is element text and masked as such).
+    "data-tl-frame", "data-tl-mode", "data-tl-canvas", "data-tl-document", "data-tl-for",
+    "data-tl-ocr", "data-tl-pending",
     "id", "class", "name", "type", "for", "role", "placeholder", "title", "aria-label", "lang",
     "aria-labelledby", "aria-describedby", "aria-hidden", "aria-expanded", "aria-selected",
     "disabled", "readonly", "required", "checked", "selected", "multiple", "hidden", "rows",

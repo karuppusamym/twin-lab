@@ -188,7 +188,9 @@ def replay(
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
         try:
-            page = browser.new_context(viewport={"width": 1280, "height": 900}).new_page()
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            context.add_init_script(domlib.SHADOW_HOOK_JS)  # closed shadow roots, as recorded
+            page = context.new_page()
             _track(page)
             for step in rec.steps:
                 report = StepReport(
@@ -221,7 +223,7 @@ def replay(
                     report.status = "skipped"
                     report.note = "no recorded snapshot for this step"
                     continue
-                report.differences = compare_dom(expected, page.evaluate(domlib.SYNC_JS), step.seq)
+                report.differences = compare_dom(expected, domlib.page_html(page), step.seq)
                 if report.differences:
                     report.status = "fail"
                     if stop_on_fail:
@@ -249,7 +251,9 @@ def _act(page, rec: Recording, step, base_url: str | None, values: dict[str, str
     if step.action == "goto":
         page.goto(_rebase(step.url, base_url))
         return
-    loc = page.locator(step.selector).first
+    from labctl.locate import locate
+
+    loc = locate(page, step.selector).first  # into frames; open shadow roots need nothing
     if step.action == "type":
         value = values.get(step.selector) if step.selector in values else _recorded_value(rec, step)
         if value is None:

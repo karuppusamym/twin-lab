@@ -110,6 +110,45 @@ Without source, the framework is read from the HAR's HTML and script names where
 If nothing identifies it, the lab default is used: React, FastAPI and Postgres. The brief says
 which, and why.
 
+## What a recording captures
+
+The recorder needs no browser extension. It drives Chromium through Playwright, or attaches to a
+running Chrome or Edge over the DevTools protocol, and adds a small script to every page and
+every frame. Per step it keeps:
+- the page as the action met it;
+- the page after it, once it settles;
+- a picture;
+- the network (HAR, with bodies).
+
+Typed values are never kept, only their shape (`A-9`).
+
+A plain copy of the page's HTML misses several things, so the recorder writes them into the
+snapshot as ordinary elements:
+
+| On the screen | In the snapshot | Notes |
+|---|---|---|
+| An iframe or frame, same origin or not | `<tl-frame data-tl-frame="iframe#x">` with the frame's page, right after the `<iframe>` | Actions inside are recorded as `iframe#x >>> button#save`; frames inside frames chain. A frame from another site is read from outside by Playwright. A step lists `frames_unread` if one could not be read. |
+| A web component's shadow root, open or closed | `<tl-shadow data-tl-mode="open\|closed">` inside its host | Closed roots are reached through a hook that runs before the page's own code. When attaching to an open browser, closed roots made before the recording started stay out of reach. |
+| A `<canvas>` (charts, drawn forms) | `data-tl-canvas="c1"`, then `<tl-canvas-text>` with the text OCR read | A picture of each canvas is kept (`screens/0007.c1.png`). OCR uses Tesseract when installed (`pip install -e ".[ocr]"` and the `tesseract` program), otherwise Windows' built-in OCR, otherwise none, and the step says which. |
+| An embedded PDF (`<embed>`, `<object>`, `<iframe>`) | `data-tl-document="pdf"` | The PDF is kept in `docs/`, with its text. `docs/documents.json` lists its address, pages and form field names, never field values. The app model gets a screen per document. |
+
+Selectors follow the same convention everywhere: the UiPath analyser writes
+`<webctrl tag='IFRAME' id='x'/><webctrl id='y'/>` as `iframe#x >>> #y`. Conformance, the
+harness bot and fidelity replay enter the frames. Open shadow roots need nothing, because
+Playwright looks inside them. An element in a closed shadow root is recorded and compared, but
+no selector can reach it, so a bot that clicks one can only be checked by fidelity replay of
+the page around it.
+
+**What no web recorder can read:**
+- **Citrix or remote desktop.** A Citrix session shows the application as a picture of a remote
+  screen; there is no HTML to read. Record the application where it runs as a web app (inside
+  the Citrix session, Twin Lab's `evidence attach` works against a browser started there with
+  a debugging port). Otherwise build from the database schema, API descriptions and the
+  robot's logs, which give a backend-only app.
+- **Plug-ins and native windows** (Java applets, ActiveX, a desktop client) are the same case.
+- **Pictures of text inside images** are read only on canvases, not in `<img>`. The picture of
+  every step is kept for a person to look at.
+
 ## Privacy
 
 A HAR or a database export from a real system holds customer data, cookies and tokens. So:

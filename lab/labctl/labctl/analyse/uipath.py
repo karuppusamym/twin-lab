@@ -237,6 +237,8 @@ def to_css(selector: str) -> str | None:
             and any(a in attrs for a in TEXT_ONLY_ATTRS)
         ):
             return None
+        if attrs.get("tag", "").lower() in ("iframe", "frame"):
+            css += " >>>"  # what follows is inside this frame (labctl.locate)
         steps.append(css)
     return " ".join(steps) or None
 

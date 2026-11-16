@@ -2,6 +2,30 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-16 — Recordings: frames, shadow DOM, canvas and PDFs
+The recorder used to read only the top page's HTML. Now:
+
+- **Iframes and frames, same origin or not.** A listener runs in every frame and reports to the
+  top page. Actions inside a frame are recorded as `iframe#x >>> button#save`. The frame's page
+  is written into the snapshot as `<tl-frame>`, read from outside by Playwright when the frame
+  comes from another site.
+- **Shadow DOM, open and closed.** A hook installed before the page's own code reaches closed
+  roots; roots appear as `<tl-shadow>`. A click inside a closed root is recorded on the real
+  element, not its host.
+- **Canvas.** A picture of each canvas, and the text OCR reads in it: Tesseract, or Windows'
+  built-in OCR with nothing to install.
+- **Embedded PDFs.** Kept with their text and form field names (never values), fetched with the
+  page's sign-in when the browser does not load them itself. They become screens in the app
+  model.
+- **Selectors into frames.** One convention everywhere: the UiPath analyser writes iframe
+  selectors that way; conformance, the harness bot and fidelity replay enter the frames.
+- **Scripted recordings** now have a picture per step too.
+
+Tried on a test page with a same-origin and a cross-origin iframe, open and closed components, a
+chart drawn on a canvas, and a PDF with a form field. Each was recorded; Windows OCR read "Total
+due" from the chart, and fidelity replay went into both frames. A Citrix session, a plug-in or a
+desktop window has no HTML to read; [06-evidence.md](06-evidence.md) says what to do instead.
+
 ## 2026-11-16 — Round 5: a portal anyone can start with, OpenShift, the rest of Prod Echo
 QTT and Synapse are left aside on purpose; everything else from Prod Echo is built.
 

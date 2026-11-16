@@ -204,7 +204,9 @@ def _same_literals(pattern: str, path: str) -> bool:
 
 
 def _act(page, action: str, selector: str, value: str) -> None:
-    locator = page.locator(selector).first
+    from labctl.locate import locate
+
+    locator = locate(page, selector).first  # "iframe#x >>> #y" goes into the frame
     if action in ("read", "wait"):
         locator.wait_for(state="attached")
         return

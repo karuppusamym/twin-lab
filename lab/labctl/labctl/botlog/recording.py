@@ -36,6 +36,7 @@ class RecStep:
     value: str | None = None
     typed_shape: str | None = None  # the recorder's shape of what was typed (never the value)
     dom_before: str | None = None  # the page as the action met it (the recorder writes it)
+    before_scope: str | None = None  # "frame": dom_before is only the frame's document
 
     @property
     def path(self) -> str | None:
@@ -184,6 +185,9 @@ def load(path: Path) -> Recording:
                         dom_before=(
                             d.get("dom_before") if isinstance(d.get("dom_before"), str) else None
                         ),
+                        before_scope=d.get("before_scope")
+                        if isinstance(d.get("before_scope"), str)
+                        else None,
                     )
                 )
             except (ValueError, TypeError, AttributeError):

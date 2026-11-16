@@ -114,6 +114,8 @@ def observe(rec: Recording) -> list[dict]:
             while first > 0 and steps[first - 1].dom is None and steps[first - 1].ts == step.ts:
                 first -= 1
             for candidate in (steps[first], step):
+                if candidate.before_scope == "frame":
+                    continue  # only the frame's document: not comparable with the whole page
                 html_b = rec.dom(candidate, before=True)
                 if html_b is not None:
                     before_file = candidate.dom_before

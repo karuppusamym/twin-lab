@@ -66,7 +66,8 @@ def test_record_keeps_the_page_before_each_action(site, tmp_path):
     assert click["dom_before"] and (out / click["dom_before"]).exists()
     before = (out / click["dom_before"]).read_text(encoding="utf-8")
     assert "nothing yet" in before  # the page as the click met it
-    assert not any(s["screenshot"] for s in steps)  # a script's run has no honest pictures
+    shots = [s["screenshot"] for s in steps if s["screenshot"]]
+    assert shots and all((out / s).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n" for s in shots)
     assert har.load(out).steps  # the analyser still reads the recording
 
 

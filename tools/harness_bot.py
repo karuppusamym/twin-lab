@@ -46,7 +46,8 @@ except ImportError:  # running from a checkout without the package installed
 
 import yaml  # noqa: E402
 
-from labctl.behaviour.dom import SYNC_JS  # noqa: E402
+from labctl.behaviour.dom import SHADOW_HOOK_JS, page_html  # noqa: E402
+from labctl.locate import locate  # noqa: E402
 
 ACTIVITY = {
     "open": "UiPath.Core.Activities.OpenBrowser",
@@ -190,7 +191,8 @@ class Recorder:
             return
         self.seq += 1
         rel = f"dom/{self.seq:04d}.html"
-        (self.root / rel).write_text(self.page.evaluate(SYNC_JS), encoding="utf-8")
+        # Frames and shadow roots included, as the recorder writes them.
+        (self.root / rel).write_text(page_html(self.page), encoding="utf-8")
         line = {
             "seq": self.seq,
             "ts": started.isoformat().replace("+00:00", "Z"),
@@ -311,6 +313,7 @@ def run_once(
     else:
         rec_dir = None
     context = browser.new_context(**context_args)
+    context.add_init_script(SHADOW_HOOK_JS)  # closed shadow roots appear in the snapshots
     page = context.new_page()
     track_requests(page)
     recorder = Recorder(rec_dir, page)
@@ -405,7 +408,7 @@ def one_use(page, log, recorder, use, auto_bindings, inputs, bindings, private, 
     t0 = now()
     out: dict[str, Any] = {}
     try:
-        loc = page.locator(selector).first
+        loc = locate(page, selector).first  # "iframe#x >>> #y" goes into the frame
         if action == "type":
             loc.fill(value, timeout=10000)
         elif action == "select":
