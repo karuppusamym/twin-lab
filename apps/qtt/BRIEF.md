@@ -48,10 +48,12 @@ This app is a **reconstruction**: built from a recording of the real application
 | `a#appTitle` | - |  | observed | yes |
 | `main#content` | - |  | observed | yes |
 | `form#loginForm` | - |  | observed | yes |
-| `input#username` | type | uipath-qtt-qc-review, qtt-loan-search | observed | yes |
-| `input#password` | type | uipath-qtt-qc-review, qtt-loan-search | observed | yes |
+| `input#username` | type | uipath-qtt-qc-review | observed | yes |
+| `input#password` | type | uipath-qtt-qc-review | observed | yes |
 | `button#btnLogin` | submit, click | uipath-qtt-qc-review | observed | yes |
 | `div#loginError` | - |  | observed | yes |
+| *User ID* | - | qtt-loan-search | described | not checked (described; no selector known yet) |
+| *Password* | - | qtt-loan-search | described | not checked (described; no selector known yet) |
 
 Read: `apps/qtt/pages/login.html`. Reproduce what these files render and do on this screen, including elements nothing names: they decide layout and behaviour.
 
@@ -441,4 +443,6 @@ Inferred from the page before and after each recorded step; every rule has evide
 ## Open questions for the reviewer
 
 - ddl: line 152: review_items: unique key on (review_id, checklist_item_id) is not checked (only single-column unique keys are)
+- button#btnReopen on /reviews/{id} was never pressed in any recording: what it does is unknown. Record it, or build it to show it is not available in the demo
+- button#btnApprove on /reviews/{id} was never pressed in any recording: what it does is unknown. Record it, or build it to show it is not available in the demo
 - no health route in the evidence; the demo app must add GET /api/health

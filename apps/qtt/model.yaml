@@ -134,9 +134,8 @@ screens:
     - har:qc-review
     - har:review-return
     - automation:uipath-qtt-qc-review
-    - flow:qtt-loan-search
     selector: input#username
-    label: User ID
+    label: Xxxx ID
     actions:
     - type
     tag: input
@@ -151,9 +150,8 @@ screens:
     - har:qc-review
     - har:review-return
     - automation:uipath-qtt-qc-review
-    - flow:qtt-loan-search
     selector: input#password
-    label: Password
+    label: Xxxxxxxx
     actions:
     - type
     tag: input
@@ -169,7 +167,7 @@ screens:
     - har:review-return
     - automation:uipath-qtt-qc-review
     selector: button#btnLogin
-    label: Sign in
+    label: Xxxx in
     actions:
     - submit
     - click
@@ -188,6 +186,20 @@ screens:
     classes:
     - msg
     - msg-error
+    options: []
+  - basis: described
+    from:
+    - flow:qtt-loan-search
+    label: User ID
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:qtt-loan-search
+    label: Password
+    actions: []
+    classes: []
     options: []
   calls:
   - method: POST
@@ -388,7 +400,7 @@ screens:
     - har:review-return
     - automation:uipath-qtt-qc-review
     selector: input#reviewSearch
-    label: R-1001, L-200001 or name
+    label: R-9999, L-999999 or name
     actions:
     - type
     tag: input
@@ -403,7 +415,7 @@ screens:
     - har:qc-review
     - har:review-return
     selector: input#mineOnly
-    label: Assigned to me
+    label: Xxxxxxxx to me
     actions:
     - click
     tag: input
@@ -724,7 +736,7 @@ screens:
     from:
     - har:error-cases
     selector: h1#errorTitle
-    label: Not found
+    label: Xxx found
     actions: []
     tag: h1
     classes: []
@@ -1038,8 +1050,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1048,7 +1060,7 @@ screens:
     - har:review-return
     - automation:uipath-qtt-qc-review
     selector: input#comment-CRD-01
-    label: Comment required for Fail
+    label: Xxxxxxx required for Xxxx
     actions:
     - type
     tag: input
@@ -1114,8 +1126,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1187,8 +1199,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1261,8 +1273,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1271,7 +1283,7 @@ screens:
     - har:review-return
     - automation:uipath-qtt-qc-review
     selector: input#comment-INC-01
-    label: Comment required for Fail
+    label: Xxxxxxx required for Xxxx
     actions:
     - type
     tag: input
@@ -1336,8 +1348,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1410,8 +1422,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1483,8 +1495,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1556,8 +1568,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1630,8 +1642,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1703,8 +1715,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1777,8 +1789,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -1850,8 +1862,8 @@ screens:
     - result-select
     options:
     - -- Select --
-    - Pass
-    - Fail
+    - Xxxx
+    - Xxxx
     - N/A
   - basis: observed
     from:
@@ -2019,7 +2031,7 @@ screens:
     - har:error-cases
     - har:review-return
     selector: textarea#returnReason
-    label: Reason for returning (at least 15 characters)
+    label: Xxxxxx for returning (at least 15 characters)
     actions:
     - type
     tag: textarea
@@ -2044,7 +2056,7 @@ screens:
     - har:error-cases
     - har:review-return
     selector: button#btnReturn
-    label: Return with reason
+    label: Xxxxxx with reason
     actions:
     - click
     tag: button
@@ -2326,7 +2338,7 @@ screens:
     from:
     - har:loan-search
     selector: input#loanQuery
-    label: L-200001 or Holt
+    label: L-999999 or Xxxx
     actions:
     - type
     tag: input
@@ -2338,7 +2350,7 @@ screens:
     from:
     - har:loan-search
     selector: button#btnSearch
-    label: Search
+    label: Xxxxxx
     actions:
     - submit
     tag: button

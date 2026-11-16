@@ -241,6 +241,17 @@ def scope(app: str, system: str, model: AppModel, db_engine: str | None = None) 
                 if route.method == "GET" and src.same_shape(route.path, scope_.screen.path):
                     _add(brief.routes, route.key, f"serves screen {scope_.screen.path}")
 
+    # Buttons on in-scope screens that nobody ever pressed: what they do is unknown. Say so, so the
+    # builder neither guesses nor drops them silently (the QTT build found Approve and Reopen).
+    for scope_ in brief.screens:
+        for el in scope_.screen.elements:
+            pressed = bool(el.actions) or any(f.startswith(NEED) for f in el.from_)
+            if el.tag == "button" and el.selector and not pressed:
+                brief.gaps.append(
+                    f"{el.selector} on {scope_.screen.path} was never pressed in any recording: what "
+                    "it does is unknown. Record it, or build it to show it is not available in the demo"
+                )
+
     # Routes somebody calls directly, and a health route for the lab agent.
     for route in model.routes:
         callers = _by([f for f in route.from_ if f.startswith("automation:")])
