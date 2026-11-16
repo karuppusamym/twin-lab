@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Review {{ review.review_no }}{% endblock %}
+{% block body_class %}page-review{% endblock %}
+{% block content %}
+{% set can = review.allowed %}
+<div class="title-row">
+  <h1>Review <span id="reviewNo" data-review-no="{{ review.review_no }}">{{ review.review_no }}</span></h1>
+  <span id="reviewStatus" class="badge status-{{ review.status|lower }}">{{ review.status }}</span>
+</div>
+
+<div id="message" class="msg" role="status" aria-live="polite"></div>
+
+<div id="lockNotice" class="notice notice-locked" {% if not review.locked %}hidden{% endif %}>This review is approved and locked. Nothing on it can change.</div>
+<div id="returnNotice" class="notice notice-returned" {% if review.status != 'RETURNED' %}hidden{% endif %}>
+  Returned by the reviewer: <span id="returnReasonText">{{ review.return_reason or '' }}</span>
+</div>
+
+<div class="columns">
+  <section id="loanSummary" class="card summary">
+    <h2>Loan summary</h2>
+    <dl>
+      <dt>Loan no</dt><dd id="loanNo"><a href="/loans/{{ review.loan.loan_no }}">{{ review.loan.loan_no }}</a></dd>
+      <dt>Borrower</dt><dd id="borrowerName">{{ review.loan.borrower_name }}</dd>
+      <dt>Product</dt><dd id="product">{{ review.loan.product }}</dd>
+      <dt>Amount</dt><dd id="loanAmount">{{ "${:,.2f}".format(review.loan.loan_amount) }}</dd>
+      <dt>Closing date</dt><dd id="closingDate">{{ review.loan.closing_date }}</dd>
+      <dt>Branch</dt><dd id="branch">{{ review.loan.branch_code }} {{ review.loan.branch_name }}</dd>
+    </dl>
+  </section>
+  <section id="reviewSummary" class="card summary">
+    <h2>Review</h2>
+    <dl>
+      <dt>Type</dt><dd id="reviewType">{{ review.review_type }}</dd>
+      <dt>Assignee</dt><dd id="assignee">{{ review.assignee_name }} ({{ review.assignee }})</dd>
+      <dt>Due date</dt><dd id="dueDate">{{ review.due_date }}</dd>
+      <dt>Progress</dt><dd id="progress">{{ review.progress.answered }} of {{ review.progress.total }} answered</dd>
+    </dl>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Checklist</h2>
+  <table id="checklist" class="grid checklist">
+    <thead><tr><th>Item</th><th>Check</th><th>Result</th><th>Comment</th><th></th></tr></thead>
+    {% for category, items in by_category.items() %}
+    <tbody class="category" data-category="{{ category }}">
+      <tr class="category-row"><th colspan="5">{{ category }}</th></tr>
+      {% for item in items %}
+      <tr id="item-{{ item.item_id }}" class="check-item" data-item-id="{{ item.item_id }}">
+        <td class="item-code">{{ item.item_id }}</td>
+        <td class="item-desc">{{ item.description }}{% if item.guidance %}<div class="guidance">{{ item.guidance }}</div>{% endif %}</td>
+        <td>
+          <select id="result-{{ item.item_id }}" class="result-select" name="result" {% if not can.edit_items %}disabled{% endif %}>
+            <option value="" {% if not item.result %}selected{% endif %}>-- Select --</option>
+            {% for value, label in results.items() %}<option value="{{ value }}" {% if item.result == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </td>
+        <td>
+          <input id="comment-{{ item.item_id }}" class="comment-input{% if item.result == 'FAIL' %} required{% endif %}" name="comment" type="text" maxlength="500"
+                 value="{{ item.comment or '' }}" {% if item.result == 'FAIL' %}required{% endif %} {% if not can.edit_items %}disabled{% endif %}>
+        </td>
+        <td>
+          <button id="save-{{ item.item_id }}" type="button" class="btn btn-small btn-save-item" {% if not can.edit_items %}disabled{% endif %}>Save</button>
+          <span id="itemStatus-{{ item.item_id }}" class="item-status"></span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>Findings <span id="findingsCount" class="count">({{ review.findings|length }})</span></h2>
+  <ul id="findings" class="findings">
+    {% for f in review.findings %}
+    <li class="finding" data-item-id="{{ f.item_id }}"><strong>{{ f.item_id }}</strong> {{ f.description }}: <span class="finding-comment">{{ f.comment }}</span></li>
+    {% endfor %}
+  </ul>
+  <p id="noFindings" class="empty" {% if review.findings %}hidden{% endif %}>No failed items.</p>
+</section>
+
+{% if user.role == 'ANALYST' %}
+<section id="analystActions" class="card actions">
+  <button id="btnSubmit" type="button" class="btn btn-primary" {% if not can.submit %}disabled{% endif %}>Submit for approval</button>
+  <button id="btnReopen" type="button" class="btn" {% if not can.reopen %}hidden{% endif %}>Reopen review</button>
+</section>
+{% endif %}
+
+{% if user.role == 'REVIEWER' %}
+<section id="reviewerPanel" class="card actions">
+  <h2>Reviewer decision</h2>
+  <label for="returnReason">Reason for returning (at least 15 characters)</label>
+  <textarea id="returnReason" name="reason" rows="3" maxlength="500" {% if not can['return'] %}disabled{% endif %}></textarea>
+  <div class="buttons">
+    <button id="btnApprove" type="button" class="btn btn-primary" {% if not can.approve %}disabled{% endif %}>Approve</button>
+    <button id="btnReturn" type="button" class="btn btn-danger" {% if not can['return'] %}disabled{% endif %}>Return with reason</button>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>History</h2>
+  <table id="auditTable" class="grid audit">
+    <thead><tr><th>When</th><th>Event</th><th>From</th><th>To</th><th>By</th><th>Detail</th></tr></thead>
+    <tbody id="auditRows">
+      {% for a in review.audit %}
+      <tr class="audit-row"><td class="when">{{ a.created_at }}</td><td class="event">{{ a.event }}</td><td>{{ a.from_status or '' }}</td><td>{{ a.to_status or '' }}</td><td class="actor">{{ a.actor }}</td><td class="detail">{{ a.detail or '' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/review.js?v={{ version }}"></script>{% endblock %}

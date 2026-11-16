@@ -1,0 +1,18 @@
+# Copy to twinlab.local.yaml (Git-ignored) and fill in. Never commit the real file.
+# Environment variables with the same names override these values.
+# Details: docs/devin.md
+
+# Devin service-user key: Devin > Settings > Devin API > Service users. Starts with cog_.
+DEVIN_API_KEY: cog_REPLACE_WITH_SERVICE_USER_KEY
+
+# Organisation id, shown on the same Devin settings page.
+DEVIN_ORG_ID: REPLACE_WITH_ORG_ID
+
+# Leave as is unless you use the local mock (http://127.0.0.1:8740).
+DEVIN_BASE_URL: https://api.devin.ai
+
+# The GitHub repository Devin opens the pull request in, as owner/name.
+GITHUB_REPO: your-org/twin-lab
+
+# Where jobs and packages are kept. Relative paths are under the repository root.
+STATE_DIR: .lab-state

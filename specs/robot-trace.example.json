@@ -1,0 +1,144 @@
+{
+  "run_id": "run_20261116T033734Z_c4c2ad",
+  "job_id": "669745c3-1709-45e7-873a-43e6c48ebc45",
+  "robot": "harness-robot",
+  "machine": "HARNESS01",
+  "process": "CaseUpdate",
+  "process_version": "1.0.0",
+  "started": "2026-11-16T03:37:34.401426Z",
+  "ended": "2026-11-16T03:37:38.406388Z",
+  "source": "evidence/showcase/robot.log.jsonl",
+  "steps": [
+    {
+      "seq": 2,
+      "ts": "2026-11-16T03:37:35.159792Z",
+      "end_ts": "2026-11-16T03:37:35.367139Z",
+      "activity": "TypeInto",
+      "activity_type": "UiPath.Core.Activities.TypeInto",
+      "display": "Type into in_User",
+      "state": "Closed",
+      "selector": {
+        "raw": "<webctrl id='username' tag='INPUT' />",
+        "css": "input#username",
+        "id": "username",
+        "tag": "INPUT"
+      },
+      "values": {
+        "in": {
+          "TimeoutMS": 30000,
+          "Text": "demo.user"
+        },
+        "out": {}
+      },
+      "variables": {
+        "in_User": "demo.user"
+      },
+      "redacted": false,
+      "duration_ms": 207
+    },
+    {
+      "seq": 3,
+      "ts": "2026-11-16T03:37:35.372906Z",
+      "end_ts": "2026-11-16T03:37:35.544362Z",
+      "activity": "TypeInto",
+      "activity_type": "UiPath.Core.Activities.TypeInto",
+      "display": "Type into in_Password",
+      "state": "Closed",
+      "values": {
+        "in": {},
+        "out": {}
+      },
+      "variables": {},
+      "redacted": true,
+      "redaction_reason": "Private (no arguments logged)",
+      "duration_ms": 171
+    },
+    {
+      "seq": 6,
+      "ts": "2026-11-16T03:37:36.495865Z",
+      "end_ts": "2026-11-16T03:37:36.670161Z",
+      "activity": "TypeInto",
+      "activity_type": "UiPath.Core.Activities.TypeInto",
+      "display": "Type into in_CaseNo",
+      "state": "Closed",
+      "selector": {
+        "raw": "<webctrl id='caseNo' tag='INPUT' />",
+        "css": "input#caseNo",
+        "id": "caseNo",
+        "tag": "INPUT"
+      },
+      "values": {
+        "in": {
+          "TimeoutMS": 30000,
+          "Text": "C-1001"
+        },
+        "out": {}
+      },
+      "variables": {
+        "in_CaseNo": "C-1001"
+      },
+      "redacted": false,
+      "duration_ms": 174
+    },
+    {
+      "seq": 9,
+      "ts": "2026-11-16T03:37:36.885987Z",
+      "end_ts": "2026-11-16T03:37:36.905704Z",
+      "activity": "GetText",
+      "activity_type": "UiPath.Core.Activities.GetText",
+      "display": "Get text from currentStatus",
+      "state": "Closed",
+      "selector": {
+        "raw": "<webctrl id='results' tag='TABLE' /><webctrl tag='TD' class='status' />",
+        "css": "table#results td.status",
+        "tag": "TD",
+        "class": "status"
+      },
+      "values": {
+        "in": {
+          "TimeoutMS": 30000
+        },
+        "out": {
+          "Value": "IN_PROGRESS"
+        }
+      },
+      "variables": {
+        "currentStatus": "IN_PROGRESS"
+      },
+      "redacted": false,
+      "duration_ms": 19
+    },
+    {
+      "seq": 11,
+      "ts": "2026-11-16T03:37:37.642776Z",
+      "end_ts": "2026-11-16T03:37:37.819239Z",
+      "activity": "SelectItem",
+      "activity_type": "UiPath.Core.Activities.SelectItem",
+      "display": "Select item in in_Category",
+      "state": "Closed",
+      "selector": {
+        "raw": "<webctrl id='category' tag='SELECT' />",
+        "css": "select#category",
+        "id": "category",
+        "tag": "SELECT"
+      },
+      "values": {
+        "in": {
+          "TimeoutMS": 30000,
+          "Item": "Cards"
+        },
+        "out": {}
+      },
+      "variables": {
+        "in_Category": "Cards"
+      },
+      "redacted": false,
+      "duration_ms": 176
+    }
+  ],
+  "unmapped_fields": [
+    "activityInfo.Tag"
+  ],
+  "bad_lines": 0,
+  "log_lines": 32
+}

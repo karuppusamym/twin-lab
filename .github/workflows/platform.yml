@@ -1,19 +1,25 @@
 name: platform
 on:
   push:
-    paths: ["lab/**", "reference/**/backend/**", "specs/**", "automations/**", "conditions/**", "data-packs/**", "apps/*/app.yaml", "pyproject.toml", ".github/workflows/platform.yml"]
+    paths: ["lab/**", "reference/**", "tools/**", "specs/**", "automations/**", "flows/**", "conditions/**", "data-packs/**", "apps/**", "pyproject.toml", ".github/workflows/platform.yml"]
   pull_request:
-    paths: ["lab/**", "reference/**/backend/**", "specs/**", "automations/**", "conditions/**", "data-packs/**", "apps/*/app.yaml", "pyproject.toml", ".github/workflows/platform.yml"]
+    paths: ["lab/**", "reference/**", "tools/**", "specs/**", "automations/**", "flows/**", "conditions/**", "data-packs/**", "apps/**", "pyproject.toml", ".github/workflows/platform.yml"]
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
+      - name: Browser for readiness checks, recorder and fidelity tests
+        run: python -m playwright install --with-deps chromium
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest -q
+      - name: Platform, lab agent and showcase reference tests (Docker tests run on this runner)
+        run: pytest -q
+      - name: QTT stand-in tests (its own package, run separately)
+        run: python -m pytest -q -c reference/qtt-sample/pytest.ini reference/qtt-sample/tests
       - run: labctl validate

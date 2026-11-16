@@ -1,0 +1,6 @@
+# Direct dependencies of the lab agent. requirements.txt pins these and everything they pull in.
+httpx==0.28.1
+psycopg[binary]==3.3.9
+pydantic==2.14.3
+starlette==1.10.0
+uvicorn==0.54.0

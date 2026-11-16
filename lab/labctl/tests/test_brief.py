@@ -1,3 +1,4 @@
+import os
 import shutil
 import sqlite3
 from pathlib import Path
@@ -106,7 +107,7 @@ def test_postgres_schema_applies_on_a_real_postgres(tmp_path):
     ddl = brief_mod.schema(built, ROOT)
     ddl += "INSERT INTO category (code, name) VALUES ('A', 'a');\n"  # id left to the database
     ddl += "SELECT count(*) FROM category;\n"
-    name = "twinlab-test-pg"
+    name = f"twinlab-test-pg-{os.getpid()}"
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     started = subprocess.run(
         [

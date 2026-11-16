@@ -74,7 +74,7 @@ factory less and less evidence and measuring what is lost.
   *Done: same screens, routes, tables, rules and schema as before; the brief text gained basis
   labels and an evidence list. See CHANGELOG.*
 
-- [ ] **E-02 HAR analyser** · L
+- [x] **E-02 HAR analyser** · L
   HAR 1.2 -> model: pages from captured HTML (elements, ids, classes, labels, framework and
   version markers), API routes with request and response shapes, status codes and error bodies
   (as `observed` rules), timings, and tables `inferred` from payloads. Drops cookies and
@@ -82,14 +82,16 @@ factory less and less evidence and measuring what is lost.
   DoD: a HAR recorded by a scripted browser run through the reference app yields every screen,
   selector and route the source analysis finds on the paths recorded; a test asserts that no
   recorded customer value, cookie or token appears anywhere in the model.
+  *Done: recordings (HAR + page snapshots) into the model; record numbers masked; behaviour catalog (Prod Echo I-09a) added.*
 
-- [ ] **E-03 Flow descriptions, DDL and API descriptions** · M
+- [x] **E-03 Flow descriptions, DDL and API descriptions** · M
   `flows/<id>.yaml` -> `described` items; DDL -> tables; OpenAPI and Postman collections ->
   routes. Mode label (copy, reconstruction, skeleton, backend only, sample) per screen and per
   app, written into the brief and `app.yaml`. Screenshots are listed in the brief for the
   builder, not parsed.
   DoD: a brief from a flow description alone is labelled `sample` throughout; a brief from DDL
   and a database-only automation is labelled `backend` and has no screens.
+  *Done: flows, DDL in six dialects, OpenAPI and Postman; mode per screen and app.*
 
 - [ ] **E-04 Evidence ablation on the reference app** · M
   Produce every kind of evidence from the reference app (source, HAR, DDL, OpenAPI, flow
@@ -104,51 +106,64 @@ factory less and less evidence and measuring what is lost.
   access to `reference/`. Review with the same independent checks as T-06.
   DoD: built and running; the review result, the rounds of correction and the differences from
   the source-built app recorded in its `BUILD-LOG.md`.
+  *Done for QTT instead of `showcase-har` (2026-11-15): the stand-in Devin built `apps/qtt/`
+  from its package alone (4 recordings + SQL Server DDL, no source). Both QTT automations are
+  READY, and the Python SLA bot itself runs against it. Round 2 fixed one gap the brief could not
+  carry: the response fields the bots read (`token`, `items`). See `apps/qtt/BUILD-NOTES.md`.*
 
-- [ ] **T-07 Conformance check** · M
+- [x] **T-07 Conformance check** · M
   `labctl conformance <automation>`: selectors in a headless browser, routes, tables and columns.
   Reports, per automation, how many checked items are `observed` versus `assumed` (E-01).
   DoD: READY for the showcase automation; renaming one element id in the demo app gives BLOCKED
   naming that selector and screen.
+  *Done: `labctl conformance`; READY 16/16 for the showcase through the lab.*
 
 - [ ] **T-08 Per-app pipeline** · M
   Reusable workflow (build, test, conformance, image) and the path-filtered caller for the showcase.
   DoD: a change under `apps/showcase/` runs only that pipeline; a change to its `automation.yaml`
   re-runs conformance; a change to `docs/` runs neither.
+  *Built: reusable `app.yml` and a generated `app-<app>.yml` per app; not yet seen running on GitHub for an app.*
 
-- [ ] **T-09 Lab agent: proxy, info, health, request log** · M
+- [x] **T-09 Lab agent: proxy, info, health, request log** · M
   DoD: the showcase is reachable only through the agent; `/_lab/info` reports version and tables;
   every request appears in the log with its duration.
+  *Done: `lab/lab-agent/` (image `twinlab/lab-agent`).*
 
-- [ ] **T-10 Data: template, upload, load, reset** · L
+- [x] **T-10 Data: template, upload, load, reset** · L
   Note from T-06: after loading rows with explicit ids, move identity sequences past them.
   Excel template from the schema; validation; all-or-nothing load; reset to baseline.
   DoD: a filled template loads and shows in the app; a workbook with a bad foreign key is refused
   naming sheet, row and column, and nothing is loaded; after an automation changes rows, reset
   returns every table to the baseline (row-level comparison).
+  *Done: Excel template, validation by sheet/row/column, all-or-nothing load, exact reset.*
 
-- [ ] **T-11 Synthetic generator** · M
+- [x] **T-11 Synthetic generator** · M
   Seeded generator producing the same workbook shape.
   DoD: the same seed gives byte-identical data twice; generated data passes T-10 validation.
+  *Done: seeded generator that reuses the app's code lists.*
 
-- [ ] **T-12 Conditions: HTTP latency and faults** · M
+- [x] **T-12 Conditions: HTTP latency and faults** · M
   DoD: under `peak-hour`, the search route's measured latency falls in the profile's range and other
   routes are unaffected; a 5 % fault rate with a fixed seed fails the same calls on every run.
+  *Done: per-route lognormal latency and seeded faults; presets in `conditions/`.*
 
-- [ ] **T-13 Conditions: database link** · M
+- [x] **T-13 Conditions: database link** · M
   TCP proxy between app and database, set through the lab agent.
   DoD: with 150 ms on the link, a page that makes three queries is at least 450 ms slower, with no
   change to the app.
+  *Done: TCP proxy on the database link; +451 ms for three queries at 150 ms.*
 
-- [ ] **T-14 Sessions** · M
+- [x] **T-14 Sessions** · M
   Start, stop, request timeline, before/after table diff, summary.
   DoD: a session around the showcase automation lists its requests in order and exactly the rows
   it inserted; `app_ms` and `injected_ms` are reported separately.
+  *Done: request timeline (app time and added delay apart) and row changes.*
 
-- [ ] **T-15 Portal v1** · L
+- [x] **T-15 Portal v1** · L
   Pages: Automations, Apps, Mapping, Data, Conditions, Sessions, Bindings.
   DoD: the whole Milestone 1 flow is done from the portal with no CLI, apart from triggering the
   automation itself.
+  *Done: `labctl portal`.*
 
   **Gate M1:** demo to the team. Same UiPath automation under `normal` and `peak-hour`, two sessions
   side by side.
@@ -168,14 +183,18 @@ factory less and less evidence and measuring what is lost.
   measure onboarding effort.
   DoD: two apps in different frameworks deployed side by side, each controlled independently; hours
   for the second app recorded against the first.
+  *Partly met: `showcase` (React + FastAPI) and `qtt` (server-rendered FastAPI + Jinja) run side by
+  side, each with its own lab (8720 and 8721); hours not recorded.*
+  *In progress: QTT stand-in is server-rendered (FastAPI + Jinja), unlike the React showcase.*
 
 - [ ] **T-19 Cross-app data packs** · M
   `links` validation across apps.
   DoD: a pack where a customer exists in one app and not the other is refused naming the key.
 
-- [ ] **T-20 Session comparison** · M
+- [x] **T-20 Session comparison** · M
   Two sessions side by side: time, waiting, retries, errors, row changes.
   DoD: the comparison names a row one automation changed and the other did not.
+  *Done: portal session comparison.*
 
 - [ ] **T-21 Shared hosting** · M · needs the hosting decision
   Deploy step in the reusable workflow; hostname per app.

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Flows · Twin Lab{% endblock %}
+{% block content %}
+<h1>Flows</h1>
+<p class="lead">When there is no automation code, or a demo needs a screen no bot uses, write the flow down. A requested flow puts its screens, and what they need, in scope.</p>
+
+<div class="card scroll">
+  <table>
+    <thead><tr><th>Flow</th><th>App</th><th>Requested by</th><th>Steps</th></tr></thead>
+    <tbody>
+    {% for path, f, problems in flows %}
+      {% if f %}
+      <tr><td><b>{{ f.id }}</b><br><span class="small muted">{{ f.purpose }}</span></td><td><a href="/apps/{{ f.app }}">{{ f.app }}</a></td><td>{{ f.requested_by }}</td>
+        <td class="small">{% for s in f.steps %}{{ s.screen }}{% if s.path %} <code>{{ s.path }}</code>{% endif %}{% if not loop.last %} → {% endif %}{% endfor %}</td></tr>
+      {% else %}
+      <tr><td colspan="4"><span class="pill err">invalid</span> {{ path }}: {{ problems | map('string') | join('; ') }}</td></tr>
+      {% endif %}
+    {% else %}
+      <tr><td colspan="4" class="muted">No flow written yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Add or replace a flow</h2>
+  <p class="small muted">Saving a flow with an existing id replaces it. Steps name the screen as people call it; add its <code>path</code> when you know it, so it joins up with recordings.</p>
+  <form method="post" action="/flows">
+    <textarea name="text" rows="22">{{ example }}</textarea>
+    <button type="submit">Save flow</button>
+  </form>
+</div>
+{% endblock %}

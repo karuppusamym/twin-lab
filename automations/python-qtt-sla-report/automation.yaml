@@ -1,0 +1,46 @@
+id: python-qtt-sla-report
+name: QTT SLA report (Python, API and database)
+type: python
+surface: backend
+trigger: manual
+owner: unassigned
+source:
+  path: .
+  entry: report.py
+touches:
+- app: qtt
+  via: api
+  routes:
+  - method: POST
+    path: /api/login
+  - method: GET
+    path: /api/reviews
+- app: qtt
+  via: db
+  tables:
+  - table: review_audit
+    columns:
+    - review_id
+    - event
+    - actor
+    - created_at
+    - audit_id
+    access: read
+  - table: qc_reviews
+    columns:
+    - review_id
+    - review_no
+    - status
+    access: read
+bindings:
+  qtt_api: '{{qtt.api}}'
+  qtt_db: '{{qtt.db}}'
+  qtt_user: '{{qtt.credentials.username}}'
+  qtt_password: '{{qtt.credentials.password}}'
+analysis:
+  by: manual
+  gaps: []
+  notes:
+  - where: report.py
+    what: GET /api/reviews is called with query status=SUBMITTED; the SQL also filters
+      qc_reviews.status = 'SUBMITTED' and review_audit.event IN ('SUBMITTED', 'RETURNED')

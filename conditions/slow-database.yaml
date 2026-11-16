@@ -1,0 +1,8 @@
+id: slow-database
+description: The database is slow; the application itself is fine.
+calibration: estimate
+calibrated_from: "illustrative"
+seed: 12
+targets:
+  - app: any
+    db: {latency_ms: 250, jitter_ms: 100}

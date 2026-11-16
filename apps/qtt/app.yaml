@@ -1,0 +1,73 @@
+id: qtt
+name: QTT (demo copy)
+mode: reconstruction
+copies:
+  system: QTT
+  source: null
+  ref: sha256:b0fe55c4b4ecf68f
+  analysed: '2026-11-15'
+stack:
+  db:
+    engine: postgres
+  frontend:
+    framework: server-rendered
+    marker: pages arrive with their content; no client framework marker
+run:
+  web:
+    port: 8000
+  api:
+    port: 8000
+    health: /api/health
+  env:
+    database_url: DATABASE_URL
+db:
+  schema: db/schema.sql
+  derived_from:
+  - automation:python-qtt-sla-report
+  - automation:uipath-qtt-qc-review
+  - ddl:ddl.sql
+built_for:
+- python-qtt-sla-report
+- uipath-qtt-qc-review
+- qtt-loan-search
+rules:
+- id: R1
+  where: POST /api/reviews/{id}/submit
+  rule: '422 ITEMS_INCOMPLETE: 12 checklist item(s) have no result: XXX-99, XXX-99, XXX-99, XXX-99, XXX-99,
+    XXX-99, XXX-99, XXX-99, XXX-99, XXX-99, XXX-99, XXX-99.'
+  verification: hypothesis
+- id: R2
+  where: PUT /api/reviews/{id}/items/{id2}
+  rule: '422 COMMENT_REQUIRED: A comment is required when the result is Xxxx.'
+  verification: hypothesis
+- id: R3
+  where: POST /api/reviews/{id}/submit
+  rule: '422 ITEMS_INCOMPLETE: 11 checklist item(s) have no result: XXX-99, XXX-99, XXX-99, XXX-99, XXX-99,
+    XXX-99, XXX-99, XXX-99, XXX-99, XXX-99, XXX-99.'
+  verification: hypothesis
+- id: R4
+  where: POST /api/reviews/{id}/return
+  rule: '422 RETURN_REASON_REQUIRED: A reason of at least 15 characters is required to return a review.'
+  verification: hypothesis
+- id: R5
+  where: Loan search
+  rule: Search matches part of the loan number or the borrower name, ignoring case
+  verification: hypothesis
+- id: R6
+  where: Loan search
+  rule: At most 50 loans are listed
+  verification: hypothesis
+- id: R7
+  where: Loan search
+  rule: When nothing matches, the page says no loans match
+  verification: hypothesis
+- id: R8
+  where: Loan detail
+  rule: An unknown loan number shows a not-found page
+  verification: hypothesis
+lab:
+  port: 8721
+  db_port: 15421
+  credentials:
+    username: analyst1
+    password: Qtt-Sample-2026

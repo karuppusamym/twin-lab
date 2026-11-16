@@ -2,6 +2,43 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-15 — End to end without source: QTT stand-in, real bots, review fixes
+`apps/qtt/` was built by a stand-in Devin from its package alone: 4 recordings and SQL Server
+DDL, with no source. Both QTT automations are READY (65 and 4 checks). Running the real Python
+SLA bot then found three problems that conformance could not see.
+
+1. **The bot needed fields the brief did not carry.** It reads `token` from `POST /api/login` and
+   `items` from `GET /api/reviews`. The fix is round 2 in `apps/qtt/BUILD-NOTES.md`. Lesson: response
+   fields a bot's own code reads must reach the brief.
+2. **`localhost` cost about 20 s per connection on Windows.** It tries IPv6 first, and the lab
+   ports listen on IPv4 only. Bindings and clients now use `127.0.0.1`. The bot run went from
+   137 s to 2.7 s.
+3. **Profiles for `app: any` applied nothing when sent to the lab agent directly.** They now apply
+   to every app. The portal was not affected.
+
+With those fixed, the same bot on the same data shows the slowness lab working:
+
+| Condition | Login | Review list | Whole run |
+|---|---|---|---|
+| Normal | 32 ms | 14 ms | 2.7 s |
+| slow-database | 1.7 s | 1.8 s | 7.8 s |
+
+The admin calls of the review fixes now need a token. Other changes from the reviews:
+
+- Masking is one-to-one, and `sanitize()` reports collisions.
+- A Devin session is never created twice, and `labctl devin start --force` overrides that guard.
+- Stale polls cannot undo a cancel.
+- Reset refuses mismatched baseline files. A baseline from an older agent is upgraded at startup.
+- Intervals keep exact precision.
+- Admin calls need exactly one `X-Lab-Token` and a JSON body.
+- Lab ports bind to `127.0.0.1` unless `TWINLAB_LAB_BIND` says otherwise.
+- The admin token is generated in `.lab-state/lab-token`.
+- `lab up` sets the first baseline. It also rebuilds the agent image every time, so a `git pull`
+  takes effect.
+- The agent image build works from any folder.
+
+Open: the factory does not yet extract the fields a bot reads.
+
 ## 2026-11-15 — E-01 App model with provenance (done)
 Everything known about an application now goes into one model, `apps/<app>/model.yaml`, and the
 brief, schema and `app.yaml` are generated from it alone. Builders exist for three kinds of

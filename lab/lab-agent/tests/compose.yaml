@@ -1,0 +1,62 @@
+# Integration stack for test_docker_integration.py: Postgres (TLS on), the showcase app with its
+# DATABASE_URL pointing at the agent's DB link proxy, and the agent in front of the app.
+# Synthetic credentials only; they exist nowhere but this throwaway stack.
+# Host ports: 18210 agent front door, 18211 DB link proxy (for the driver tests).
+name: tl-lab-agent-test
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab-test-only
+      POSTGRES_DB: showcase
+    volumes:
+      - ${TL_CERT_DIR:?set TL_CERT_DIR}:/certs:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        cp /certs/server.crt /certs/server.key /tmp/ &&
+        chown postgres:postgres /tmp/server.crt /tmp/server.key &&
+        chmod 600 /tmp/server.key &&
+        exec docker-entrypoint.sh postgres -c ssl=on
+        -c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab -d showcase"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  agent:
+    image: twinlab/lab-agent:dev
+    environment:
+      APP_ID: showcase
+      APP_VERSION: "1.0.0"
+      APP_UPSTREAM: http://app:8000
+      APP_HEALTH_PATH: /api/health
+      DB_UPSTREAM: db:5432
+      DB_PROXY_PORT: "15432"
+      ADMIN_DATABASE_URL: postgresql://lab:lab-test-only@db:5432/showcase
+      STATE_DIR: /var/lib/twinlab
+      LAB_PORT: "9000"
+      LAB_TOKEN: test-token
+    volumes:
+      - agent-state:/var/lib/twinlab
+    ports:
+      - "18210:9000"
+      - "18211:15432"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    image: twinlab/showcase:dev
+    environment:
+      DATABASE_URL: postgresql://lab:lab-test-only@agent:15432/showcase
+      DB_WAIT_SECONDS: "60"
+    depends_on:
+      agent:
+        condition: service_started
+
+volumes:
+  agent-state:

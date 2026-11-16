@@ -1,0 +1,47 @@
+<Activity mc:Ignorable="sap sap2010" x:Class="CheckReviewViaApi"
+  xmlns="http://schemas.microsoft.com/netfx/2009/xaml/activities"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:sap="http://schemas.microsoft.com/netfx/2009/xaml/activities/presentation"
+  xmlns:sap2010="http://schemas.microsoft.com/netfx/2010/xaml/activities/presentation"
+  xmlns:njl="clr-namespace:Newtonsoft.Json.Linq;assembly=Newtonsoft.Json"
+  xmlns:ui="http://schemas.uipath.com/workflow/activities"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Hand-authored sample that follows the UiPath Studio XAML layout. Signs in to the QTT API
+       and reads the review's status, to confirm what the page showed. Synthetic. -->
+  <x:Members>
+    <x:Property Name="in_Api" Type="InArgument(x:String)" />
+    <x:Property Name="in_User" Type="InArgument(x:String)" />
+    <x:Property Name="in_Password" Type="InArgument(x:String)" />
+    <x:Property Name="in_ReviewNo" Type="InArgument(x:String)" />
+    <x:Property Name="out_Status" Type="OutArgument(x:String)" />
+  </x:Members>
+  <Sequence DisplayName="Check the review through the API">
+    <Sequence.Variables>
+      <Variable x:TypeArguments="x:String" Name="loginJson" />
+      <Variable x:TypeArguments="x:String" Name="token" />
+      <Variable x:TypeArguments="x:String" Name="reviewApiUrl" />
+      <Variable x:TypeArguments="x:String" Name="reviewJson" />
+      <Variable x:TypeArguments="x:Int32" Name="reviewHttpStatus" />
+      <Variable x:TypeArguments="njl:JObject" Name="review" />
+    </Sequence.Variables>
+    <ui:HttpClient DisplayName="Sign in to the API" Method="POST" EndPoint="[in_Api + &quot;/api/login&quot;]" BodyFormat="application/json" Body="[&quot;{&quot;&quot;username&quot;&quot;:&quot;&quot;&quot; + in_User + &quot;&quot;&quot;,&quot;&quot;password&quot;&quot;:&quot;&quot;&quot; + in_Password + &quot;&quot;&quot;}&quot;]" Result="[loginJson]" />
+    <Assign DisplayName="Take the token">
+      <Assign.To><OutArgument x:TypeArguments="x:String">[token]</OutArgument></Assign.To>
+      <Assign.Value><InArgument x:TypeArguments="x:String">[Newtonsoft.Json.Linq.JObject.Parse(loginJson)("token").ToString]</InArgument></Assign.Value>
+    </Assign>
+    <Assign DisplayName="Build review address">
+      <Assign.To><OutArgument x:TypeArguments="x:String">[reviewApiUrl]</OutArgument></Assign.To>
+      <Assign.Value><InArgument x:TypeArguments="x:String">[in_Api + "/api/reviews/" + in_ReviewNo]</InArgument></Assign.Value>
+    </Assign>
+    <ui:HttpClient DisplayName="Get the review" Method="GET" EndPoint="[reviewApiUrl]" AcceptFormat="JSON" Result="[reviewJson]" StatusCode="[reviewHttpStatus]">
+      <ui:HttpClient.Headers>
+        <InArgument x:TypeArguments="x:String" x:Key="Authorization">["Bearer " + token]</InArgument>
+      </ui:HttpClient.Headers>
+    </ui:HttpClient>
+    <ui:DeserializeJson x:TypeArguments="njl:JObject" DisplayName="Read the review JSON" JsonString="[reviewJson]" JsonObject="[review]" />
+    <Assign DisplayName="Take the status">
+      <Assign.To><OutArgument x:TypeArguments="x:String">[out_Status]</OutArgument></Assign.To>
+      <Assign.Value><InArgument x:TypeArguments="x:String">[review("status").ToString]</InArgument></Assign.Value>
+    </Assign>
+  </Sequence>
+</Activity>

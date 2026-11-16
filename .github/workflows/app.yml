@@ -1,0 +1,58 @@
+# Reusable pipeline for one demo app: build its image, start it in the lab (Postgres, lab agent,
+# app) and check every automation it is built for. Called by app-<app>.yml, one per app.
+name: app
+on:
+  workflow_call:
+    inputs:
+      app:
+        required: true
+        type: string
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Has the app been built yet?
+        id: built
+        run: |
+          if [ -f "apps/${{ inputs.app }}/Dockerfile" ]; then echo "built=true" >> "$GITHUB_OUTPUT";
+          else echo "built=false" >> "$GITHUB_OUTPUT"; echo "::notice::apps/${{ inputs.app }} has a brief but no build yet; nothing to run"; fi
+      - uses: actions/setup-python@v5
+        if: steps.built.outputs.built == 'true'
+        with:
+          python-version: "3.13"
+      - name: Install labctl
+        if: steps.built.outputs.built == 'true'
+        run: pip install -e ".[dev]"
+      - name: Install the browser used by readiness checks
+        if: steps.built.outputs.built == 'true'
+        run: python -m playwright install --with-deps chromium
+      - name: Validate contracts
+        if: steps.built.outputs.built == 'true'
+        run: labctl validate
+      - name: Start ${{ inputs.app }} in the lab
+        if: steps.built.outputs.built == 'true'
+        run: labctl lab up ${{ inputs.app }}
+      - name: Readiness of every automation it is built for
+        if: steps.built.outputs.built == 'true'
+        run: |
+          set -e
+          status=0
+          for automation in $(python -c "import yaml,sys; print(' '.join(yaml.safe_load(open('apps/${{ inputs.app }}/app.yaml')).get('built_for') or []))"); do
+            if [ -f "automations/$automation/automation.yaml" ]; then
+              echo "::group::$automation"
+              labctl conformance "$automation" || status=1
+              echo "::endgroup::"
+            else
+              echo "$automation is a requested flow; nothing to replay"
+            fi
+          done
+          exit $status
+      - name: Lab logs on failure
+        if: failure() && steps.built.outputs.built == 'true'
+        run: docker compose -f .lab-state/compose/${{ inputs.app }}.yml logs --tail 200 || true
+      - name: Stop
+        if: always() && steps.built.outputs.built == 'true'
+        run: labctl lab down ${{ inputs.app }} --wipe || true

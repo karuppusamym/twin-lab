@@ -1,0 +1,212 @@
+{
+  "run_id": "run_20261116T033734Z_c4c2ad",
+  "process": "CaseUpdate",
+  "automation": "uipath-case-update",
+  "source": "harness",
+  "masked": false,
+  "started": "2026-11-16T03:37:34.401426Z",
+  "ended": "2026-11-16T03:37:38.406388Z",
+  "recording": "rec_20261116T033734Z_ef503e",
+  "steps": [
+    {
+      "seq": 2,
+      "ts": "2026-11-16T03:37:35.159792Z",
+      "app": "showcase",
+      "screen": "login",
+      "path": "/login",
+      "action": "type",
+      "field": "in_User",
+      "selector": "input#username",
+      "value": "demo.user",
+      "redacted": false,
+      "display": "Type into in_User",
+      "duration_ms": 207,
+      "gap_ms": 5,
+      "wait_ms": 212,
+      "requests": [],
+      "dom": "dom/0002.html",
+      "matched_by": "selector"
+    },
+    {
+      "seq": 3,
+      "ts": "2026-11-16T03:37:35.372906Z",
+      "app": "showcase",
+      "screen": "login",
+      "path": "/login",
+      "action": "type",
+      "field": "in_Password",
+      "selector": "input#password",
+      "redacted": true,
+      "display": "Type into in_Password",
+      "duration_ms": 171,
+      "gap_ms": 7,
+      "wait_ms": 178,
+      "requests": [],
+      "dom": "dom/0003.html",
+      "matched_by": "order"
+    },
+    {
+      "seq": 6,
+      "ts": "2026-11-16T03:37:36.495865Z",
+      "app": "showcase",
+      "screen": "cases",
+      "path": "/cases",
+      "action": "type",
+      "field": "in_CaseNo",
+      "selector": "input#caseNo",
+      "value": "C-1001",
+      "redacted": false,
+      "display": "Type into in_CaseNo",
+      "duration_ms": 174,
+      "gap_ms": 3,
+      "wait_ms": 177,
+      "requests": [],
+      "dom": "dom/0006.html",
+      "matched_by": "selector"
+    },
+    {
+      "seq": 7,
+      "ts": "2026-11-16T03:37:36.674152Z",
+      "app": "showcase",
+      "screen": "cases",
+      "path": "/cases",
+      "action": "click",
+      "selector": "button#btnSearch",
+      "redacted": false,
+      "display": "Click button#btnSearch",
+      "duration_ms": 195,
+      "gap_ms": 5,
+      "wait_ms": 200,
+      "requests": [
+        "GET /api/cases/search*"
+      ],
+      "dom": "dom/0007.html",
+      "matched_by": "selector"
+    },
+    {
+      "seq": 8,
+      "ts": "2026-11-16T03:37:36.875983Z",
+      "app": "showcase",
+      "screen": "cases",
+      "path": "/cases",
+      "action": "wait",
+      "field": "found",
+      "selector": "table#results",
+      "value": true,
+      "redacted": false,
+      "display": "Element exists found",
+      "duration_ms": 9,
+      "gap_ms": 0,
+      "wait_ms": 9,
+      "requests": [],
+      "matched_by": "selector"
+    },
+    {
+      "seq": 9,
+      "ts": "2026-11-16T03:37:36.885987Z",
+      "app": "showcase",
+      "screen": "cases",
+      "path": "/cases",
+      "action": "read",
+      "field": "currentStatus",
+      "selector": "table#results td.status",
+      "value": "IN_PROGRESS",
+      "redacted": false,
+      "display": "Get text from currentStatus",
+      "duration_ms": 19,
+      "gap_ms": 0,
+      "wait_ms": 19,
+      "requests": [],
+      "matched_by": "selector"
+    },
+    {
+      "seq": 11,
+      "ts": "2026-11-16T03:37:37.642776Z",
+      "app": "showcase",
+      "screen": "cases-item",
+      "path": "/cases/{in_CaseNo}",
+      "action": "select",
+      "field": "in_Category",
+      "selector": "select#category",
+      "value": "Cards",
+      "redacted": false,
+      "display": "Select item in in_Category",
+      "duration_ms": 176,
+      "gap_ms": 4,
+      "wait_ms": 180,
+      "requests": [
+        "GET /api/categories/*/subcategories"
+      ],
+      "dom": "dom/0009.html",
+      "matched_by": "selector"
+    },
+    {
+      "seq": 14,
+      "ts": "2026-11-16T03:37:38.189424Z",
+      "app": "showcase",
+      "screen": "cases-item",
+      "path": "/cases/{in_CaseNo}",
+      "action": "click",
+      "selector": "button#btnSave",
+      "redacted": false,
+      "display": "Click button#btnSave",
+      "duration_ms": 200,
+      "gap_ms": 4,
+      "wait_ms": 204,
+      "requests": [
+        "PUT /api/cases/*"
+      ],
+      "dom": "dom/0012.html",
+      "matched_by": "selector"
+    },
+    {
+      "seq": 15,
+      "ts": "2026-11-16T03:37:38.394363Z",
+      "app": "showcase",
+      "screen": "cases-item",
+      "path": "/cases/{in_CaseNo}",
+      "action": "read",
+      "field": "out_Message",
+      "selector": "#message",
+      "value": "Escalation needs a reason of at least 10 characters",
+      "redacted": false,
+      "display": "Get text from out_Message",
+      "duration_ms": 11,
+      "wait_ms": 11,
+      "requests": [],
+      "matched_by": "selector"
+    }
+  ],
+  "waits": [
+    {
+      "app": "showcase",
+      "screen": "login",
+      "action": "goto",
+      "target": "/login",
+      "n": 1,
+      "p50_ms": 757,
+      "p95_ms": 757,
+      "max_ms": 757,
+      "requests": [
+        "GET /login"
+      ]
+    },
+    {
+      "app": "showcase",
+      "screen": "login",
+      "action": "type",
+      "target": "in_User",
+      "n": 1,
+      "p50_ms": 212,
+      "p95_ms": 212,
+      "max_ms": 212,
+      "requests": []
+    }
+  ],
+  "gaps": [
+    {
+      "where": "step 3 TypeInto 'Type into in_Password'",
+      "what": "no selector logged; matched to the next analysed use by order"
+    }
+  ]
+}

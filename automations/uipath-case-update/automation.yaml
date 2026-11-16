@@ -92,6 +92,11 @@ bindings:
   in_Db: '{{showcase.db}}'
   in_User: '{{showcase.credentials.username}}'
   in_Password: '{{showcase.credentials.password}}'
+test_inputs:
+  in_CaseNo: C-1003
+  in_Category: Payments
+  in_Subcategory: Refund
+  in_NoteText: Checked by the conformance run
 analysis:
   by: uipath-analyser@0.1.0
   gaps: []

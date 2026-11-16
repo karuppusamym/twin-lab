@@ -126,6 +126,7 @@ class Automation(Contract):
     replaced_by: Slug | None = None
     touches: list[Touch] = []
     bindings: dict[str, str] = {}
+    test_inputs: dict[str, str] = {}  # values for the conformance check, e.g. in_CaseNo: C-1003
     analysis: Analysis = Analysis()
 
     @model_validator(mode="after")
@@ -159,8 +160,9 @@ class Copies(Contract):
 
 class FrontendStack(Contract):
     framework: str
-    version: str
+    version: str | None = None  # unknown for a server-rendered app
     ui_library: str | None = None
+    marker: str | None = None  # what identified the framework in a recording
 
 
 class BackendStack(Contract):
@@ -219,9 +221,18 @@ class Link(Contract):
     table: str | None = None
 
 
+class Lab(Contract):
+    """How the lab runs this app: host ports and the test sign-in the data provides."""
+
+    port: int = Field(gt=0, lt=65536)  # the lab agent: the app's front door
+    db_port: int = Field(gt=0, lt=65536)  # the database, through the slowdown proxy
+    credentials: dict[str, str] = {}  # test values only, e.g. username/password from the seed
+
+
 class App(Contract):
     id: Slug
     name: str
+    mode: str | None = None  # copy | reconstruction | skeleton | backend | sample (06-evidence.md)
     copies: Copies
     stack: Stack
     run: Run
@@ -229,6 +240,7 @@ class App(Contract):
     built_for: list[Slug] = []
     rules: list[Rule] = []
     links: list[Link] = []
+    lab: Lab | None = None
 
 
 # --- data pack ---------------------------------------------------------------------------------
@@ -333,6 +345,7 @@ class Change(Contract):
     table: str
     op: Literal["insert", "update", "delete"]
     key: str
+    columns: list[str] = []  # for an update: the columns that changed
 
 
 class SessionSummary(Contract):
@@ -345,6 +358,7 @@ class SessionSummary(Contract):
 class Session(Contract):
     session_id: str = Field(pattern=r"^ses_\d{8}T\d{6}Z_[0-9a-f]{6}$")
     automation: Slug | None = None
+    label: str | None = None
     apps: list[SessionApp] = Field(min_length=1)
     started: datetime
     ended: datetime | None = None

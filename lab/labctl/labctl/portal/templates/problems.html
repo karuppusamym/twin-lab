@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Problems · Twin Lab{% endblock %}
+{% block content %}
+<p class="small"><a href="/apps/{{ app_id }}#data">← {{ app_id }}</a></p>
+<h1>{{ title }}</h1>
+<p class="lead">Fix these in the workbook and upload it again. Nothing was changed in the app.</p>
+<div class="card"><ol>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ol></div>
+{% endblock %}

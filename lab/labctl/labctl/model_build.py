@@ -284,6 +284,29 @@ def from_flows(app: str, flows: list[Flow]) -> AppModel:
     return model
 
 
+# --- recordings and API descriptions --------------------------------------------------------------
+
+
+def from_recording(app: str, path: Path, repo_root: Path, pages_dir: Path | None) -> AppModel:
+    """What a browser recording shows (`labctl.har`): a folder or a bare `.har` file.
+
+    Writes value-free page snapshots to `pages_dir` (normally `apps/<app>/pages/`) when given.
+    """
+    from labctl import har
+
+    return har.analyse(app, Path(path), Path(repo_root), pages_dir)
+
+
+from_har = from_recording  # the name docs/dev/integration.md uses
+
+
+def from_openapi(app: str, path: Path) -> AppModel:
+    """Declared routes with request and response shapes: OpenAPI 3.x or a Postman v2.1 collection."""
+    from labctl import openapi
+
+    return openapi.analyse(app, Path(path))
+
+
 # --- merging -----------------------------------------------------------------------------------
 
 
@@ -299,6 +322,15 @@ def _add_rule(model: AppModel, rule: Rule) -> None:
             have.basis = stronger(have.basis, rule.basis)
             return
     model.rules.append(rule)
+
+
+def same_id(a: str | None, b: str | None) -> bool:
+    """`#message` and `div#message` name the same element."""
+    simple = re.compile(r"^([a-z0-9]*)#([\w-]+)$", re.I)
+    ma, mb = simple.match(a or ""), simple.match(b or "")
+    if not (ma and mb) or ma.group(2) != mb.group(2):
+        return False
+    return not ma.group(1) or not mb.group(1) or ma.group(1).lower() == mb.group(1).lower()
 
 
 def _find_screen(screens: list[Screen], screen: Screen) -> Screen | None:
@@ -324,8 +356,14 @@ def _merge_screen(have: Screen, new: Screen) -> None:
         if other != name and other not in have.aliases:
             have.aliases.append(other)
     have.name = name
-    for attr in ("files", "ids", "classes"):
-        setattr(have, attr, getattr(strong, attr) or getattr(weak, attr))
+    have.files = strong.files or weak.files
+    for attr in ("ids", "classes"):
+        if have.basis == new.basis == "observed":  # source and a recording: both are real
+            setattr(have, attr, sorted(set(getattr(have, attr)) | set(getattr(new, attr))))
+        else:
+            setattr(have, attr, getattr(strong, attr) or getattr(weak, attr))
+    if new.snapshots is not None:
+        have.snapshots = (have.snapshots or 0) + new.snapshots
     have.calls = have.calls + [
         c for c in new.calls if (c.method, c.path) not in {(x.method, x.path) for x in have.calls}
     ]
@@ -335,11 +373,18 @@ def _merge_screen(have: Screen, new: Screen) -> None:
                 e
                 for e in have.elements
                 if (el.selector and e.selector == el.selector)
+                or (el.selector and same_id(e.selector, el.selector))
                 or (not el.selector and e.label == el.label)
             ),
             None,
         )
         if same:
+            if same.selector != el.selector and any(f.startswith("automation:") for f in el.from_):
+                same.selector = el.selector  # the automation's selector is what must resolve
+            for attr in ("label", "tag", "name", "type"):
+                setattr(same, attr, getattr(same, attr) or getattr(el, attr))
+            for attr in ("classes", "options"):
+                setattr(same, attr, _union(getattr(same, attr), getattr(el, attr)))
             same.actions = _union(same.actions, el.actions)
             same.from_ = _union(same.from_, el.from_)
             same.basis = stronger(same.basis, el.basis)
@@ -371,10 +416,14 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
             None,
         )
         if have:
+            attrs = ("handler", "at", "doc", "query", "body", "tables", "responses", "timings")
             if route.basis == stronger(route.basis, have.basis) and route.basis != have.basis:
-                for attr in ("handler", "at", "doc", "query", "body", "tables"):
+                for attr in attrs:
                     setattr(have, attr, getattr(route, attr) or getattr(have, attr))
                 have.path = route.path
+            else:  # weaker evidence fills only what the stronger one lacks
+                for attr in attrs:
+                    setattr(have, attr, getattr(have, attr) or getattr(route, attr))
             have.basis = stronger(have.basis, route.basis)
             have.from_ = _union(have.from_, route.from_)
         else:
@@ -389,6 +438,15 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
         )
         names = {c.name.lower() for c in strong.columns}
         extra = [c for c in weak.columns if c.name.lower() not in names]
+        if weak.basis == "inferred" and all(f.startswith("automation:") for f in strong.from_):
+            # An automation names columns, not types; recorded payloads show the types.
+            seen = {c.name.lower(): c for c in weak.columns}
+            strong.columns = [
+                seen[c.name.lower()].model_copy(update={"name": c.name})
+                if c.name.lower() in seen and c.type == "TEXT"
+                else c
+                for c in strong.columns
+            ]
         if strong.basis == "observed":  # a column the evidence lacks is a question, not a column
             for column in extra:
                 model.conflicts.append(Conflict(
@@ -403,6 +461,8 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
         have.from_ = _union(have.from_, table.from_)
     for rule in part.rules:
         _add_rule(model, rule)
+    for key, values in part.codes.items():
+        model.codes[key] = sorted(set(model.codes.get(key, [])) | set(values))
 
 
 def merge(app: str, parts: list[AppModel]) -> AppModel:
@@ -415,6 +475,11 @@ def merge(app: str, parts: list[AppModel]) -> AppModel:
     model = AppModel(app=app)
     for part in sorted(parts, key=rank):
         _merge_into(model, part)
+    names = {t.name.lower(): t.name for t in model.tables}
+    for route in model.routes:  # table names as merged (case may differ between evidence)
+        route.tables = list(
+            dict.fromkeys(names[t.lower()] for t in route.tables if t.lower() in names)
+        )
     _find_conflicts(model)
     return model
 
@@ -439,20 +504,32 @@ def _find_conflicts(model: AppModel) -> None:
                          "or the automation and the source disagree",
                     evidence=_union(el.from_, [e for e in screen.from_ if e not in el.from_]),
                 ))  # fmt: skip
-        if complete["screens"] and screen.basis == "declared":
+        if (
+            complete["screens"]
+            and screen.basis == "declared"
+            and not set(screen.from_) & set(complete["screens"])
+        ):
             model.conflicts.append(Conflict(
                 what=f"screen {screen.name} ({screen.path or 'path unknown'}) is used by {who(screen.from_)} "
                      "but no route in the frontend matches it",
                 evidence=screen.from_ + complete["screens"],
             ))  # fmt: skip
     for route in model.routes:
-        if complete["routes"] and route.basis == "declared":
+        if (
+            complete["routes"]
+            and route.basis == "declared"
+            and not set(route.from_) & set(complete["routes"])
+        ):
             model.conflicts.append(Conflict(
                 what=f"{route.key} is called by {who(route.from_)} but no backend route serves it",
                 evidence=route.from_ + complete["routes"],
             ))  # fmt: skip
     for table in model.tables:
-        if complete["tables"] and table.basis == "declared":
+        if (
+            complete["tables"]
+            and table.basis == "declared"
+            and not set(table.from_) & set(complete["tables"])
+        ):
             model.conflicts.append(Conflict(
                 what=f"table {table.name} is queried by {who(table.from_)} but no model declares it",
                 evidence=table.from_ + complete["tables"],

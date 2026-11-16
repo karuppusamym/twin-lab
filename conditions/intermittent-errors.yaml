@@ -1,0 +1,10 @@
+id: intermittent-errors
+description: One save in ten fails with 503; reads are fine.
+calibration: estimate
+calibrated_from: "illustrative"
+seed: 13
+targets:
+  - app: any
+    faults:
+      - {match: "POST *", status: 503, rate: 0.1}
+      - {match: "PUT *", status: 503, rate: 0.1}

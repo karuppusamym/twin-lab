@@ -90,6 +90,9 @@ class Result:
     gaps: list[Gap] = field(default_factory=list)
     notes: list[Gap] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
+    unbound: dict[str, str] = field(
+        default_factory=dict
+    )  # argument -> web | api | db, used as an address
 
 
 # --- reading XAML safely -----------------------------------------------------------------------
@@ -363,8 +366,15 @@ class _Walker:
             return
         self.goto(browser, argument(el, "Url"), env, where)
 
+    def head(self, parts: list[Part], kind: str) -> None:
+        """Remember an argument used as the start of an address, so bindings can be proposed."""
+        if parts and parts[0].kind == "var":
+            self.result.unbound.setdefault(parts[0].value, kind)
+
     def goto(self, browser: Browser, raw: str | None, env: dict, where: str) -> None:
-        target, path, problem = split_address(vb.resolve(vb.parse(raw), env))
+        parts = vb.resolve(vb.parse(raw), env)
+        self.head(parts, "web")
+        target, path, problem = split_address(parts)
         if problem:
             self.gap(where, problem)
         if target and target[1] != "web":
@@ -415,7 +425,9 @@ class _Walker:
     # -- api --
 
     def http(self, el: ET.Element, env: dict, where: str) -> None:
-        target, path, problem = split_address(vb.resolve(vb.parse(argument(el, "EndPoint")), env))
+        parts = vb.resolve(vb.parse(argument(el, "EndPoint")), env)
+        self.head(parts, "api")
+        target, path, problem = split_address(parts)
         if problem:
             self.gap(where, problem)
         if not target:
@@ -433,6 +445,7 @@ class _Walker:
     def query(self, el: ET.Element, env: dict, where: str) -> None:
         conn = vb.resolve(vb.parse(argument(el, "ConnectionString")), env)
         conn = conn or vb.resolve(vb.parse(argument(el, "ExistingDbConnection")), env)
+        self.head(conn, "db")
         if len(conn) != 1 or conn[0].kind != "bind":
             self.gap(where, "database connection is not bound to an application")
             return
@@ -509,3 +522,36 @@ def analyse(
         )
     walker.result.touches = walker.touches()
     return walker.result
+
+
+CREDENTIAL_HINTS = (("password", "password"), ("passwd", "password"), ("pwd", "password"),
+                    ("user", "username"), ("login", "username"))  # fmt: skip
+
+
+def suggest_bindings(
+    project_dir: Path, app: str, entry: str | None = None, known: dict[str, str] | None = None
+) -> dict[str, str]:
+    """Bindings proposed for a project that runs against one app: every argument used as the start
+    of an address, and user and password arguments by name. A person reviews them."""
+    known = dict(known or {})
+    first = analyse(project_dir, entry, known)
+    proposed = {
+        arg: "{{" + f"{app}.{kind}" + "}}"
+        for arg, kind in first.unbound.items()
+        if arg not in known
+    }
+    main = Path(project_dir) / (entry or "Main.xaml")
+    if main.exists():
+        for prop in safe_parse(main).iter(f"{{{X_NS}}}Property"):
+            name = prop.get("Name") or ""
+            if (
+                name in known
+                or name in proposed
+                or not (prop.get("Type") or "").startswith("InArgument")
+            ):
+                continue
+            for hint, field_name in CREDENTIAL_HINTS:
+                if hint in name.lower():
+                    proposed[name] = "{{" + f"{app}.credentials.{field_name}" + "}}"
+                    break
+    return {**known, **proposed}

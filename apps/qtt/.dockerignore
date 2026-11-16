@@ -1,0 +1,8 @@
+**/__pycache__
+**/*.pyc
+pages/
+BRIEF.md
+BUILD-NOTES.md
+model.yaml
+behaviours.json
+app.yaml

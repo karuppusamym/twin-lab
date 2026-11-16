@@ -1,0 +1,12 @@
+id: peak-hour
+description: Busy morning. Every request slower, searches much slower; database under load.
+calibration: estimate
+calibrated_from: "bot support: searches take 5 to 20 seconds after 10 a.m. (estimate, to replace with robot-log figures)"
+seed: 11
+targets:
+  - app: any
+    http:
+      - {match: "GET */search*", latency_ms: {p50: 5000, p95: 15000}}
+      - {match: "* /api/*", latency_ms: {p50: 1200, p95: 4000}}
+      - {match: "*", latency_ms: {p50: 300, p95: 900}}
+    db: {latency_ms: 80, jitter_ms: 40}

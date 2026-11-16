@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Case Workbench</title>
+    <script type="module" crossorigin="" src="/assets/index-HYuJWd3h.js"></script>
+    <link rel="stylesheet" crossorigin="" href="/assets/index-DVdU0Z7I.css">
+  </head>
+  <body>
+    <div id="root"><header class="topbar"><a class="brand" href="/cases">Case Workbench</a><nav><a id="navCases" href="/cases">Cases</a></nav><span class="who"><span id="currentUser">Demo User</span><button type="button" id="btnLogout" class="link">Sign out</button></span></header><main><p><a id="backToSearch" href="/cases">← Back to search</a></p><h1>Case <span id="fCaseNo">C-1001</span> <span id="fStatus" class="pill s-IN_PROGRESS">IN_PROGRESS</span></h1><p id="fTitle" class="lead">Statement shows duplicate charge</p><div class="columns"><section class="card"><h2>Customer</h2><dl><dt>Name</dt><dd id="fCustomerName">Ben Okafor</dd><dt>Customer no.</dt><dd id="fCustNo">CU-2004</dd><dt>Email</dt><dd id="fEmail">ben.okafor4@example.test</dd><dt>Phone</dt><dd id="fPhone">+44 20 7946 0245</dd><dt>City</dt><dd id="fCity">Cork</dd><dt>Priority</dt><dd id="fPriority">LOW</dd><dt>Category</dt><dd id="fCategory">Payments / Refund</dd></dl></section><section class="card"><h2>Update case</h2><form id="updateForm"><label for="category">Category</label><select id="category" name="category"><option value="">Select…</option><option value="1" selected="">Cards</option><option value="4">Customer profile</option><option value="3">Online access</option><option value="2">Payments</option></select><label for="subcategory">Sub-category</label><select id="subcategory" name="subcategory"><option value="">Select…</option><option value="1" selected="">Declined payment</option><option value="2">Lost or stolen</option></select><label for="caseStatus">Status</label><select id="caseStatus" name="caseStatus"><option value="OPEN">OPEN</option><option value="IN_PROGRESS" selected="">IN_PROGRESS</option><option value="ESCALATED">ESCALATED</option><option value="RESOLVED">RESOLVED</option></select><button id="btnSave" type="submit">Save</button></form></section></div><section class="card"><h2>Notes</h2><p id="noNotes" class="muted">No notes yet</p><form id="noteForm"><label for="noteText">Add a note</label><textarea id="noteText" name="noteText" rows="3" value=""></textarea><div class="row"><button id="btnAddNote" type="submit" disabled="">Add note</button><span id="noteCount" class="muted">0 / 500</span></div></form></section></main></div>
+  
+
+</body></html>

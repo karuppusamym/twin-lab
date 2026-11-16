@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Readiness · Twin Lab{% endblock %}
+{% block content %}
+<h1>Readiness</h1>
+<p class="lead">Can each automation work against the demo apps as built? READY means every screen step, route and table it uses was found. BLOCKED lists what is missing.</p>
+<div class="card scroll">
+  <table>
+    <thead><tr><th>Automation</th>{% for app in apps %}<th>{{ app }}</th>{% endfor %}<th>Verdict</th><th>Checked items</th></tr></thead>
+    <tbody>
+    {% for a in automations %}
+      {% set v = verdicts.get(a.id) %}
+      <tr>
+        <td><a href="/automations/{{ a.id }}">{{ a.id }}</a></td>
+        {% for app in apps %}
+          <td>{% if app in a.apps() %}
+            {% set failed = (v.items if v else []) | selectattr("app", "equalto", app) | selectattr("status", "equalto", "failed") | list %}
+            {% if not v %}<span class="pill">not checked</span>{% elif failed %}<span class="pill err">{{ failed | length }} missing</span>{% else %}<span class="pill ok">ok</span>{% endif %}
+          {% else %}-{% endif %}</td>
+        {% endfor %}
+        <td>{% if v %}<span class="pill {{ 'ok' if v.verdict == 'READY' else 'err' }}">{{ v.verdict }}</span>{% else %}<span class="pill">-</span>{% endif %}</td>
+        <td class="small">{% if v %}{% for k, n in v.checked_basis.items() %}{{ n }} {{ k }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="{{ apps | length + 3 }}" class="muted">No automation registered yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<form method="post" action="/mapping/run"><button type="submit">Check all now</button></form>
+<p class="small muted">Checks need the apps to be running. <b>observed</b> items were seen in a recording or real code; <b>declared</b> items are known only from the automation itself, so passing them proves less.</p>
+{% endblock %}

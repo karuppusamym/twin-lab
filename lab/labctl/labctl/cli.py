@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import typer
 import yaml
 from pydantic import ValidationError
 
-from labctl import brief as brief_mod
+from labctl import bindings as bindings_mod
+from labctl import conformance as conformance_mod
 from labctl import demand as demand_report
-from labctl import repo
+from labctl import evidence_cli, factory, repo
+from labctl import lab as lab_mod
 from labctl.analyse import uipath
+from labctl.behaviour import cli as behaviour_cli
+from labctl.bindings import BindingError
+from labctl.botlog import cli as botlog_cli
+from labctl.data import cli as data_cli
+from labctl.devin import cli as devin_cli
 from labctl.models import KINDS, Automation
+from labctl.realdata import cli as realdata_cli
 from labctl.source import UnsupportedStack
 from labctl.source import sqlalchemy_models as sam
 
@@ -181,69 +190,44 @@ def brief(
 ) -> None:
     """Write apps/<app>/model.yaml, BRIEF.md, db/schema.sql and a first app.yaml from the evidence."""
     root = _root()
-    automations = [a for a in _automations() if any(t.app == app_id for t in a.touches)]
-    flows = _flows(app_id)
-    if not automations and not flows:
-        typer.echo(
-            f"no registered automation or requested flow needs '{app_id}'; nothing to build",
-            err=True,
-        )
-        raise typer.Exit(1)
     if source is not None and not source.is_dir():
         typer.echo(f"source folder not found: {source}", err=True)
         raise typer.Exit(2)
     if db_engine is not None and db_engine not in sam.ENGINES:
         typer.echo(f"unknown --db-engine; one of {', '.join(sam.ENGINES)}", err=True)
         raise typer.Exit(2)
-    out = root / "apps" / app_id
-    model_file, brief_file = out / "model.yaml", out / "BRIEF.md"
-    schema_file, app_file = out / "db" / "schema.sql", out / "app.yaml"
-    if (brief_file.exists() or schema_file.exists() or model_file.exists()) and not force:
-        typer.echo(f"{out} already has a brief; --force replaces it", err=True)
-        raise typer.Exit(1)
+    found = factory.discover(root, app_id)
+    if found.kinds():
+        typer.echo("evidence: " + ", ".join(f"{len(getattr(found, k))} {k}" for k in found.kinds()))
     try:
-        result = brief_mod.build(
+        done = factory.generate(
+            root,
             app_id,
             system or (source.resolve().name if source else app_id),
-            automations=automations,
-            flows=flows,
-            source=source,
-            repo_root=root,
-            db_engine=db_engine,
+            source,
+            db_engine,
+            force,
         )
+    except factory.FactoryError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
     except UnsupportedStack as exc:
         typer.echo(f"UNSUPPORTED  {exc}", err=True)
         raise typer.Exit(2) from exc
-    schema_file.parent.mkdir(parents=True, exist_ok=True)
-    model_file.write_text(
-        yaml.safe_dump(
-            result.model.model_dump(mode="json", by_alias=True, exclude_none=True),
-            sort_keys=False,
-            width=100,
-        ),
-        encoding="utf-8",
-    )
-    brief_file.write_text(brief_mod.render(result, root), encoding="utf-8")
-    schema_file.write_text(brief_mod.schema(result, root), encoding="utf-8")
-    if app_file.exists():
-        typer.echo(f"kept existing {app_file}; rules in the brief may differ from it")
-    else:
-        app_file.write_text(
-            yaml.safe_dump(brief_mod.app_yaml(result, root), sort_keys=False, width=100),
-            encoding="utf-8",
+    result = done.brief
+    if done.kept_app_yaml:
+        typer.echo(
+            f"kept existing {root / 'apps' / app_id / 'app.yaml'}; rules in the brief may differ from it"
         )
     typer.echo(
         f"{app_id}: {len(result.screens)} screen(s), {len(result.routes)} route(s), "
         f"{len(result.tables)} table(s) in scope; "
         f"left out {len(result.out_screens)} screen(s), {len(result.out_routes)} route(s), "
-        f"{len(result.out_tables)} table(s)"
+        f"{len(result.out_tables)} table(s); mode {result.mode}"
     )
     for gap in result.gaps:
         typer.echo(f"  OPEN  {gap}")
-    typer.echo(
-        f"wrote {model_file.relative_to(root)}, {brief_file.relative_to(root)}, "
-        f"{schema_file.relative_to(root)}"
-    )
+    typer.echo("wrote " + ", ".join(str(p.relative_to(root)) for p in done.files))
 
 
 @app_app.command("list")
@@ -266,3 +250,122 @@ def condition_list() -> None:
 
 if __name__ == "__main__":
     app()
+
+
+# --- lab, bindings, conformance ------------------------------------------------------------------
+
+lab_app = typer.Typer(no_args_is_help=True, help="Run demo apps in the lab (Docker Compose).")
+app.add_typer(lab_app, name="lab")
+app.add_typer(evidence_cli.app, name="evidence", help="Analyse and record evidence.")
+app.add_typer(realdata_cli.app, name="realdata", help="Slice, mask and load real data (read-only).")
+app.add_typer(
+    botlog_cli.app, name="botlog", help="Robot logs, NetLog, bot traces, calibration, parity."
+)
+app.add_typer(behaviour_cli.app, name="behaviour", help="Behaviour catalog and fidelity replay.")
+data_app.registered_commands.extend(
+    data_cli.app.registered_commands
+)  # template, validate, generate
+app.add_typer(devin_cli.app, name="devin", help="Build apps with Devin: package, start, status.")
+
+
+def _automation(automation_id: str) -> Automation:
+    path = _root() / "automations" / automation_id / "automation.yaml"
+    model, problems = repo.load(path, "automation")
+    if model is None:
+        for problem in problems:
+            typer.echo(str(problem), err=True)
+        raise typer.Exit(1)
+    return model
+
+
+@lab_app.command("up")
+def lab_up(
+    app_id: str,
+    no_build: bool = typer.Option(False, "--no-build", help="Use the images already built."),
+) -> None:
+    """Start an app with its database and lab agent; waits until healthy."""
+    try:
+        lab_mod.up(_root(), app_id, build=not no_build)
+        state = lab_mod.status(_root(), app_id)
+    except (lab_mod.LabError, BindingError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{app_id}: {'running' if state.running else 'NOT running'} {state.services}")
+    if state.health is not None:
+        typer.echo(f"  health {state.health}")
+
+
+@lab_app.command("down")
+def lab_down(
+    app_id: str, wipe: bool = typer.Option(False, "--wipe", help="Delete its database too.")
+) -> None:
+    """Stop an app's lab."""
+    try:
+        lab_mod.down(_root(), app_id, wipe)
+    except (lab_mod.LabError, BindingError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{app_id}: stopped" + (" and wiped" if wipe else ""))
+
+
+@lab_app.command("status")
+def lab_status(app_id: str) -> None:
+    """Containers and health of an app's lab."""
+    state = lab_mod.status(_root(), app_id)
+    typer.echo(f"{app_id}: {'running' if state.running else 'not running'} {state.services or ''}")
+    if state.health is not None:
+        typer.echo(f"  health {state.health}")
+    if state.error:
+        typer.echo(f"  {state.error}")
+
+
+@app.command()
+def bindings(
+    automation_id: str,
+    form: str = typer.Option(
+        "json", help="json (ATS_BINDINGS), env, uipath (input arguments) or yaml."
+    ),
+) -> None:
+    """What an automation needs to run against the lab: addresses, test sign-in, inputs."""
+    auto = _automation(automation_id)
+    try:
+        b = bindings_mod.for_automation(_root(), auto)
+        typer.echo(bindings_mod.render(auto, b, form))
+    except BindingError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def conformance(
+    automation_id: str,
+    as_json: bool = typer.Option(False, "--json", help="Print the report as JSON."),
+) -> None:
+    """Check an automation against the running demo apps: READY or BLOCKED."""
+    report = conformance_mod.check(_root(), _automation(automation_id))
+    typer.echo(
+        json.dumps(report.to_dict(), indent=2) if as_json else conformance_mod.render(report)
+    )
+    if report.verdict != "READY":
+        raise typer.Exit(1)
+
+
+@app.command()
+def portal(
+    host: str = typer.Option(
+        "127.0.0.1", help="0.0.0.0 to let colleagues reach it (set a password)."
+    ),
+    port: int = typer.Option(8790),
+) -> None:
+    """Start the Twin Lab portal (web page) for this repository."""
+    import uvicorn
+
+    from labctl.portal.app import create_app
+
+    if host not in ("127.0.0.1", "localhost") and not os.environ.get("TWINLAB_PORTAL_PASSWORD"):
+        typer.echo(
+            "Refusing to listen beyond this machine without TWINLAB_PORTAL_PASSWORD set.", err=True
+        )
+        raise typer.Exit(2)
+    typer.echo(f"Twin Lab portal on http://{host}:{port}  (repository {_root()})")
+    uvicorn.run(create_app(_root()), host=host, port=port, log_level="warning")

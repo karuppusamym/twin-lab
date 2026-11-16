@@ -1,0 +1,5 @@
+[
+  {"case_no": "C-1001", "category": "Cards", "subcategory": "Declined payment", "select#caseStatus": "ESCALATED"},
+  {"case_no": "C-1005", "category": "Online access", "subcategory": "Locked out", "select#caseStatus": "ESCALATED"},
+  {"case_no": "C-1013", "category": "Payments", "subcategory": "Delayed", "select#caseStatus": "IN_PROGRESS"}
+]

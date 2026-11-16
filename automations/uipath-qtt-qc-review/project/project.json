@@ -1,0 +1,23 @@
+{
+  "name": "QttQcReview",
+  "description": "Signs in to QTT as an analyst, finds an OPEN loan QC review in the work queue, answers every checklist item (one Fail with a comment), submits it, confirms the status through the API and reads the audit trail. Hand-authored to follow the Studio layout; never opened in Studio or run by a robot.",
+  "main": "Main.xaml",
+  "projectVersion": "1.0.0",
+  "studioVersion": "24.10.0",
+  "expressionLanguage": "VisualBasic",
+  "targetFramework": "Windows",
+  "dependencies": {
+    "UiPath.System.Activities": "[24.10.0]",
+    "UiPath.UIAutomation.Activities": "[24.10.0]",
+    "UiPath.WebAPI.Activities": "[1.20.0]",
+    "UiPath.Database.Activities": "[1.9.0]"
+  },
+  "entryPoints": [
+    {
+      "filePath": "Main.xaml",
+      "uniqueId": "5b1f0c2e-7a43-4c1e-9d0a-3f2b8e6a9c11",
+      "input": [],
+      "output": []
+    }
+  ]
+}

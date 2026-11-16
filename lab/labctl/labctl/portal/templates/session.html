@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Session · Twin Lab{% endblock %}
+{% block content %}
+<p class="small"><a href="/apps/{{ app_id }}#sessions">← {{ app_id }}</a></p>
+<h1>{{ s.label or s.session_id }}</h1>
+{% set sm = s.summary or {} %}
+<p class="lead">{{ s.automation or "automation not given" }} · {{ s.started }} → {{ s.ended or "running" }} ·
+  condition {{ (s.apps[0].condition if s.apps else "") or "normal" }} · data {{ (s.apps[0].data_pack if s.apps else "") or "baseline" }}</p>
+
+<div class="steps">
+  <div class="step"><b>{{ sm.requests }}</b><span>requests</span></div>
+  <div class="step"><b>{{ sm.wall_s }} s</b><span>start to stop</span></div>
+  <div class="step"><b>{{ sm.waiting_on_app_s }} s</b><span>waiting on the app (incl. added delay)</span></div>
+  <div class="step"><b>{{ sm.errors }}</b><span>errors (5xx or injected faults)</span></div>
+  <div class="step"><b>{{ s.changes | length }}</b><span>rows changed</span></div>
+</div>
+
+<div class="card">
+  <h2>Rows changed</h2>
+  {% if s.changes %}
+  <div class="scroll"><table class="small"><thead><tr><th>Table</th><th>Change</th><th>Key</th><th>Columns</th></tr></thead><tbody>
+  {% for c in s.changes %}<tr><td><code>{{ c.table }}</code></td><td>{{ c.op }}</td><td><code>{{ c.key }}</code></td><td>{{ (c.columns or []) | join(", ") }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="muted">Nothing changed in the database.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Requests</h2>
+  {% set maxms = (s.requests | map(attribute='app_ms') | list + s.requests | map(attribute='injected_ms') | list + [1]) | max %}
+  <div class="scroll"><table class="small"><thead><tr><th>Time</th><th>Request</th><th>Status</th><th>App</th><th>Added delay</th><th></th></tr></thead><tbody>
+  {% for r in s.requests %}
+    <tr><td>{{ r.ts[11:23] }}</td><td><code>{{ r.method }} {{ r.path }}</code></td>
+      <td><span class="pill {{ 'err' if r.status >= 500 else 'warn' if r.status >= 400 else 'ok' }}">{{ r.status }}</span></td>
+      <td>{{ r.app_ms }} ms</td><td>{{ r.injected_ms }} ms</td>
+      <td style="min-width:140px"><span class="bar" style="width:{{ (120 * r.app_ms / maxms) | round(0, 'ceil') | int + 1 }}px"></span><span class="bar injected" style="width:{{ (120 * r.injected_ms / maxms) | round(0, 'ceil') | int }}px"></span></td></tr>
+  {% else %}<tr><td colspan="6" class="muted">No requests reached the app.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="small muted"><span class="bar"></span> time in the app · <span class="bar injected"></span> delay added by the condition. Added delay is never counted as the app's own speed.</p>
+</div>
+{% endblock %}
