@@ -30,6 +30,8 @@ from labctl import bindings as bnd
 from labctl import conformance as conf
 from labctl import factory, repo
 from labctl import lab as lab_mod
+from labctl import packs as packs_mod
+from labctl import verdict as verdict_mod
 from labctl.analyse import run as analysis
 from labctl.analyse import uipath
 from labctl.appmodel import Flow
@@ -540,6 +542,7 @@ def create_app(root: Path) -> FastAPI:
             else None
         )
         lab_info = sessions = current_condition = None
+        baselines: list = []
         if status and status.running:
             try:
                 agent = lab_mod.agent(root, app_id)
@@ -548,8 +551,9 @@ def create_app(root: Path) -> FastAPI:
                     agent.sessions(),
                     agent.condition(),
                 )
+                baselines = agent.baselines()
             except lab_mod.LabError as exc:
-                lab_info = {"error": str(exc)}
+                lab_info = lab_info or {"error": str(exc)}
         try:
             cfg = devin()
             devin_ok, devin_list = (
@@ -566,6 +570,7 @@ def create_app(root: Path) -> FastAPI:
             app_id=app_id,
             app=model,
             evidence=ev,
+            replayable=[p.name for p in ev.recordings if (p / "steps.jsonl").exists()],
             has_brief=(folder / "BRIEF.md").exists(),
             built=(folder / "Dockerfile").exists(),
             needed_by=[a.id for a in factory.automations(root, app_id)],
@@ -573,6 +578,8 @@ def create_app(root: Path) -> FastAPI:
             status=status,
             lab_info=lab_info,
             sessions=sessions,
+            baselines=baselines,
+            packs=[p.to_dict() for p in packs_mod.listing(root, app_id)],
             condition=current_condition,
             conditions=[c for c in conditions() if condition_for(c, app_id)],
             automations=factory.automations(root, app_id),
@@ -661,8 +668,24 @@ def create_app(root: Path) -> FastAPI:
         return back(f"/apps/{app_id}#evidence", f"Removed {path}")
 
     @portal.post("/apps/{app_id}/record")
-    def record(request: Request, app_id: str, url: str = Form(...), name: str = Form(...)):
+    def record(
+        request: Request,
+        app_id: str,
+        name: str = Form(...),
+        url: str = Form(""),
+        cdp: str = Form(""),
+        minutes: float = Form(30),
+    ):
         app_id = slug(app_id, "app id")
+        cdp = cdp.strip()
+        if cdp and not re.match(r"^https?://(127\.0\.0\.1|localhost|\[::1\]):\d{2,5}/?$", cdp):
+            return back(
+                f"/apps/{app_id}#evidence",
+                "Attach only to a browser on this machine, e.g. http://127.0.0.1:9222",
+                "error",
+            )
+        if not cdp and not url.strip():
+            return back(f"/apps/{app_id}#evidence", "Give a start address", "error")
         client = request.client.host if request.client else ""
         if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
             return back(
@@ -676,18 +699,42 @@ def create_app(root: Path) -> FastAPI:
         if target.exists():
             return back(f"/apps/{app_id}#evidence", f"{target.name} already exists", "error")
 
+        stop_flag = state / "record-stop" / f"{app_id}--{target.name}"
+
         def job(log):
             from labctl import recorder
 
-            print(
-                f"A browser window opens on this machine at {url}. Go through the flow, then close the window."
-            )
-            recorder.record(url, target, headless=False)
+            limit = max(1.0, min(minutes, 240.0)) * 60
+            if cdp:
+                print(
+                    f"Recording the browser at {cdp}. Run the flow (or the robot) now. "
+                    "Press Stop recording on the app page, or close that browser, to finish."
+                )
+                stop_flag.unlink(missing_ok=True)
+                try:
+                    recorder.attach(cdp, target, max_seconds=limit, stop=stop_flag.exists)
+                finally:
+                    stop_flag.unlink(missing_ok=True)
+            else:
+                print(
+                    f"A browser window opens on this machine at {url}. Go through the flow, then close the window."
+                )
+                recorder.record(url, target, headless=False, max_seconds=limit)
             print(f"Saved to evidence/{app_id}/{target.name}")
             return {"recording": target.name}
 
         job_id = jobs.submit("record", f"Record a flow of {app_id}", job, app_id)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @portal.post("/apps/{app_id}/record/stop")
+    def record_stop(app_id: str, name: str = Form(...)):
+        app_id = slug(app_id, "app id")
+        flag = state / "record-stop" / f"{app_id}--{slug(name, 'recording name')}"
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        flag.touch()
+        return back(
+            f"/apps/{app_id}#evidence", f"Stopping the recording {name}; it is saved in a moment"
+        )
 
     @portal.post("/apps/{app_id}/brief")
     def make_brief(
@@ -849,6 +896,66 @@ def create_app(root: Path) -> FastAPI:
         job_id = jobs.submit("lab", f"{title} {app_id}", job, app_id)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
+    # fidelity replay: a recording of the real application, replayed against the demo app
+
+    def fidelity_dir(app_id: str) -> Path:
+        return state / "fidelity" / app_id
+
+    @portal.post("/apps/{app_id}/fidelity")
+    def fidelity_start(app_id: str, recording: str = Form(...), values: str = Form("")):
+        app_id = slug(app_id, "app id")
+        model = app_model(app_id)
+        if model is None or model.lab is None:
+            return back(f"/apps/{app_id}#lab", "The app has no lab ports yet", "error")
+        folder = factory.evidence_dir(root, app_id) / slug(recording, "recording")
+        if not (folder / "steps.jsonl").exists():
+            return back(
+                f"/apps/{app_id}#lab", f"{recording} is not a recording with steps", "error"
+            )
+        typed: dict[str, str] = {}
+        for line in values.splitlines():
+            sel, sep, val = line.partition("=")
+            if sep and sel.strip():
+                typed[sel.strip()] = val.strip()
+        creds = model.lab.credentials
+        base_url = f"http://127.0.0.1:{model.lab.port}"
+
+        def job(log):
+            from datetime import UTC, datetime
+
+            from labctl.behaviour import fidelity
+
+            given = dict(typed)
+            for sel in ("input[type=password]", "input#password", 'input[name="password"]'):
+                if creds.get("password"):
+                    given.setdefault(sel, creds["password"])
+            print(f"Replaying {folder.name} against {base_url} ...")
+            report = fidelity.replay(folder, base_url, given)
+            out = fidelity_dir(app_id)
+            out.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            name = f"{folder.name}--{stamp}"
+            (out / f"{name}.md").write_text(report.markdown(), encoding="utf-8", newline="\n")
+            (out / f"{name}.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
+            failed = sum(1 for s in report.steps if s.status == "fail")
+            print(f"Result: {report.status.upper()} ({len(report.steps)} steps, {failed} failed)")
+            print(f"Report: /apps/{app_id}/fidelity/{name}")
+            return {"status": report.status, "report": f"/apps/{app_id}/fidelity/{name}"}
+
+        job_id = jobs.submit("fidelity", f"Fidelity replay of {folder.name}", job, app_id)
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @portal.get("/apps/{app_id}/fidelity/{name}", response_class=HTMLResponse)
+    def fidelity_report(request: Request, app_id: str, name: str):
+        app_id = slug(app_id, "app id")
+        if not re.match(r"^[a-z0-9][a-z0-9-]*--\d{8}T\d{6}Z$", name):
+            raise HTTPException(404)
+        path = fidelity_dir(app_id) / f"{name}.md"
+        if not path.exists():
+            raise HTTPException(404)
+        return page(request, "report.html", title=f"Fidelity: {name.split('--')[0]}",
+                    html=md.render(path.read_text(encoding="utf-8")), back=f"/apps/{app_id}#lab")  # fmt: skip
+
     # data
 
     @portal.get("/apps/{app_id}/data/template")
@@ -943,6 +1050,46 @@ def create_app(root: Path) -> FastAPI:
             return back(f"/apps/{app_id}#data", str(exc), "error")
         raise HTTPException(404)
 
+    @portal.post("/apps/{app_id}/packs/save")
+    def pack_save(app_id: str, name: str = Form(...)):
+        app_id = slug(app_id, "app id")
+        try:
+            info = packs_mod.save_from_lab(root, app_id, name.strip().lower())
+        except (packs_mod.PackError, lab_mod.LabError) as exc:
+            return back(f"/apps/{app_id}#data", str(exc), "error")
+        return back(
+            f"/apps/{app_id}#data", f"Saved pack {info.name}: {_counts({'counts': info.counts})}"
+        )
+
+    @portal.post("/apps/{app_id}/packs/{name}/{action}")
+    def pack_action(app_id: str, name: str, action: str):
+        app_id = slug(app_id, "app id")
+        try:
+            if action == "use":
+                reply = packs_mod.load_into_lab(root, app_id, name)
+                return back(f"/apps/{app_id}#data", f"Loaded pack {name}: {_counts(reply)}. It is now the baseline.")  # fmt: skip
+            if action == "delete":
+                packs_mod.delete(root, app_id, name)
+                return back(f"/apps/{app_id}#data", f"Deleted pack {name}")
+        except (packs_mod.PackError, lab_mod.LabError) as exc:
+            return back(f"/apps/{app_id}#data", str(exc), "error")
+        raise HTTPException(404)
+
+    @portal.post("/apps/{app_id}/baselines/{baseline_id}/{action}")
+    def baseline_action(app_id: str, baseline_id: str, action: str, pinned: str = Form("")):
+        app_id = slug(app_id, "app id")
+        agent = lab_mod.agent(root, app_id)
+        try:
+            if action == "restore":
+                reply = agent.restore_baseline(baseline_id)
+                return back(f"/apps/{app_id}#data", f"Restored the baseline: {_counts(reply)}")
+            if action == "pin":
+                agent.pin_baseline(baseline_id, bool(pinned))
+                return back(f"/apps/{app_id}#data", "Pinned" if pinned else "Unpinned")
+        except lab_mod.LabError as exc:
+            return back(f"/apps/{app_id}#data", str(exc), "error")
+        raise HTTPException(404)
+
     # conditions
 
     @portal.post("/apps/{app_id}/condition")
@@ -997,12 +1144,39 @@ def create_app(root: Path) -> FastAPI:
 
     @portal.get("/apps/{app_id}/sessions/{session_id}", response_class=HTMLResponse)
     def session_page(request: Request, app_id: str, session_id: str):
+        app_id = slug(app_id, "app id")
         try:
-            session = lab_mod.agent(root, slug(app_id, "app id")).session(session_id)
+            verdict, session, auto = verdict_mod.for_session(root, app_id, session_id)
         except lab_mod.LabError as exc:
             raise HTTPException(404, str(exc)) from exc
         others = [s for s in _session_list(app_id) if s.get("session_id") != session_id]
-        return page(request, "session.html", app_id=app_id, s=session, others=others)
+        unexpected = {(c["table"], c["op"], c["key"]): c["why"] for c in verdict.unexpected}
+        try:
+            tables_used = (lab_mod.agent(root, app_id).session_detail(session_id) or {}).get(
+                "tables_used"
+            )
+        except lab_mod.LabError:
+            tables_used = None
+        return page(
+            request, "session.html", app_id=app_id, s=session, others=others,
+            verdict=verdict.to_dict(), verdict_automation=auto, unexpected=unexpected,
+            tables_used=tables_used,
+        )  # fmt: skip
+
+    @portal.post("/apps/{app_id}/sessions/{session_id}/accept")
+    def session_accept(app_id: str, session_id: str, replace: str = Form("")):
+        app_id = slug(app_id, "app id")
+        url = f"/apps/{app_id}/sessions/{session_id}"
+        try:
+            session, changes = verdict_mod.session_changes(lab_mod.agent(root, app_id), session_id)
+            auto = session.get("automation")
+            if not auto:
+                return back(url, "The session names no automation", "error")
+            expects = verdict_mod.accept(root, slug(auto, "automation"), changes, bool(replace))
+        except (lab_mod.LabError, ValueError) as exc:
+            return back(url, str(exc), "error")
+        said = "; ".join(f"{e.table}: {', '.join(e.ops)}" for e in expects) or "no row changes"
+        return back(url, f"automations/{auto}/automation.yaml now expects {said}")
 
     @portal.get("/apps/{app_id}/compare", response_class=HTMLResponse)
     def compare(request: Request, app_id: str, a: str, b: str):

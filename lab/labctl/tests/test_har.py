@@ -443,7 +443,9 @@ def test_live_recording_of_the_showcase_gives_the_same_screens_and_routes(tmp_pa
     out = record(f"{BASE}/login", tmp_path / "live", script=showcase_flow, headless=True)
     steps = [json.loads(line) for line in (out / "steps.jsonl").read_text().splitlines()]
     assert {s["action"] for s in steps} >= {"goto", "type", "click", "select", "submit"}
-    assert all(set(s) == {"seq", "ts", "url", "action", "selector", "dom"} for s in steps)
+    base = {"seq", "ts", "url", "action", "selector", "dom"}
+    extra = {"dom_before", "screenshot", "typed_shape"}  # never "value": typed text is not kept
+    assert all(base <= set(s) <= base | extra for s in steps)
     assert not any(
         "workbench-demo" in p.read_text(encoding="utf-8") for p in (out / "dom").iterdir()
     )

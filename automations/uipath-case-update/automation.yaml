@@ -105,6 +105,19 @@ test_inputs:
   in_Category: Payments
   in_Subcategory: Refund
   in_NoteText: Checked by the conformance run
+expects:
+- table: case_audit
+  ops:
+  - insert
+  columns: []
+- table: cases
+  ops:
+  - update
+  columns:
+  - category_id
+  - status
+  - subcategory_id
+  - updated_at
 analysis:
   by: uipath-analyser@0.1.0
   gaps: []

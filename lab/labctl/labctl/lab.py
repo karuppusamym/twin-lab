@@ -352,11 +352,22 @@ class Agent:
     def data(self):
         return self._call("GET", "/_lab/data")
 
-    def load(self, rows: dict, label: str):
-        return self._call("POST", "/_lab/data/load", json={"rows": rows, "label": label})
+    def load(self, rows: dict, label: str, pack: str | None = None):
+        body = {"rows": rows, "label": label, **({"pack": pack} if pack else {})}
+        return self._call("POST", "/_lab/data/load", json=body)
 
-    def baseline(self):
-        return self._call("POST", "/_lab/data/baseline")
+    def baseline(self, label: str | None = None, pack: str | None = None):
+        body = {k: v for k, v in (("label", label), ("pack", pack)) if v}
+        return self._call("POST", "/_lab/data/baseline", json=body)
+
+    def baselines(self):
+        return self._call("GET", "/_lab/baselines")
+
+    def restore_baseline(self, baseline_id: str):
+        return self._call("POST", f"/_lab/baselines/{baseline_id}/restore")
+
+    def pin_baseline(self, baseline_id: str, pinned: bool = True):
+        return self._call("POST", f"/_lab/baselines/{baseline_id}/pin", json={"pinned": pinned})
 
     def reset(self):
         return self._call("POST", "/_lab/reset")
@@ -380,6 +391,9 @@ class Agent:
 
     def session(self, session_id: str):
         return self._call("GET", f"/_lab/sessions/{session_id}")
+
+    def session_detail(self, session_id: str):
+        return self._call("GET", f"/_lab/sessions/{session_id}/detail")
 
 
 def agent(root: Path, app_id: str, host: str | None = None) -> Agent:

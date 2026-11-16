@@ -115,17 +115,48 @@ def record(
     out: Path | None = typer.Option(
         None, "--out", help="Recording folder (default evidence/<app>/<timestamp>/)."
     ),
+    no_screenshots: bool = typer.Option(False, "--no-screenshots", help="Skip the PNG per step."),
 ) -> None:
     """Open a browser; click through the flow, then close the window to finish the recording."""
     from labctl import recorder
 
-    if out is None:
-        try:
-            root = repo.find_root()
-        except repo.NotARepo:
-            root = Path.cwd()
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        out = root / "evidence" / app_id / stamp
+    out = out or _default_out(app_id)
     typer.echo(f"recording into {out}; close the browser window to finish")
-    recorder.record(url, out)
+    recorder.record(url, out, screenshots=not no_screenshots)
+    typer.echo(f"done: analyse it with `labctl evidence analyse {app_id} {out}`")
+
+
+def _default_out(app_id: str) -> Path:
+    try:
+        root = repo.find_root()
+    except repo.NotARepo:
+        root = Path.cwd()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return root / "evidence" / app_id / stamp
+
+
+@app.command()
+def attach(
+    app_id: str = typer.Argument(..., metavar="APP"),
+    cdp: str = typer.Option(
+        "http://127.0.0.1:9222",
+        "--cdp",
+        help="The running browser's debugging address. Start Chrome or Edge with "
+        "--remote-debugging-port=9222 (and its own --user-data-dir).",
+    ),
+    out: Path | None = typer.Option(None, "--out", help="Recording folder."),
+    minutes: float = typer.Option(30, "--minutes", help="Stop after this long."),
+    no_screenshots: bool = typer.Option(False, "--no-screenshots"),
+) -> None:
+    """Record a browser that is already running, such as the one a robot drives. Stop with
+    Ctrl+C, by closing the browser, or after --minutes. The browser is left running."""
+    from labctl import recorder
+
+    out = out or _default_out(app_id)
+    typer.echo(f"recording {cdp} into {out}; press Ctrl+C to finish")
+    try:
+        recorder.attach(cdp, out, max_seconds=minutes * 60, screenshots=not no_screenshots)
+    except Exception as exc:  # noqa: BLE001 - Playwright raises its own error types
+        typer.echo(f"could not attach to {cdp}: {str(exc).splitlines()[0]}", err=True)
+        raise typer.Exit(1) from exc
     typer.echo(f"done: analyse it with `labctl evidence analyse {app_id} {out}`")

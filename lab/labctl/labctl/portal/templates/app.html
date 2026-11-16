@@ -44,10 +44,19 @@
     </form>
     <form method="post" action="/apps/{{ app_id }}/record">
       <h3>Record a flow</h3>
-      <p class="small muted">Opens a browser on this machine. Sign in and go through the flow once; close the window to finish. Pages are captured after every step.</p>
-      <label for="rurl">Start address of the real application</label><input id="rurl" type="url" name="url" required placeholder="https://qtt.uat.example/login">
+      <p class="small muted">Opens a browser on this machine. Sign in and go through the flow once; close the window to finish. Each step keeps the page before the action, the page after it, and a picture.</p>
+      <label for="rurl">Start address of the real application</label><input id="rurl" type="url" name="url" placeholder="https://qtt.uat.example/login">
       <label for="rname">Recording name</label><input id="rname" type="text" name="name" required placeholder="qc-review" pattern="[a-z0-9][a-z0-9-]*">
+      <details><summary>Or record a browser that is already running (a robot's)</summary>
+        <p class="small muted">Start Chrome or Edge on this machine with <code>--remote-debugging-port=9222 --user-data-dir=C:\tl-robot</code>, give its address here, start recording, then run the robot. Stop with the button below or by closing that browser.</p>
+        <label for="rcdp">Browser address</label><input id="rcdp" type="text" name="cdp" placeholder="http://127.0.0.1:9222">
+        <label for="rmin">Stop after (minutes)</label><input id="rmin" type="number" name="minutes" value="30" min="1" max="240">
+      </details>
       <button type="submit">Start recording</button>
+    </form>
+    <form method="post" action="/apps/{{ app_id }}/record/stop" class="row">
+      <div><input type="text" name="name" placeholder="recording name" pattern="[a-z0-9][a-z0-9-]*" required></div>
+      <div><button type="submit" class="secondary">Stop recording</button></div>
     </form>
   </div>
 </section>
@@ -137,6 +146,16 @@
       <form method="post" action="/apps/{{ app_id }}/lab/up" class="inline"><button type="submit">{{ "Rebuild and restart" if status and status.running else "Start" }}</button></form>
       <form method="post" action="/apps/{{ app_id }}/lab/down" class="inline" data-confirm="Stop {{ app_id }}? Its data is kept."><button type="submit" class="secondary">Stop</button></form>
       {% else %}<p class="muted">Not built yet: the app's code arrives with the build's pull request.</p>{% endif %}
+      {% if status and status.running and replayable %}
+      <details><summary>Fidelity replay: does the demo app behave like the recording?</summary>
+        <p class="small muted">Replays a recording of the real application against this demo app, step by step, and compares each page: elements, enabled state, options and value formats. Typed values are not recorded; the test password is filled in, give others as <code>selector=value</code>.</p>
+        <form method="post" action="/apps/{{ app_id }}/fidelity">
+          <div class="row"><div><label for="frec">Recording</label><select id="frec" name="recording">{% for r in replayable %}<option>{{ r }}</option>{% endfor %}</select></div></div>
+          <label for="fval">Typed values (one per line)</label><textarea id="fval" name="values" rows="2" placeholder="input#username=analyst1"></textarea>
+          <button type="submit" class="secondary">Replay and compare</button>
+        </form>
+      </details>
+      {% endif %}
     {% endif %}
     <details {{ 'open' if not app.lab }}><summary>Ports and test sign-in</summary>
       <form method="post" action="/apps/{{ app_id }}/lab-settings">
@@ -186,7 +205,30 @@
       <form method="post" action="/apps/{{ app_id }}/data/reset"><button type="submit">Reset to baseline</button></form>
       <form method="post" action="/apps/{{ app_id }}/data/baseline" data-confirm="Make the current data the new baseline?"><button type="submit" class="secondary">Current data becomes the baseline</button></form>
     </div>
+    <div>
+      <h3>Named data packs</h3>
+      <p class="small muted">Save the current data under a name, and load it again later: "month-end", "empty queue". Packs stay on this machine.</p>
+      <form method="post" action="/apps/{{ app_id }}/packs/save" class="row">
+        <div><input type="text" name="name" placeholder="month-end" pattern="[a-z0-9][a-z0-9-]*" required></div>
+        <div><button type="submit" class="secondary">Save current data</button></div>
+      </form>
+      {% if packs %}<table class="small"><tbody>
+      {% for p in packs %}<tr><td><b>{{ p.name }}</b><br><span class="muted">{{ p.saved_at }} · {{ p.counts.values() | sum }} rows</span></td>
+        <td><form method="post" action="/apps/{{ app_id }}/packs/{{ p.name }}/use" data-confirm="Replace the lab's data with pack {{ p.name }}?"><button type="submit">Load</button></form></td>
+        <td><form method="post" action="/apps/{{ app_id }}/packs/{{ p.name }}/delete" data-confirm="Delete pack {{ p.name }}?"><button type="submit" class="danger">Delete</button></form></td></tr>{% endfor %}
+      </tbody></table>{% else %}<p class="small muted">No packs yet.</p>{% endif %}
+    </div>
   </div>
+  {% if baselines %}
+  <details><summary>Earlier baselines ({{ baselines | length }})</summary>
+    <p class="small muted">Every load and every "becomes the baseline" is kept: the newest 20, plus any you pin. Restore puts that data back and makes it the baseline again.</p>
+    <div class="scroll"><table class="small"><thead><tr><th>Taken</th><th>From</th><th>Rows</th><th></th><th></th></tr></thead><tbody>
+    {% for b in baselines %}<tr><td>{{ b.loaded_at }}{% if b.current %} <span class="pill ok">current</span>{% endif %}{% if b.pinned %} <span class="pill">pinned</span>{% endif %}</td>
+      <td>{{ b.pack or b.label or b.kind }}</td><td>{{ (b.counts or {}).values() | sum }}</td>
+      <td>{% if not b.current %}<form method="post" action="/apps/{{ app_id }}/baselines/{{ b.id }}/restore" data-confirm="Replace the lab's data with this baseline?"><button type="submit" class="secondary">Restore</button></form>{% endif %}</td>
+      <td><form method="post" action="/apps/{{ app_id }}/baselines/{{ b.id }}/pin"><input type="hidden" name="pinned" value="{{ '' if b.pinned else '1' }}"><button type="submit" class="secondary">{{ 'Unpin' if b.pinned else 'Pin' }}</button></form></td></tr>{% endfor %}
+    </tbody></table></div>
+  </details>{% endif %}
   {% if lab_info and lab_info.tables %}
   <details><summary>Tables ({{ lab_info.tables | length }})</summary>
     <ul class="small">{% for t in lab_info.tables %}<li><code>{{ t.name }}</code>{% if t.rows is defined %} · {{ t.rows }} row(s){% endif %}</li>{% endfor %}</ul>

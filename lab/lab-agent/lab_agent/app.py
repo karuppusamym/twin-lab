@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import secrets
 from collections import deque
 from collections.abc import AsyncIterator
@@ -31,6 +32,8 @@ log = logging.getLogger("lab_agent")
 RECENT_REQUESTS = 5000
 BASELINE_ROWS = "baseline.rows.json"
 BASELINE_META = "baseline.meta.json"
+KEEP_BASELINES = 20
+BASELINE_ID = re.compile(r"^bl_\d{8}T\d{6}Z_[0-9a-f]{6}$")
 JSON_TYPE = "application/json"
 
 
@@ -83,6 +86,7 @@ class LabAgent:
         only = None
         if settings.schema_path and settings.schema_path.is_file():
             only = tables_in_ddl(settings.schema_path) or None
+        self.known_tables = {t.lower() for t in only or []}
         self.database = (
             Database(settings.admin_database_url, settings.db_schema, only)
             if settings.admin_database_url
@@ -113,6 +117,7 @@ class LabAgent:
                 log.error("ignoring unreadable %s: %s", self.state_dir / "condition.json", exc)
         self.baseline = read_json(self.state_dir / BASELINE_META)
         self._upgrade_baseline_rows()
+        self._upgrade_history()
         self.sessions = SessionStore(self.state_dir, s.app_id, s.app_version)
         self.client = httpx.AsyncClient(
             transport=self.transport,
@@ -124,7 +129,10 @@ class LabAgent:
         self.proxy = HttpProxy(s.app_id, s.app_upstream, self.client, self.engine, self._record)
         if self.start_db_proxy and s.db_upstream_addr:
             self.db_proxy = DbLinkProxy(
-                s.db_upstream_addr, lambda: self.engine.db_link, self.engine.db_rng
+                s.db_upstream_addr,
+                lambda: self.engine.db_link,
+                self.engine.db_rng,
+                on_sql=self._on_sql,
             )
             await self.db_proxy.start("0.0.0.0", s.db_proxy_port)
             log.info("db link proxy on :%s -> %s", s.db_proxy_port, s.db_upstream)
@@ -135,6 +143,23 @@ class LabAgent:
             await self.db_proxy.stop()
         if self.client is not None:
             await self.client.aclose()
+
+    def _on_sql(self, sql: str) -> None:
+        """Tables a statement on the database link reads or writes, kept for the session."""
+        if self.sessions is None or self.sessions.active is None:
+            return
+        from labctl.analyse.sql import tables as sql_tables
+
+        found, _ = sql_tables(sql)
+        known = self.known_tables
+        found = [
+            t
+            for t in found
+            if not t["table"].lower().startswith(("pg_", "information_schema"))
+            and (not known or t["table"].lower() in known)
+        ]
+        if found:
+            self.sessions.note_tables(found)
 
     def _record(self, rec: dict[str, Any]) -> None:
         self.recent.append(rec)
@@ -195,6 +220,9 @@ class LabAgent:
             Route("/_lab/data", self.data, methods=["GET"]),
             Route("/_lab/data/load", self.load, methods=["POST"]),
             Route("/_lab/data/baseline", self.make_baseline, methods=["POST"]),
+            Route("/_lab/baselines", self.baselines, methods=["GET"]),
+            Route("/_lab/baselines/{baseline_id}/restore", self.restore_baseline, methods=["POST"]),
+            Route("/_lab/baselines/{baseline_id}/pin", self.pin_baseline, methods=["POST"]),
             Route("/_lab/reset", self.reset, methods=["POST"]),
             Route("/_lab/condition", self.get_condition, methods=["GET"]),
             Route("/_lab/condition", self.put_condition, methods=["PUT"]),
@@ -258,7 +286,8 @@ class LabAgent:
     def _baseline_meta(self) -> dict[str, Any] | None:
         if not self.baseline:
             return None
-        return {k: self.baseline.get(k) for k in ("id", "loaded_at", "label", "pack", "kind")}
+        keys = ("id", "loaded_at", "label", "pack", "kind", "pinned")
+        return {k: self.baseline.get(k) for k in keys}
 
     async def info(self, request: Request) -> Response:
         s = self.settings
@@ -315,12 +344,53 @@ class LabAgent:
             "kind": kind,
             "tables": sorted(rows),
         }
+        # The history copy first: a crash after it leaves an extra entry, never a current
+        # baseline missing from the history.
+        write_json(self._history_path(meta["id"]), {"meta": meta, "rows": rows})
+        self._make_current(meta, rows)
+        self._prune_history()
+        return meta
+
+    def _make_current(self, meta: dict, rows: dict) -> None:
         # Two files, each written atomically and each carrying the baseline id; reset checks the
         # ids agree, so a crash between the writes can never restore rows under the wrong label.
         write_json(self.state_dir / BASELINE_ROWS, {"baseline_id": meta["id"], "rows": rows})
         write_json(self.state_dir / BASELINE_META, meta)
         self.baseline = meta
-        return meta
+
+    # baseline history: every baseline is kept under baselines/<id>.json, newest KEEP_BASELINES
+    # unpinned ones plus every pinned one.
+
+    def _history_path(self, baseline_id: str):
+        return self.state_dir / "baselines" / f"{baseline_id}.json"
+
+    def _history(self) -> list[dict[str, Any]]:
+        folder = self.state_dir / "baselines"
+        out = []
+        for path in folder.glob("bl_*.json") if folder.is_dir() else []:
+            doc = read_json(path)
+            if isinstance(doc, dict) and isinstance(doc.get("meta"), dict):
+                meta = dict(doc["meta"])
+                rows = doc.get("rows") or {}
+                meta["counts"] = {t: len(r) for t, r in rows.items()}
+                out.append(meta)
+        return sorted(out, key=lambda m: m.get("loaded_at") or "", reverse=True)
+
+    def _prune_history(self) -> None:
+        current = (self.baseline or {}).get("id")
+        unpinned = [m for m in self._history() if not m.get("pinned") and m["id"] != current]
+        for meta in unpinned[KEEP_BASELINES - 1 :]:
+            remove(self._history_path(meta["id"]))
+
+    def _upgrade_history(self) -> None:
+        """A current baseline from an agent without history gets its history entry."""
+        if not self.baseline or self._history_path(self.baseline["id"]).exists():
+            return
+        rows, problem = self._read_baseline_rows()
+        if problem is None:
+            write_json(
+                self._history_path(self.baseline["id"]), {"meta": self.baseline, "rows": rows}
+            )
 
     def _upgrade_baseline_rows(self) -> None:
         """Agents before the baseline id wrote `{table: [rows]}`. At startup nothing else is
@@ -408,12 +478,15 @@ class LabAgent:
         except ValueError as exc:
             return error(400, "LAB_BAD_REQUEST", str(exc))
         label = body.get("label") if isinstance(body, dict) else None
+        pack = body.get("pack") if isinstance(body, dict) else None
+        if pack is not None and (not isinstance(pack, str) or not SLUG.match(pack)):
+            return error(422, "LAB_BAD_REQUEST", "'pack' must be a slug")
         async with self.lock:
             try:
                 _, rows = await self.database.snapshot()
             except Exception as exc:  # noqa: BLE001
                 return self._db_down(exc)
-            self._save_baseline(rows, label, None, "snapshot")
+            self._save_baseline(rows, label, pack, "snapshot")
         return JSONResponse(
             {"baseline": self._baseline_meta(), "counts": {t: len(r) for t, r in rows.items()}}
         )
@@ -438,6 +511,72 @@ class LabAgent:
                 return self._db_down(exc)
             meta = self._baseline_meta()
         return JSONResponse({"baseline": meta, "counts": result.counts, "cleared": result.cleared})
+
+    async def baselines(self, request: Request) -> Response:
+        current = (self.baseline or {}).get("id")
+        items = await asyncio.to_thread(self._history)
+        for meta in items:
+            meta["current"] = meta["id"] == current
+            meta.pop("tables", None)
+        return JSONResponse(items)
+
+    def _stored_baseline(self, baseline_id: str) -> tuple[dict | None, JSONResponse | None]:
+        if not BASELINE_ID.match(baseline_id):
+            return None, error(404, "LAB_BASELINE_NOT_FOUND", "no such baseline")
+        doc = read_json(self._history_path(baseline_id))
+        if not isinstance(doc, dict) or not isinstance(doc.get("rows"), dict):
+            return None, error(404, "LAB_BASELINE_NOT_FOUND", "no such baseline")
+        return doc, None
+
+    async def restore_baseline(self, request: Request) -> Response:
+        """Put an earlier baseline's rows back and make it the current baseline again."""
+        if self.database is None:
+            return self._no_db()
+        async with self.lock:
+            doc, problem = await asyncio.to_thread(
+                self._stored_baseline, request.path_params["baseline_id"]
+            )
+            if problem is not None:
+                return problem
+            try:
+                result = await self.database.replace(doc["rows"])
+            except DataProblems as exc:
+                return error(
+                    409,
+                    "LAB_BASELINE_MISMATCH",
+                    "that baseline no longer fits the database (the schema changed); "
+                    "nothing was changed",
+                    problems=[p.as_dict() for p in exc.problems],
+                )
+            except Exception as exc:  # noqa: BLE001
+                return self._db_down(exc)
+            meta = {k: v for k, v in doc["meta"].items() if k != "counts"}
+            self._make_current(meta, doc["rows"])
+        return JSONResponse(
+            {"baseline": self._baseline_meta(), "counts": result.counts, "cleared": result.cleared}
+        )
+
+    async def pin_baseline(self, request: Request) -> Response:
+        try:
+            body = await self._body(request)
+        except ValueError as exc:
+            return error(400, "LAB_BAD_REQUEST", str(exc))
+        pinned = body.get("pinned", True) if isinstance(body, dict) else True
+        if not isinstance(pinned, bool):
+            return error(422, "LAB_BAD_REQUEST", "'pinned' must be true or false")
+        async with self.lock:
+            baseline_id = request.path_params["baseline_id"]
+            doc, problem = await asyncio.to_thread(self._stored_baseline, baseline_id)
+            if problem is not None:
+                return problem
+            doc["meta"]["pinned"] = pinned
+            write_json(self._history_path(baseline_id), doc)
+            if self.baseline and self.baseline.get("id") == baseline_id:
+                self.baseline = {**self.baseline, "pinned": pinned}
+                write_json(self.state_dir / BASELINE_META, self.baseline)
+            if not pinned:
+                self._prune_history()
+        return JSONResponse({"id": baseline_id, "pinned": pinned})
 
     # condition
 

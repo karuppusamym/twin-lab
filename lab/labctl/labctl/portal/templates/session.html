@@ -15,14 +15,46 @@
   <div class="step"><b>{{ s.changes | length }}</b><span>rows changed</span></div>
 </div>
 
+{% if verdict %}
+<div class="card" id="verdict">
+  <h2>Verdict:
+    <span class="pill {{ 'ok' if verdict.status == 'PASS' else 'err' if verdict.status == 'FAIL' else 'warn' }}">{{ verdict.status | replace('_', ' ') }}</span></h2>
+  {% if verdict.status == 'PASS' %}<p>Every row change is one <code>{{ verdict_automation }}</code> is expected to make.</p>
+  {% elif verdict.status == 'FAIL' %}<p>{{ verdict.reasons | join("; ") }}. Unexpected changes are marked below.</p>
+  {% else %}<p class="muted">{{ verdict.reasons | join("; ") }}.</p>{% endif %}
+  {% if verdict_automation and verdict.status != 'PASS' %}
+  <form method="post" action="/apps/{{ app_id }}/sessions/{{ s.session_id }}/accept" class="row"
+        data-confirm="Write these changes into automations/{{ verdict_automation }}/automation.yaml as expected? Only do this after checking them.">
+    <div><button type="submit" class="secondary">These changes are correct: expect them from {{ verdict_automation }}</button></div>
+    {% if verdict.status == 'FAIL' %}<div><label><input type="checkbox" name="replace" value="1"> replace what it expects now</label></div>{% endif %}
+  </form>
+  <p class="small muted">This writes <code>expects:</code> in the automation's file; commit it like any other change.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Rows changed</h2>
   {% if s.changes %}
-  <div class="scroll"><table class="small"><thead><tr><th>Table</th><th>Change</th><th>Key</th><th>Columns</th></tr></thead><tbody>
-  {% for c in s.changes %}<tr><td><code>{{ c.table }}</code></td><td>{{ c.op }}</td><td><code>{{ c.key }}</code></td><td>{{ (c.columns or []) | join(", ") }}</td></tr>{% endfor %}
+  <div class="scroll"><table class="small"><thead><tr><th>Table</th><th>Change</th><th>Key</th><th>Columns</th><th></th></tr></thead><tbody>
+  {% for c in s.changes %}{% set why = (unexpected or {}).get((c.table, c.op, c.key)) %}<tr><td><code>{{ c.table }}</code></td><td>{{ c.op }}</td><td><code>{{ c.key }}</code></td><td>{{ (c.columns or []) | join(", ") }}</td>
+    <td>{% if why %}<span class="pill err" title="{{ why }}">unexpected</span> <span class="small">{{ why }}</span>{% endif %}</td></tr>{% endfor %}
   </tbody></table></div>
   {% else %}<p class="muted">Nothing changed in the database.</p>{% endif %}
 </div>
+
+{% if tables_used is not none %}
+<div class="card">
+  <h2>Tables used</h2>
+  {% if tables_used %}
+  <p class="small muted">Every table a statement on the database link named during the session: the app's own queries and any bot that queries the database directly.</p>
+  <table class="small"><thead><tr><th>Table</th><th>Read</th><th>Written</th></tr></thead><tbody>
+  {% for t in tables_used %}<tr><td><code>{{ t.table }}</code></td><td>{{ "yes" if t.read }}</td><td>{{ "yes" if t.write }}</td></tr>{% endfor %}
+  </tbody></table>
+  <p class="small muted">For real data, give these to <code>labctl realdata trace-diff --observed-session {{ app_id }}/{{ s.session_id }}</code> to find tables the subset would miss.</p>
+  {% else %}<p class="muted">No statements were seen on the database link (sessions from an older lab agent do not have this).</p>{% endif %}
+</div>
+{% endif %}
 
 <div class="card">
   <h2>Requests</h2>

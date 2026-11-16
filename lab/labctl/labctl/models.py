@@ -118,6 +118,19 @@ class Analysis(Contract):
     reviewed_by: str | None = None
 
 
+ChangeOp = Literal["insert", "update", "delete"]
+
+
+class ExpectedChange(Contract):
+    """A row change an automation is allowed to make. A session passes when every change it
+    recorded matches one of these; anything else is an unexpected change and fails it."""
+
+    table: str = Field(min_length=1)
+    ops: list[ChangeOp] = Field(min_length=1)
+    columns: list[str] = []  # for update: the only columns that may change; empty means any
+    max_rows: int | None = Field(default=None, ge=1)  # per op; None means any number
+
+
 class Automation(Contract):
     id: Slug
     name: str
@@ -131,6 +144,8 @@ class Automation(Contract):
     touches: list[Touch] = []
     bindings: dict[str, str] = {}
     test_inputs: dict[str, str] = {}  # values for the conformance check, e.g. in_CaseNo: C-1003
+    # The row changes a run may make. None: not declared yet (no verdict). []: changes nothing.
+    expects: list[ExpectedChange] | None = None
     analysis: Analysis = Analysis()
 
     @model_validator(mode="after")
@@ -347,7 +362,7 @@ class RequestRecord(Contract):
 class Change(Contract):
     app: Slug
     table: str
-    op: Literal["insert", "update", "delete"]
+    op: ChangeOp
     key: str
     columns: list[str] = []  # for an update: the columns that changed
 

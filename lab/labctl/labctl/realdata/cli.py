@@ -153,15 +153,118 @@ def extract_cmd(
     typer.echo(f"{sum(result.counts.values())} rows: {counts}")
 
 
+@app.command("draft-spec")
+def draft_spec_cmd(
+    seed_table: str = typer.Option(..., "--table", help="The table the bot works on."),
+    value: list[str] = typer.Option(None, "--value", help="A key value to start from (repeat)."),
+    url_env: str = typer.Option(None, "--url-env", help="NAME of the env var holding the URL."),
+    schema: Path = typer.Option(
+        None, "--schema", help="An inventory.json instead of the database."
+    ),
+    app_id: str = typer.Option(None, "--app", help="The demo app it is for."),
+    limit: int = typer.Option(20, "--limit", help="Child rows per parent row."),
+    out: Path = typer.Option(..., "--out", help="subset.yaml to write"),
+) -> None:
+    """Draft a subset spec from the inventory: seed, child limits, history tables left out."""
+    from labctl.realdata import specgen
+
+    try:
+        spec = specgen.draft(_tables(url_env, schema), seed_table, value or [], app=app_id,
+                             db_env=url_env, limit=limit)  # fmt: skip
+    except RealDataError as exc:
+        _fail(str(exc))
+    out.write_text(
+        "# Drafted by `labctl realdata draft-spec`: read and change before extracting.\n"
+        + yaml.safe_dump(spec, sort_keys=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    lim = spec["closure"]["limits"]
+    typer.echo(f"wrote {out}: seed {seed_table}, {len(lim)} child table(s) limited to {limit}, "
+               f"{len(spec['closure']['exclude'])} left out ({', '.join(spec['closure']['exclude']) or 'none'})")  # fmt: skip
+
+
+@app.command("synapse-job")
+def synapse_job_cmd(
+    url_env: str = typer.Option(..., "--url-env", help="NAME of the env var holding the URL."),
+    spec: Path = typer.Option(..., "--spec", help="subset.yaml"),
+    job: Path = typer.Option(..., "--job", help="Folder to write the job into."),
+) -> None:
+    """Write the extraction job for a data platform: one SQL file per table and job.json."""
+    from labctl.realdata import synapse
+
+    try:
+        doc = synapse.write_job(_url(url_env), _spec(spec), job)
+    except RealDataError as exc:
+        _fail(str(exc))
+    _warn_if_tracked(job / "job.json")
+    for t in doc["tables"]:
+        typer.echo(f"{t['table']}.sql: {t['rows']} row(s)")
+    typer.echo(f"job in {job}; the platform writes <output>/<table>.json for each table")
+
+
+@app.command("synapse-read")
+def synapse_read_cmd(
+    job: Path = typer.Option(..., "--job", help="The job folder."),
+    output: Path = typer.Option(..., "--output", help="Where the platform wrote <table>.json."),
+    manifest: Path = typer.Option(..., "--manifest", help="mask.yaml: rows are masked at once."),
+    url_env: str = typer.Option(None, "--url-env", help="For the sanitize check's inventory."),
+    schema: Path = typer.Option(None, "--schema", help="An inventory.json instead."),
+    out: Path = typer.Option(..., "--out", help="masked.json"),
+) -> None:
+    """Read the platform's output, check it against the job, mask it and write masked.json."""
+    from labctl.realdata import synapse
+
+    try:
+        result = synapse.read_output(job, output)
+    except RealDataError as exc:
+        _fail(str(exc))
+    m = _manifest(manifest)
+    try:
+        masked = mask_mod.mask(result.rows, m, mask_mod.key_from_env(m))
+    except mask_mod.MaskError as exc:
+        _fail(str(exc))
+    problems = mask_mod.sanitize(result.rows, masked, m, _tables(url_env, schema))
+    if problems:
+        _fail("sanitize failed, nothing written:\n" + "\n".join(problems))
+    out.write_text(json.dumps(masked, indent=1), encoding="utf-8")
+    toapp.write_receipt(out, manifest)
+    counts = ", ".join(f"{t}={len(r)}" for t, r in masked.items())
+    typer.echo(f"{sum(len(r) for r in masked.values())} masked rows: {counts}")
+
+
 @app.command("trace-diff")
 def trace_diff_cmd(
     url_env: str = typer.Option(..., "--url-env", help="NAME of the env var holding the URL."),
     spec: Path = typer.Option(..., "--spec", help="subset.yaml"),
-    observed: list[str] = typer.Option(..., "--observed", help="A table the screen reads."),
+    observed: list[str] = typer.Option(None, "--observed", help="A table the screen reads."),
+    observed_session: str = typer.Option(
+        None,
+        "--observed-session",
+        help="APP/SESSION: the tables a lab session used (the lab schema keeps the real names "
+        "when it was built from the real DDL).",
+    ),
 ) -> None:
     """Tables a screen reads that the closure misses, with candidate associations."""
+    tables = list(observed or [])
+    if observed_session:
+        from labctl import lab as lab_mod
+        from labctl import repo
+
+        app_id, _, session_id = observed_session.partition("/")
+        try:
+            detail = lab_mod.agent(repo.find_root(), app_id).session_detail(session_id) or {}
+        except (lab_mod.LabError, repo.NotARepo) as exc:
+            _fail(f"cannot read session {observed_session}: {exc}", 2)
+        used = [t["table"] for t in detail.get("tables_used") or []]
+        if not used:
+            _fail(f"session {observed_session} lists no tables used", 2)
+        typer.echo(f"observed in {observed_session}: {', '.join(used)}")
+        tables += used
+    if not tables:
+        _fail("give --observed TABLE or --observed-session APP/SESSION", 2)
     try:
-        missing = closure.missing_relations(_url(url_env), _spec(spec), observed)
+        missing = closure.missing_relations(_url(url_env), _spec(spec), tables)
     except RealDataError as exc:
         _fail(str(exc))
     for m in missing:

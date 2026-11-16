@@ -106,9 +106,21 @@ def observe(rec: Recording) -> list[dict]:
             continue
         before = steps[i - 1]
         html_b, html_a = rec.dom(before), rec.dom(step)
+        before_file = before.dom
+        if html_b is None:
+            # A click and the submit it caused share one snapshot: the page the first of them
+            # met (the recorder keeps it) is the page before the step.
+            first = i
+            while first > 0 and steps[first - 1].dom is None and steps[first - 1].ts == step.ts:
+                first -= 1
+            for candidate in (steps[first], step):
+                html_b = rec.dom(candidate, before=True)
+                if html_b is not None:
+                    before_file = candidate.dom_before
+                    break
         if html_b is None or html_a is None:
             continue
-        evidence = {"recording": rec.id, "step": step.seq, "before": before.dom, "after": step.dom}
+        evidence = {"recording": rec.id, "step": step.seq, "before": before_file, "after": step.dom}
         trig = domlib.key_of(step.selector) or step.selector or "?"
         event = EVENTS[step.action]
         sb, sa = domlib.snapshot(html_b), domlib.snapshot(html_a)
@@ -129,13 +141,20 @@ def observe(rec: Recording) -> list[dict]:
         for key in dict.fromkeys([*sb.elements, *sa.elements]):
             eb, ea = sb.elements.get(key), sa.elements.get(key)
             if key == trig:
-                if (
-                    step.action == "type"
-                    and step.value is not None
+                typed_other = (
+                    step.value is not None
                     and ea is not None
                     and ea.value is not None
                     and ea.value != step.value
-                ):
+                )
+                shaped_other = (  # a recorder keeps only the shape of what was typed
+                    step.value is None
+                    and step.typed_shape is not None
+                    and ea is not None
+                    and ea.value is not None
+                    and domlib.shape(ea.value) != step.typed_shape
+                )
+                if step.action == "type" and (typed_other or shaped_other):
                     out.append(
                         {
                             **base,

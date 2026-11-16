@@ -340,6 +340,198 @@ def conformance(
         raise typer.Exit(1)
 
 
+# --- sessions: verdict on unexpected changes ------------------------------------------------------
+
+session_app = typer.Typer(no_args_is_help=True, help="Lab sessions and their verdict.")
+app.add_typer(session_app, name="session")
+
+
+def _lab_call(fn):
+    from labctl import packs as packs_mod
+
+    try:
+        return fn()
+    except (lab_mod.LabError, BindingError, packs_mod.PackError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@session_app.command("list")
+def session_list(app_id: str) -> None:
+    """Stored sessions of an app's lab, newest first."""
+    for s in _lab_call(lambda: lab_mod.agent(_root(), app_id).sessions()):
+        sm = s.get("summary") or {}
+        typer.echo(
+            f"{s['session_id']}  {s.get('automation') or '-':<28} {s.get('label') or '':<24} "
+            f"{sm.get('requests', 0)} requests, {sm.get('errors', 0)} errors"
+        )
+
+
+@session_app.command("verdict")
+def session_verdict(
+    app_id: str,
+    session_id: str,
+    automation: str = typer.Option(None, "--automation", help="Judge against this automation."),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """PASS when every row change is one the automation expects; FAIL otherwise (exit 1)."""
+    from labctl import verdict as verdict_mod
+
+    v, _, auto = _lab_call(lambda: verdict_mod.for_session(_root(), app_id, session_id, automation))
+    if as_json:
+        typer.echo(json.dumps({"automation": auto, **v.to_dict()}, indent=2))
+    else:
+        typer.echo(f"{v.status}  {session_id}  automation {auto or '-'}  {v.checked} change(s)")
+        for reason in v.reasons:
+            typer.echo(f"  {reason}")
+        for c in v.unexpected[: verdict_mod.SHOWN]:
+            typer.echo(f"  {c['table']} {c['op']} {c['key']}: {c['why']}")
+    if v.status == verdict_mod.FAIL:
+        raise typer.Exit(1)
+
+
+@session_app.command("accept")
+def session_accept(
+    app_id: str,
+    session_id: str,
+    automation: str = typer.Option(None, "--automation", help="Default: the session's own."),
+    replace: bool = typer.Option(
+        False, "--replace", help="Replace `expects:` instead of widening."
+    ),
+) -> None:
+    """Accept a checked session's row changes as what the automation is expected to do."""
+    from labctl import verdict as verdict_mod
+
+    root = _root()
+    session, changes = _lab_call(
+        lambda: verdict_mod.session_changes(lab_mod.agent(root, app_id), session_id)
+    )
+    auto = automation or session.get("automation")
+    if not auto:
+        typer.echo("the session names no automation; give --automation", err=True)
+        raise typer.Exit(2)
+    expects = _lab_call(lambda: verdict_mod.accept(root, auto, changes, replace))
+    typer.echo(f"automations/{auto}/automation.yaml expects:")
+    for e in expects:
+        cols = f" columns {', '.join(e.columns)}" if e.columns else ""
+        typer.echo(f"  {e.table}: {', '.join(e.ops)}{cols}")
+    if not expects:
+        typer.echo("  nothing (the automation changes no rows)")
+
+
+# --- the harness chain ---------------------------------------------------------------------------
+
+harness_app = typer.Typer(no_args_is_help=True, help="The harness chain in one command.")
+app.add_typer(harness_app, name="harness")
+
+
+@harness_app.command("run")
+def harness_run(
+    automation_id: str,
+    inputs: Path = typer.Option(None, "--inputs", help="JSON object or list (one run each)."),
+    condition: str = typer.Option(None, "--condition", help="Condition id; default normal."),
+    no_reset: bool = typer.Option(False, "--no-reset", help="Keep the data as it is."),
+    golden: str = typer.Option(
+        None, "--golden", help="A production run to compare with: <upload>/<run id>."
+    ),
+    out: Path = typer.Option(None, "--out", help="Folder for the log, recordings and report."),
+    headed: bool = typer.Option(False, "--headed", help="Show the browser."),
+    repeat: int = typer.Option(1, "--repeat", min=1, max=20, help="Run the chain N times."),
+) -> None:
+    """Reset, apply a condition, record a session around the harness bot, import its robot log,
+    judge the row changes and (with --golden) check parity. With --repeat, also check that
+    every run changed the same kinds of rows. Exit 1 unless PASS."""
+    from labctl import harness
+
+    runs = None
+    if inputs is not None:
+        data = json.loads(inputs.read_text(encoding="utf-8-sig"))
+        runs = data if isinstance(data, list) else [data]
+    results = []
+    try:
+        for n in range(repeat):
+            where = (out / f"run-{n + 1}") if (out and repeat > 1) else out
+            results.append(harness.run_chain(_root(), automation_id, runs, condition,
+                                             not no_reset, golden, where, not headed))  # fmt: skip
+    except (harness.HarnessError, lab_mod.LabError, BindingError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    if repeat == 1:
+        typer.echo((results[0].out / "report.md").read_text(encoding="utf-8"))
+        typer.echo(f"report: {results[0].out / 'report.md'}")
+        status = results[0].status
+    else:
+        status, text = harness.consistency(results)
+        typer.echo(text)
+        for r in results:
+            typer.echo(f"report: {r.out / 'report.md'}")
+    if status != "PASS":
+        raise typer.Exit(1)
+
+
+# --- data packs and baselines --------------------------------------------------------------------
+
+
+@data_app.command("save")
+def data_save(
+    app_id: str,
+    name: str,
+    label: str = typer.Option(None, "--label"),
+    replace: bool = typer.Option(False, "--replace", help="Overwrite a pack of that name."),
+) -> None:
+    """Save the lab's current data as a named pack (kept on this machine)."""
+    from labctl import packs as packs_mod
+
+    info = _lab_call(lambda: packs_mod.save_from_lab(_root(), app_id, name, label, replace))
+    typer.echo(f"saved pack {info.name}: " + ", ".join(f"{t} {n}" for t, n in info.counts.items()))
+
+
+@data_app.command("packs")
+def data_packs(app_id: str) -> None:
+    """Named packs saved for an app."""
+    from labctl import packs as packs_mod
+
+    for p in packs_mod.listing(_root(), app_id):
+        typer.echo(f"{p.name:<24} {p.saved_at}  {sum(p.counts.values())} rows  {p.label or ''}")
+
+
+@data_app.command("use")
+def data_use(app_id: str, name: str) -> None:
+    """Load a named pack into the lab; it becomes the baseline."""
+    from labctl import packs as packs_mod
+
+    reply = _lab_call(lambda: packs_mod.load_into_lab(_root(), app_id, name))
+    typer.echo(f"loaded pack {name}: " + ", ".join(f"{t} {n}" for t, n in reply["counts"].items()))
+
+
+@data_app.command("baselines")
+def data_baselines(app_id: str) -> None:
+    """Every kept baseline, newest first. * marks the current one, P a pinned one."""
+    for b in _lab_call(lambda: lab_mod.agent(_root(), app_id).baselines()):
+        mark = ("*" if b.get("current") else " ") + ("P" if b.get("pinned") else " ")
+        rows = sum((b.get("counts") or {}).values())
+        typer.echo(
+            f"{mark} {b['id']}  {b.get('loaded_at')}  {b.get('kind'):<8} {rows:>6} rows  "
+            f"{b.get('pack') or b.get('label') or ''}"
+        )
+
+
+@data_app.command("restore")
+def data_restore(app_id: str, baseline_id: str) -> None:
+    """Put an earlier baseline back; it becomes the current baseline."""
+    reply = _lab_call(lambda: lab_mod.agent(_root(), app_id).restore_baseline(baseline_id))
+    typer.echo(
+        f"restored {baseline_id}: " + ", ".join(f"{t} {n}" for t, n in reply["counts"].items())
+    )
+
+
+@data_app.command("pin")
+def data_pin(app_id: str, baseline_id: str, unpin: bool = typer.Option(False, "--unpin")) -> None:
+    """Keep a baseline however many newer ones are taken (or --unpin)."""
+    _lab_call(lambda: lab_mod.agent(_root(), app_id).pin_baseline(baseline_id, not unpin))
+    typer.echo(f"{baseline_id}: {'unpinned' if unpin else 'pinned'}")
+
+
 @app.command()
 def portal(
     host: str = typer.Option(

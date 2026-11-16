@@ -121,17 +121,29 @@ the portal follows them and shows the pull request. Details: [devin.md](devin.md
 2. **Flows**: for anything with no bot code, write the flow down.
 3. **App > Evidence**: add what you have. A recording is the most useful: **Record a flow** opens
    a browser on this machine against the real application (UAT or production, as your rules
-   allow); go through the flow once and close the window. Add the DBA's DDL and any API
-   description. Raw evidence stays in `evidence/` on this machine and is never committed.
+   allow); go through the flow once and close the window. Each step keeps the page before and
+   after the action and a picture; what you type is never kept. To record what a robot does in
+   its own browser, start that Chrome or Edge with `--remote-debugging-port=9222` and fill in
+   **Or record a browser that is already running**. Add the DBA's DDL and any API description.
+   Raw evidence stays in `evidence/` on this machine and is never committed.
 4. **App > Brief**: generate. Read it. Every item says what it is based on.
 5. **App > Build**: Devin builds the app and opens a pull request. Review and merge it on GitHub,
    then **Settings > Get the latest from GitHub**.
-6. **App > Lab**: Start. The first start builds images and takes a few minutes.
+6. **App > Lab**: Start. The first start builds images and takes a few minutes. **Fidelity
+   replay** replays a recording of the real application against the demo app and lists every
+   screen where it behaves differently.
 7. **Readiness**: check each automation. READY, or BLOCKED with what is missing.
-8. **App > Data**: load your own Excel data or synthetic data. Reset before each run.
+8. **App > Data**: load your own Excel data or synthetic data. Reset before each run. **Save
+   current data** keeps it as a named pack ("month-end") to load again later; **Earlier
+   baselines** lists every baseline taken, to restore or pin.
 9. **App > Conditions**: pick normal, peak-hour, slow-database, intermittent-errors or timeouts.
 10. **App > Sessions**: start recording, run the bot as you normally would (bindings for UiPath
-    are on the automation page), stop. Compare two sessions side by side.
+    are on the automation page), stop. The session page shows every request, every row
+    changed and every table used. Compare two sessions side by side.
+    - **Verdict.** The first time, read the row changes; if they are right, press **These
+      changes are correct**. That writes `expects:` into the automation's file (commit it).
+      From then on every session of that automation is PASS, or FAIL with each unexpected
+      change marked.
 11. **Automation > Robot runs**: upload the bot's log from production (Orchestrator export or NLog
     JSON lines). You see each run step by step with its waits. **Make a condition from these
     timings** turns production's slowness into a condition you can apply in the lab.
@@ -177,6 +189,37 @@ labctl realdata load <app> --in masked.json --map map.yaml --dry-run
 labctl botlog trace robot.log.jsonl --automation automations/<automation> --out traces.json
 ```
 
+```bash
+labctl session verdict <app> <session id>
+```
+
+```bash
+labctl session accept <app> <session id>
+```
+
+```bash
+labctl data save <app> month-end
+```
+
+```bash
+labctl data use <app> month-end
+```
+
+```bash
+labctl data baselines <app>
+```
+
+```bash
+labctl evidence attach <app> --cdp http://127.0.0.1:9222
+```
+
+The whole harness chain in one command (reset, condition, session, harness bot, robot log,
+verdict, parity, report), for demos and regression:
+
+```bash
+labctl harness run uipath-case-update --inputs inputs.json --condition slow-database --repeat 3
+```
+
 ## 7. When something is wrong
 
 | Symptom | Look at |
@@ -191,8 +234,11 @@ labctl botlog trace robot.log.jsonl --automation automations/<automation> --out 
 | The portal says "unknown host name" | open it as http://127.0.0.1:8790, or add the name people use to `TWINLAB_PORTAL_HOSTS` (or set a portal password) |
 | "Record a flow" says the window opens on the Twin Lab machine | record there, or save a HAR in your own browser (developer tools > Network > Save all as HAR) and upload it |
 | A Devin build failed with 401 after you fixed the key | start it again: the new key is read at once, no restart needed |
-| An upload fails with "path longer than 260 characters" | move the repository to a short folder such as `C:	l`, or turn on Windows long paths |
+| An upload fails with "path longer than 260 characters" | move the repository to a short folder such as `C:\tl`, or turn on Windows long paths |
 | A bot's database login fails after updating Twin Lab | run `labctl lab up <app>` once: it sets the generated passwords; the bindings now use the login `bot` |
+| A session says FAIL after a change to the bot | the session page marks each unexpected change; if the new behaviour is right, accept the session again (it widens `expects:`) |
+| `labctl evidence attach` cannot connect | the browser must be started with `--remote-debugging-port=9222` and its own `--user-data-dir`, and on this machine |
+| "Tables used" is empty | the session was recorded by an older lab agent; run `labctl lab up <app>` once |
 | Port already in use | change `lab:` ports on the app page (Lab > Ports and test sign-in) |
 
 ## 8. What it does not do
@@ -205,5 +251,6 @@ labctl botlog trace robot.log.jsonl --automation automations/<automation> --out 
   condition.
 - The lab's databases are Postgres. Bots that query SQL Server or Oracle directly need their
   connection pointed at the lab's Postgres address (the bindings give it).
-- Nothing fails a session on an unexpected change yet: read the row changes on the session page.
+- A session is judged only once its automation has `expects:`; until then the verdict says
+  NOT DECLARED.
 - Gaps still open, and how large they are: [07-prod-echo-coverage.md](07-prod-echo-coverage.md).

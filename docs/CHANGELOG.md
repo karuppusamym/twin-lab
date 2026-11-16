@@ -2,6 +2,60 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-16 — Round 4: the open gaps closed
+PR 4 was merged. Round 4 builds what round 3 left open, and each piece was tried on the
+running labs.
+
+- **A verdict on every session.** An automation declares `expects:`, the row changes it may
+  make: tables, operations, columns that may change, and row counts. The usual way is to read
+  a session's changes and press **These changes are correct** (`labctl session accept`). After
+  that, every session is PASS, or FAIL with each unexpected change marked. Tried live:
+  - `uipath-case-update` now expects an insert into `case_audit` and updates to four columns of
+    `cases`.
+  - `python-qtt-sla-report` reads only, so it expects `[]`.
+- **Named data packs and baseline history.** The lab agent keeps every baseline (the newest 20,
+  plus pinned ones), and any of them can be restored. **Save current data** stores a named
+  pack on this machine, and it loads again by name.
+- **Recorder.** `labctl evidence attach`, or the portal, records a browser that is already
+  running (a robot's), over the DevTools protocol; the HAR is built from network events. Each
+  step keeps the page as the action met it, the page after it, and a PNG. A step's time is now
+  when the action happened, not when the page settled. Typed values are still never kept, only
+  their shape (`A9`), and that is how input masks are found.
+- **Fidelity replay in the portal** (Lab > Fidelity replay), with the test password filled in.
+- **`labctl harness run`.** Resets the data, applies a condition and records a session around
+  the harness bot. It then imports the robot log, judges the changes, checks parity with
+  `--golden` and writes a report. With `--repeat N` it also checks that every run changed the
+  same kinds of rows. Tried live on showcase:
+  - normal: 5.6 s, PASS;
+  - slow-database: 12.8 s, PASS, and parity PASS against the normal run;
+  - peak-hour: 19.7 s, PASS.
+- **Two harness fixes the slow runs found:**
+  - The bot moved on while the login request was still running. Playwright's network-idle
+    wait returns at once on a page that was idle before. The harness bot and fidelity replay
+    now wait until nothing is in flight.
+  - A harness run left its condition applied; the earlier condition is now put back.
+- **`tools/refresh_fixtures.py`** checks the test fixtures against a fresh harness run, or
+  replaces them with `--write`. It found no drift.
+- **Reference app.** The case number field has an input mask (`c1003` becomes `C-1003`), and
+  search shows "Searching…" for at least 600 ms. The catalog finds both; the showcase demo app
+  predates them, so a fidelity replay reports them.
+- **Tables used.** The lab's database link reads the SQL text that passes through it and keeps
+  the table names per session, shown on the session page. Tried live: the showcase bot run
+  touched 7 tables (writes to `cases` and `case_audit` only); the QTT Python bot read 4.
+  `realdata trace-diff --observed-session` uses them.
+- **Real data:**
+  - `realdata draft-spec` drafts a subset spec from the inventory.
+  - `realdata synapse-job` and `synapse-read` hand the extraction to a data platform and check
+    what comes back.
+- **T-16.** The Python analyser also reports tables in the code's SQL, and Playwright or Selenium
+  selectors, that `touches` does not list.
+
+Still open (end of `07-prod-echo-coverage.md`):
+- baseline quarantine
+- a check of UAT behaviour against production
+- value binding, which needs production capture
+- agreeing the Synapse file format
+
 ## 2026-11-16 — Round 3: the bots' own fields, review fixes, Prod Echo gaps closed
 PR 3 was merged, and every merged branch and worktree was removed. Only `main` is left.
 

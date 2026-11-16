@@ -66,7 +66,8 @@ def _python(folder: Path, model: Automation, data: dict) -> Outcome:
     found = pyscan.analyse(files)
     out = Outcome(data, [p.relative_to(base).as_posix() for p in files])
     # What touches is declared by a person here, so their notes stay; ours are added after.
-    mine = ("the code calls ", "no HTTP call with a literal path")
+    mine = ("the code calls ", "no HTTP call with a literal path", "the code's SQL uses table ",
+            "the code uses the selector ", "SQL in ")  # fmt: skip
     out.notes = [n for n in model.analysis.notes if not n.what.startswith(mine)]
     out.gaps = [g for g in model.analysis.gaps if not g.what.startswith(mine)]
     used = set()
@@ -100,4 +101,38 @@ def _python(folder: Path, model: Automation, data: dict) -> Outcome:
         out.gaps.append(
             Gap(where="source", what="no HTTP call with a literal path found; fields are unknown")
         )
+    _sql_and_selectors(pyscan.scan(files), data, out)
     return out
+
+
+def _sql_and_selectors(found: pyscan.Scan, data: dict, out: Outcome) -> None:
+    """Tables in the code's SQL and selectors it uses that no `touches` entry lists are notes;
+    a declared table without columns gets the columns the SQL names."""
+    declared: dict[str, dict] = {}
+    for touch in data.get("touches", []):
+        if touch.get("via") == "db":
+            for t in touch["tables"]:
+                declared[t["table"].lower()] = t
+    for name, use in sorted(found.tables.items()):
+        have = declared.get(name.lower())
+        if have is None:
+            cols = f" ({', '.join(use['columns'])})" if use["columns"] else ""
+            out.notes.append(Gap(where="source", what=(
+                f"the code's SQL uses table {name}{cols} ({use['access']}), which no `touches` "
+                "entry lists; add a db touch if the demo app's database must have it")))  # fmt: skip
+        elif not have.get("columns") and use["columns"]:
+            have["columns"] = list(use["columns"])
+    used = {
+        u["selector"]
+        for touch in data.get("touches", [])
+        if touch.get("via") == "web"
+        for screen in touch["screens"]
+        for u in screen.get("uses", [])
+    }
+    for s in found.selectors:
+        if s["selector"] not in used:
+            out.notes.append(Gap(where=s["where"], what=(
+                f"the code uses the selector {s['selector']} ({s['action']}), which no screen in "
+                "`touches` lists; add it to the screen it is on")))  # fmt: skip
+    for problem in found.problems:
+        out.notes.append(Gap(where="source", what=f"SQL in {problem}"))

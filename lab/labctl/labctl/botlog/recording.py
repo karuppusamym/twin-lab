@@ -34,6 +34,8 @@ class RecStep:
     selector: str | None
     dom: str | None
     value: str | None = None
+    typed_shape: str | None = None  # the recorder's shape of what was typed (never the value)
+    dom_before: str | None = None  # the page as the action met it (the recorder writes it)
 
     @property
     def path(self) -> str | None:
@@ -74,10 +76,11 @@ class Recording:
     entries: list[HarEntry] = field(default_factory=list)
     bad_lines: int = 0
 
-    def dom(self, step: RecStep | None) -> str | None:
-        if step is None or not step.dom:
+    def dom(self, step: RecStep | None, before: bool = False) -> str | None:
+        rel = (step.dom_before if before else step.dom) if step is not None else None
+        if not rel:
             return None
-        target = (self.path / step.dom).resolve()
+        target = (self.path / rel).resolve()
         if self.path.resolve() not in target.parents or not target.exists():
             return None
         return target.read_text(encoding="utf-8", errors="replace")
@@ -175,6 +178,12 @@ def load(path: Path) -> Recording:
                         selector=_mask_ids(d.get("selector")),
                         dom=d.get("dom"),
                         value=d.get("value") if isinstance(d.get("value"), str) else None,
+                        typed_shape=(
+                            d.get("typed_shape") if isinstance(d.get("typed_shape"), str) else None
+                        ),
+                        dom_before=(
+                            d.get("dom_before") if isinstance(d.get("dom_before"), str) else None
+                        ),
                     )
                 )
             except (ValueError, TypeError, AttributeError):

@@ -134,12 +134,38 @@ def _rebase(url: str, base_url: str | None) -> str:
     return urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment))
 
 
+SETTLE_MAX_MS = 30000
+
+
+def _track(page) -> None:
+    """Count requests in flight: `networkidle` alone returns at once on a page that was idle
+    before, so a slow login's POST would be outrun by the next step."""
+    page._tl_inflight = 0
+
+    def start(_r):
+        page._tl_inflight += 1
+
+    def end(_r):
+        page._tl_inflight = max(0, page._tl_inflight - 1)
+
+    page.on("request", start)
+    page.on("requestfinished", end)
+    page.on("requestfailed", end)
+
+
 def _settle(page, settle_ms: int) -> None:
     try:
         page.wait_for_load_state("networkidle", timeout=5000)
     except Exception:  # noqa: BLE001 - a page that never goes idle is still compared
         pass
-    page.wait_for_timeout(settle_ms)
+    if not hasattr(page, "_tl_inflight"):
+        page.wait_for_timeout(settle_ms)
+        return
+    quiet = waited = 0
+    while quiet < settle_ms and waited < SETTLE_MAX_MS:
+        page.wait_for_timeout(50)
+        waited += 50
+        quiet = quiet + 50 if page._tl_inflight == 0 else 0
 
 
 def replay(
@@ -163,6 +189,7 @@ def replay(
         browser = pw.chromium.launch(headless=headless)
         try:
             page = browser.new_context(viewport={"width": 1280, "height": 900}).new_page()
+            _track(page)
             for step in rec.steps:
                 report = StepReport(
                     seq=step.seq,
