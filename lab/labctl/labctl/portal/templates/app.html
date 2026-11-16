@@ -169,8 +169,8 @@
       <form method="post" action="/apps/{{ app_id }}/data/generate">
         <div class="row"><div><label for="seed">Seed</label><input id="seed" type="number" name="seed" value="20261115"></div></div>
         <label for="counts">Rows per table</label>
-        <textarea id="counts" name="counts" rows="4" placeholder="customer=50&#10;cases=200">{% if lab_info and lab_info.tables %}{% for t in lab_info.tables[:3] %}{{ t.name }}=50
-{% endfor %}{% endif %}</textarea>
+        <textarea id="counts" name="counts" rows="4" placeholder="customer=50&#10;cases=200"></textarea>
+        <p class="small muted">Only the tables you name are replaced (and their child rows are cleared). Leave out the users table to keep the test sign-in working.{% if lab_info and lab_info.tables %} Tables: {{ lab_info.tables | map(attribute='name') | join(', ') }}.{% endif %}</p>
         <button type="submit">Generate and load</button>
       </form>
     </div>
@@ -206,8 +206,8 @@
   <h2>7 · Sessions</h2>
   <p class="small muted">Record what an automation does: start, run the bot as you normally would, stop. You get every request with its waiting time and every row it changed.</p>
   {% if not running %}<p class="muted">Start the app to record sessions.</p>{% else %}
-  {% if lab_info and lab_info.session_active %}
-    <p><span class="pill warn">recording</span> session <code>{{ lab_info.session_active }}</code></p>
+  {% if lab_info and lab_info.session %}
+    <p><span class="pill warn">recording</span> session <code>{{ lab_info.session }}</code></p>
     <form method="post" action="/apps/{{ app_id }}/session/stop"><button type="submit">Stop and show the result</button></form>
   {% else %}
   <form method="post" action="/apps/{{ app_id }}/session/start" class="row">

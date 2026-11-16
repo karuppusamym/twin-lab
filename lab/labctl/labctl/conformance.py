@@ -346,12 +346,30 @@ def check(root: Path, automation: Automation, host: str | None = None) -> Report
         report.errors.append(str(exc))
         return report
     basis_by_app = {app_id: _model_basis(root, app_id) for app_id in b.apps}
+    for app_id in b.apps:  # readiness is about what exists, not speed: say when a slowdown is on
+        try:
+            current = httpx.get(
+                f"{b.apps[app_id].api.rstrip('/')}/_lab/condition", timeout=5
+            ).json()
+        except (httpx.HTTPError, ValueError):
+            continue
+        if isinstance(current, dict) and current.get("id"):
+            report.errors.append(
+                f"{app_id} is running under the condition '{current['id']}'; slow responses can make "
+                "steps time out. Check readiness under normal conditions."
+            )
     values = {**args, **automation.test_inputs}
     _check_screens(automation, b, args, report, basis_by_app)
     _check_routes(automation, b, values, report, basis_by_app)
     _check_tables(automation, b, report, basis_by_app)
     if any(i.status == "failed" for i in report.items) or automation.analysis.gaps:
         report.verdict = "BLOCKED"
+    if any(i.kind == "screen" and i.status == "failed" for i in report.items):
+        report.errors.append(
+            "A screen step failed. Either the app lacks the element, or the screen looks different for "
+            f"this record (for example a closed one hides its form): check test_inputs "
+            f"{automation.test_inputs or '{}'} against the data loaded now, or reset the data."
+        )
     return report
 
 
