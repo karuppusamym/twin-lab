@@ -61,7 +61,10 @@ def query(db_url: str, sql: str) -> list[dict]:
         path = unquote(parts.path if parts.scheme else db_url)
         if parts.scheme == "sqlite" and len(path) > 2 and path[0] == "/" and path[2] == ":":
             path = path[1:]  # sqlite:///C:/... on Windows
-        conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True)
+        if path.startswith("//"):
+            path = "/" + path.lstrip("/")  # sqlite:////tmp/x gives //tmp/x; POSIX keeps the //
+        # as_uri() gives file:///... on every OS (a bare "file://tmp/x" would name a host "tmp").
+        conn = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         try:
             return [dict(r) for r in conn.execute(sql)]
