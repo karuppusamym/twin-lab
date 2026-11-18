@@ -678,7 +678,8 @@ def create_app(root: Path) -> FastAPI:
         from labctl import dbservers
 
         db_choices = [("postgres", "PostgreSQL, in a container Twin Lab runs"),
-                      ("sqlserver", "SQL Server 2022, in a container Twin Lab runs")]  # fmt: skip
+                      ("sqlserver", "SQL Server 2022, in a container Twin Lab runs"),
+                      ("sqlite", "SQLite, one file; no slow-database conditions")]  # fmt: skip
         try:
             db_choices += [(s.name, f"{s.label} at {s.host} ({s.name})")
                            for s in dbservers.load(root).values()]  # fmt: skip
@@ -915,7 +916,7 @@ def create_app(root: Path) -> FastAPI:
         )
 
     @portal.post("/apps/{app_id}/lab-settings")
-    def lab_settings(app_id: str, port: int = Form(...), db_port: int = Form(...),
+    def lab_settings(app_id: str, port: int = Form(...), db_port: int | None = Form(None),
                      username: str = Form(""), password: str = Form("")):  # fmt: skip
         app_id = slug(app_id, "app id")
         path = root / "apps" / app_id / "app.yaml"
@@ -923,7 +924,11 @@ def create_app(root: Path) -> FastAPI:
             return back(f"/apps/{app_id}", "No app.yaml yet: generate the brief first", "error")
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         creds = {k: v for k, v in {"username": username.strip(), "password": password}.items() if v}
-        data["lab"] = {"port": port, "db_port": db_port, "credentials": creds}
+        lab = {**(data.get("lab") or {}), "port": port, "credentials": creds}
+        lab.pop("db_port", None)
+        if db_port:
+            lab["db_port"] = db_port
+        data["lab"] = lab  # keeps the other settings, such as the database choice
         try:
             App.model_validate(data)
         except ValidationError as exc:

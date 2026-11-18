@@ -78,7 +78,7 @@ problem; see [Troubleshooting](#5-troubleshooting).
    It writes `twinlab-<app>-<digest8>.zip` into `.lab-state/packages/` (or `--out <folder>`),
    records a *manual job* and prints its id. The zip holds:
 
-   - `DEVIN_TASK.md`: the task for Devin, step by step;
+   - `BUILD_TASK.md`: the task for Devin, step by step;
    - `apps/<app>/BRIEF.md`, `model.yaml`, `db/schema.sql`, `app.yaml`, `pages/*.html`;
    - `evidence/<app>/screenshots/*` if there are any;
    - `AGENTS.md` and `docs/factory-playbook.md`;
@@ -90,7 +90,7 @@ problem; see [Troubleshooting](#5-troubleshooting).
 
 2. **Open Devin** at https://app.devin.ai and start a new session.
 3. **Attach the zip** to the first message (paperclip or drag and drop).
-4. **Paste `DEVIN_TASK.md`** from the zip, the whole file and unchanged, as the message text, and
+4. **Paste `BUILD_TASK.md`** from the zip, the whole file and unchanged, as the message text, and
    send it. It tells Devin which repository and branch to use, what to read, what not to touch,
    which checks to run and how to name the pull request.
 5. **Wait for the pull request.** It usually takes a while. If Devin asks a question (for example
@@ -114,7 +114,7 @@ labctl devin start <app> --repo your-org/twin-lab [--max-acu 50] [--wait]
 
 Twin Lab builds the same package, uploads it to Devin, starts a session titled
 `Twin Lab: <app> demo app (<digest>)` with tags `twinlab` and `app:<app>`, and records the job.
-The task text is the same `DEVIN_TASK.md`, plus an `ATTACHMENT:"<url>"` line pointing at the
+The task text is the same `BUILD_TASK.md`, plus an `ATTACHMENT:"<url>"` line pointing at the
 uploaded zip.
 
 - `--max-acu n` caps the session's spend (Devin ACUs).

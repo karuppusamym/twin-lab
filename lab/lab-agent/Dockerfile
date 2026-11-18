@@ -17,11 +17,14 @@ COPY lab/labctl/labctl labctl/labctl
 COPY lab/lab-agent/lab_agent lab-agent/lab_agent
 # OpenShift runs the container as an arbitrary UID with group 0, so what the agent writes belongs
 # to group 0 with the owner's rights (g=u). USER is numeric so `runAsNonRoot` can be checked.
+# /var/lib/twinlab-db holds a SQLite lab's database file on a volume the demo app mounts too; a
+# new volume takes this folder's permissions, open to the app's user (which may differ).
 RUN useradd --create-home --uid 10002 --gid 0 labagent \
-    && mkdir -p /var/lib/twinlab \
-    && chown -R 10002:0 /var/lib/twinlab /home/labagent \
+    && mkdir -p /var/lib/twinlab /var/lib/twinlab-db \
+    && chown -R 10002:0 /var/lib/twinlab /var/lib/twinlab-db /home/labagent \
     && chmod -R g=u /var/lib/twinlab /home/labagent \
-    && python -c "import lab_agent.app, labctl.models"
+    && chmod 0777 /var/lib/twinlab-db \
+    && python -c "import lab_agent.app, lab_agent.sqlite_init, labctl.models"
 ENV HOME=/home/labagent
 USER 10002
 VOLUME ["/var/lib/twinlab"]

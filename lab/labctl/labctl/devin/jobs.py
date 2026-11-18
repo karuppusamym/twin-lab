@@ -336,6 +336,7 @@ class BuildJobs:
         try:
             path = pkg.build(self.repo_root, app_id, self.packages_dir, repo=repo)
             manifest = pkg.read_manifest(path)
+            pkg.record_baseline(self.repo_root, app_id, self.store.state_dir)
             job = self.store.update(
                 job.id,
                 from_poller=True,  # never revives a job cancelled meanwhile

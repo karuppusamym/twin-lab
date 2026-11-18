@@ -87,7 +87,7 @@ def test_start_runs_to_finished_with_pr_recorded(server, repo, tmp_path):
     assert session.max_acu_limit == 7
     assert session.attachment_urls == [job.attachment_url]
     assert f'ATTACHMENT:"{job.attachment_url}"' in session.prompt
-    assert "devin/demo-<yyyymmdd-hhmm>" in session.prompt
+    assert "`build/demo-" in session.prompt
     assert session.title.startswith("Twin Lab: demo")
 
 

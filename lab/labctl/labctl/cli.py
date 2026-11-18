@@ -19,6 +19,7 @@ from labctl.analyse import run as analysis
 from labctl.behaviour import cli as behaviour_cli
 from labctl.bindings import BindingError
 from labctl.botlog import cli as botlog_cli
+from labctl.builder import cli as builder_cli
 from labctl.data import cli as data_cli
 from labctl.devin import cli as devin_cli
 from labctl.models import KINDS, Automation
@@ -256,6 +257,9 @@ data_app.registered_commands.extend(
     data_cli.app.registered_commands
 )  # template, validate, generate
 app.add_typer(devin_cli.app, name="devin", help="Build apps with Devin: package, start, status.")
+app.add_typer(
+    builder_cli.app, name="build", help="Build apps with a coding agent: Claude, Devin, by hand."
+)
 app.add_typer(ocp_cli.app, name="ocp")
 
 

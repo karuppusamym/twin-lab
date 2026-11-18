@@ -79,6 +79,16 @@ def app_binding(
     )
 
 
+def sqlite_binding(app: App, host: str = LAB_HOST) -> AppBinding:
+    """An app on SQLite: its file is inside the lab, reached by no network address, so a bot
+    gets the web addresses and `db_engine: sqlite` but no database URL."""
+    if app.lab is None:
+        raise BindingError(f"apps/{app.id}/app.yaml has no `lab:` section (port)")
+    base = f"http://{host}:{app.lab.port}"
+    return AppBinding(web=base, api=base, http=base, db=None, db_engine="sqlite",
+                      credentials=dict(app.lab.credentials))  # fmt: skip
+
+
 def for_automation(
     root: Path, automation: Automation, host: str | None = None, labs: dict | None = None
 ) -> Bindings:
@@ -93,6 +103,11 @@ def for_automation(
     for app_id in automation.apps():
         app = load_app(root, labs.get(app_id, app_id))
         choice = dbservers.choice(app.lab.database if app.lab else None)
+        if choice == "sqlite":
+            apps[app_id] = sqlite_binding(app, host)
+            continue
+        if app.lab is not None and app.lab.db_port is None:
+            raise BindingError(f"apps/{app.id}/app.yaml: `lab.db_port` is needed for {choice}")
         server = None
         if choice != "postgres":
             try:

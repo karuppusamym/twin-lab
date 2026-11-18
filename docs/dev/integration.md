@@ -99,7 +99,7 @@ Owns: `labctl/devin/` (`package.py`, `client.py`, `jobs.py`, `mock.py`, `cli.py`
 `tests/test_devin_*.py`, `docs/devin.md`.
 
 - `package.build(repo_root, app_id, out_dir) -> Path`: a zip a person can upload to Devin by hand:
-  `DEVIN_TASK.md` (the prompt), the brief, model, schema, `app.yaml`, `apps/<app>/pages/`,
+  `BUILD_TASK.md` (the prompt), the brief, model, schema, `app.yaml`, `apps/<app>/pages/`,
   screenshots from `evidence/<app>/screenshots/` if any, `AGENTS.md`, the playbook. No raw HAR.
 - `client.DevinClient(api_key, org_id, base_url="https://api.devin.ai")` on API v3: `upload(path)`,
   `create_session(prompt, repos, attachment_urls, title, tags, max_acu_limit)`,

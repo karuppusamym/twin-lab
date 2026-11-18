@@ -52,7 +52,7 @@ Without Docker: `pip install -r lab/lab-agent/requirements.txt`, then
 | `LAB_PORT` | `9000` | Front door and admin API |
 | `DB_UPSTREAM` | none | `host:port` of the database; no DB link proxy without it |
 | `DB_PROXY_PORT` | `15432` | DB link proxy port |
-| `ADMIN_DATABASE_URL` | none | Direct URL for data, reset and sessions: `postgresql://…`, `mssql+pymssql://…` (SQL Server) or `oracle+oracledb://…/?service_name=…` (Oracle, thin mode, no client install) |
+| `ADMIN_DATABASE_URL` | none | Direct URL for data, reset and sessions: `postgresql://…`, `mssql+pymssql://…` (SQL Server), `oracle+oracledb://…/?service_name=…` (Oracle, thin mode, no client install) or `sqlite:////var/lib/twinlab-db/<app>.db` (SQLite: a file on a volume the app mounts too) |
 | `SCHEMA_PATH` | none | If set, only the tables (and views, which the demo database holds as tables) this DDL creates are read, loaded and reset |
 | `LAB_TOKEN` | none | When set, every `/_lab/*` call needs exactly one header `X-Lab-Token` (`labctl` sets it; see `.lab-state/lab-token`) |
 | `APP_VERSION` | `dev` | Written into sessions (`apps[].version`) |
@@ -172,6 +172,30 @@ only the table names, with read or write, as `tables_used` in `/detail`. Tables 
 app's schema file and system catalogs are left out. This list is in memory, so a session resumed
 after a restart lists only what it saw since.
 
+### SQLite
+
+With `ADMIN_DATABASE_URL=sqlite:///<absolute path>` (four slashes) there is no database server and
+no DB link: the demo app and the agent open the same file, on a volume both containers mount
+(`labctl` mounts it at `/var/lib/twinlab-db`; the image makes that folder writable by any user).
+
+- `python -m lab_agent.sqlite_init` creates the file in WAL mode, makes it writable by the app's
+  user too (0666) and creates the tables of `SCHEMA_PATH` through `labctl.dbsetup` (any dialect;
+  views become tables; procedures, functions and triggers are not created). `labctl lab up` runs it
+  before the app starts; the agent runs it again at startup. Existing tables are left alone.
+- The agent's connections use WAL, `busy_timeout` 30 s and `foreign_keys = ON`, and real
+  transactions (`BEGIN` when one starts), so a snapshot is one consistent read and never blocks
+  the app's writes. Loads and resets wait for the app's write lock instead of failing.
+- Load, reset, baselines, data packs and sessions (snapshot diff by primary key) work as on every
+  engine. A lone `INTEGER PRIMARY KEY` is the rowid and numbers itself (MAX + 1, so a reset gives
+  the same ids again); an `AUTOINCREMENT` table's counter is put back. Circular foreign keys are
+  checked at commit (`PRAGMA defer_foreign_keys`).
+- Conditions: `db` (slow database) cannot apply, as no connection passes through the agent. A
+  condition with only `db` is refused, 422 `LAB_CONDITION_UNAVAILABLE` ("not available on
+  sqlite"); one with `http` or `faults` too is applied and its reply (and `GET /_lab/condition`)
+  lists `unavailable: [{part: "db", message}]`. Web conditions work as always.
+- `tables_used` in a session's detail stays empty (no statements pass through the agent).
+- `/_lab/info` says `db_engine: "sqlite"` and `db_proxy: null`.
+
 ### Reservations (leases)
 
 While a lease is held, every changing admin call (`POST`, `PUT`, `DELETE` other than the lease
@@ -205,9 +229,11 @@ certificate for Postgres), `psycopg` and `asyncpg` on the host.
   before forwarding (responses stream).
 - Latency is added before the app is called, not spread over the response.
 - The DB link delays server-to-client traffic only, and does not drop or reset connections.
-- Postgres only for data, reset and sessions. Snapshots and baselines are held in memory and as
+- Snapshots and baselines are held in memory and as
   JSON files: fine for demo-sized data (tens of thousands of rows), not for millions.
 - Unique constraints other than the primary key, and check constraints, are left to Postgres; a
   violation is reported with the table and column but no row number.
 - Tables are read from one schema (`DB_SCHEMA`). Foreign keys to other schemas are not followed.
+- SQLite: one writer at a time. An app that holds a write transaction longer than 30 s makes a
+  load or reset fail ("database is locked"; nothing changed). For small demo apps only.
 - One running session per agent. Two people on the same app share its data and condition.

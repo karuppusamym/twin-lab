@@ -2,6 +2,41 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-17 — Any coding agent builds; several apps in one recording; SQLite
+- **One recording, several applications.** `labctl evidence split <recording>` proposes the
+  applications in a recording (by the site each step's page belongs to; sign-on pages are left
+  out; an embedded iframe is listed so it can be separated), writes a proposal file a person can
+  edit (rename, merge, split one host by path, drop), and with `--apply` writes one recording per
+  app under `evidence/<app>/` plus the whole sequence across apps in
+  `evidence/_sequences/<recording>.flow.yaml`.
+- **Wider technology detection.** A recording now names the server technology (PHP, Java with
+  JSP/Struts/JSF/Spring, .NET Web Forms/MVC/Blazor, classic ASP, Python, Ruby, Node, ColdFusion,
+  Oracle APEX/Forms, SAP, Siebel, ServiceNow, Salesforce), the web server, client libraries and
+  UI suites (jQuery, Bootstrap, PrimeFaces, Telerik, Kendo, DevExpress and others), each with
+  the marker that showed it and a confidence. Markers are header product names, cookie names and
+  file names: never a value. The brief prints them; a part with no marker says so.
+- **Tables from HTML grids.** Server-rendered pages with no JSON now give tables: a data grid's
+  headers become columns with types read from cell shapes, detail forms add columns, selects and
+  radios become code lists. These are the weakest evidence, so DDL or JSON wins.
+- **The build package is for any coding agent.** The zip holds `BUILD_TASK.md` (was
+  `DEVIN_TASK.md`): same technology, same selectors, tables and data only. When the app is
+  already built it says what the new brief adds. `labctl build package|start|status|attach-pr`;
+  the builder is `manual` (default), `claude` (a headless Claude Code session in a worktree on
+  `build/<app>-<digest>`; commits and opens a pull request only with `--pr`) or `devin`, set by
+  `builder:` in `twinlab.local.yaml` or `TWINLAB_BUILDER`. The guard treats `build/...`
+  branches as AI-built.
+- **SQLite** is a third built-in database (`labctl db use <app> sqlite`): one file on a volume
+  the app and the lab agent share, no database container or port. Load, reset, baselines, row
+  changes per session and copies work. Slow-database conditions cannot apply and are refused or
+  reported as unavailable; bots get no database address.
+- **Data shaped by what was recorded.** `labctl data observe <app>` writes
+  `apps/<app>/db/observed-profile.yaml`: code values seen (kept as seen, listed under
+  `verbatim:` for review), and for everything else only its shape. `labctl data generate
+  --from-observed` follows it and adds the rows a recorded flow opens. Names, emails, phone
+  numbers and long identifiers are never copied.
+- Left open: a live build by a Claude session has not been run; desktop and mainframe capture;
+  SQLite on OpenShift.
+
 ## 2026-11-16 — The "partly" items closed; end to end in one command
 - **A lab copy per run.** `labctl lab copy <app>` starts `<app>.run-1`: its own database, agent
   and app on free ports, from the app lab's baseline (or `--data current|app|<pack>`), with the

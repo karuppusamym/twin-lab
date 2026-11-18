@@ -244,10 +244,12 @@ class Lab(Contract):
     """How the lab runs this app: host ports and the test sign-in the data provides."""
 
     port: int = Field(gt=0, lt=65536)  # the lab agent: the app's front door
-    db_port: int = Field(gt=0, lt=65536)  # the database, through the slowdown proxy
+    # The database, through the slowdown proxy. Needed for every database but sqlite (no port).
+    db_port: int | None = Field(default=None, gt=0, lt=65536)
     credentials: dict[str, str] = {}  # test values only, e.g. username/password from the seed
     # Where the database lives: "postgres" (Twin Lab's container, the default), "sqlserver"
-    # (Twin Lab's SQL Server container), or the name of a server in twinlab.local.yaml.
+    # (Twin Lab's SQL Server container), "sqlite" (a file on a volume the app and the lab agent
+    # share), or the name of a server in twinlab.local.yaml.
     database: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][\w.-]*$")
 
 

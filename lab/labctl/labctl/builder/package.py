@@ -1,0 +1,754 @@
+"""The build package: one zip holding the task and everything a coding agent needs.
+
+Builder-neutral. A person gives the zip to any coding agent (Claude Code, GitHub Copilot's coding
+agent, Devin, ...) and pastes `BUILD_TASK.md`; the Claude builder passes the same text to a
+headless session; the Devin API path sends it as the session prompt. Nothing in the task depends
+on one product's features. Raw evidence never goes in: no HAR files, nothing under `evidence/`
+but the app's screenshots, no `.env` files, no `twinlab.local.yaml`.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import zipfile
+from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+
+import yaml
+
+FORMAT = "twinlab-build-package/1"
+TASK_FILE = "BUILD_TASK.md"
+MANIFEST_FILE = "MANIFEST.json"
+SCREENSHOT_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_APP_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_ZIP_TIME = (1980, 1, 1, 0, 0, 0)  # fixed, so the same inputs give the same file contents
+
+
+class PackageError(Exception):
+    pass
+
+
+def normalize_repo(repo: str) -> str:
+    """`owner/name` from `owner/name`, `https://github.com/owner/name` or `...name.git`."""
+    text = repo.strip()
+    text = re.sub(r"^(https?://)?(www\.)?github\.com/", "", text)
+    text = re.sub(r"^git@github\.com:", "", text)
+    text = text.removesuffix("/").removesuffix(".git")
+    if not _REPO_RE.match(text):
+        raise PackageError(f"GitHub repository must look like owner/name, got {repo!r}")
+    return text
+
+
+def excluded(rel: str) -> bool:
+    """True for a repository-relative path that must never be packaged."""
+    path = PurePosixPath(rel)
+    name = path.name.lower()
+    if name.endswith(".har") or name == "twinlab.local.yaml":
+        return True
+    if name == ".env" or name.startswith(".env."):
+        return True
+    parts = path.parts
+    if parts and parts[0] == "evidence":
+        return not (len(parts) >= 4 and parts[2] == "screenshots")
+    return False
+
+
+def _app_yaml(repo_root: Path, app_id: str) -> dict:
+    path = repo_root / "apps" / app_id / "app.yaml"
+    if not path.is_file():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise PackageError(f"{path}: cannot read: {exc}") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def brief_digest(repo_root: Path, app_id: str) -> str:
+    """The brief's digest as `labctl brief` wrote it into app.yaml (`copies.ref`).
+
+    Falls back to a digest of BRIEF.md when app.yaml has none.
+    """
+    ref = ((_app_yaml(repo_root, app_id).get("copies") or {}).get("ref") or "").strip()
+    if ref:
+        return ref
+    brief = repo_root / "apps" / app_id / "BRIEF.md"
+    return "sha256:" + hashlib.sha256(_content(brief)).hexdigest()[:16]
+
+
+def _check_inputs(repo_root: Path, app_id: str) -> None:
+    if not _APP_RE.match(app_id):
+        raise PackageError(f"app id must be lower-case letters, digits, - or _, got {app_id!r}")
+    app_dir = repo_root / "apps" / app_id
+    missing = [
+        f"apps/{app_id}/{rel}"
+        for rel in ("BRIEF.md", "db/schema.sql")
+        if not (app_dir / rel).is_file()
+    ]
+    if missing:
+        raise PackageError(
+            f"cannot package {app_id}: missing {', '.join(missing)}. "
+            f"Generate the brief first: labctl brief {app_id} ..."
+        )
+
+
+def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
+    """(path in the zip, file on disk), repository-relative, sorted, exclusions applied."""
+    app = f"apps/{app_id}"
+    wanted = [
+        f"{app}/BRIEF.md",
+        f"{app}/model.yaml",
+        f"{app}/db/schema.sql",
+        f"{app}/app.yaml",
+        f"{app}/behaviours.json",
+        "AGENTS.md",
+        "docs/factory-playbook.md",
+    ]
+    found: dict[str, Path] = {}
+    for rel in wanted:
+        path = repo_root / rel
+        if path.is_file():
+            found[rel] = path
+    for rel in ("AGENTS.md", "docs/factory-playbook.md"):
+        if rel not in found:
+            raise PackageError(f"cannot package {app_id}: {rel} is missing from the repository")
+    pages = repo_root / app / "pages"
+    if pages.is_dir():
+        for path in sorted(pages.glob("*.html")):
+            if path.is_file() and not path.is_symlink():
+                found[f"{app}/pages/{path.name}"] = path
+    shots = repo_root / "evidence" / app_id / "screenshots"
+    if shots.is_dir():
+        for path in sorted(shots.rglob("*")):
+            if (
+                path.is_file()
+                and not path.is_symlink()
+                and path.suffix.lower() in SCREENSHOT_SUFFIXES
+            ):
+                found[path.relative_to(repo_root).as_posix()] = path
+    return sorted((rel, path) for rel, path in found.items() if not excluded(rel))
+
+
+def _run_env(conf: dict) -> tuple[str | None, int | None, str | None]:
+    run = conf.get("run") or {}
+    env = (run.get("env") or {}).get("database_url")
+    port = (run.get("api") or {}).get("port") or (run.get("web") or {}).get("port")
+    health = (run.get("api") or {}).get("health")
+    return env, port, health
+
+
+def _db_example(engine: str, app_id: str, db_var: str, port: str) -> str:
+    """Commands to try the app against a throwaway database of the right engine."""
+    net, db, app = f"twinlab-{app_id}", f"twinlab-{app_id}-db", f"twinlab-{app_id}-app"
+    e = (engine or "postgres").lower()
+    if e not in ("mssql", "sqlserver", "sql server", "sqlite", "oracle", "postgres"):
+        e = "postgres"  # a named server: any engine the lab maps it to; try a local Postgres
+    if e in ("mssql", "sqlserver", "sql server"):
+        lines = [
+            f"docker network create {net}",
+            f"docker run -d --name {db} --network {net} -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=Lab_pass1 mcr.microsoft.com/mssql/server:2022-latest",
+            f'docker exec {db} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P Lab_pass1 -Q "CREATE DATABASE [{app_id}]"',
+            f"docker run -d --name {app} --network {net} -p 18080:{port} -e {db_var}=mssql+pymssql://sa:Lab_pass1@{db}:1433/{app_id} twinlab/{app_id}:dev",
+        ]
+    elif e == "sqlite":
+        lines = [
+            f"docker volume create {net}",
+            f"docker run -d --name {app} -p 18080:{port} -v {net}:/data -e {db_var}=sqlite:////data/{app_id}.db twinlab/{app_id}:dev",
+        ]
+    elif e == "oracle":
+        lines = [
+            f"docker network create {net}",
+            f"docker run -d --name {db} --network {net} -e ORACLE_PASSWORD=lab -e APP_USER=lab -e APP_USER_PASSWORD=lab gvenzl/oracle-free:slim",
+            f"docker run -d --name {app} --network {net} -p 18080:{port} -e {db_var}=oracle+oracledb://lab:lab@{db}:1521/?service_name=FREEPDB1 twinlab/{app_id}:dev",
+        ]
+    else:
+        lines = [
+            f"docker network create {net}",
+            f"docker run -d --name {db} --network {net} -e POSTGRES_USER=lab -e POSTGRES_PASSWORD=lab -e POSTGRES_DB={app_id} postgres:17",
+            f"docker run -d --name {app} --network {net} -p 18080:{port} -e {db_var}=postgresql://lab:lab@{db}:5432/{app_id} twinlab/{app_id}:dev",
+        ]
+    return "   ```bash\n" + "\n".join(f"   {line}" for line in lines) + "\n   ```"
+
+
+def default_state_dir(repo_root: Path) -> Path:
+    """`STATE_DIR` from the environment or twinlab.local.yaml, else `<repo>/.lab-state`."""
+    value = os.environ.get("STATE_DIR", "").strip()
+    if not value:
+        local = Path(repo_root) / "twinlab.local.yaml"
+        if local.is_file():
+            try:
+                data = yaml.safe_load(local.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                data = {}
+            if isinstance(data, dict):
+                for key, val in data.items():
+                    if str(key).upper() == "STATE_DIR" and val:
+                        value = str(val).strip()
+    path = Path(value or ".lab-state")
+    return path if path.is_absolute() else Path(repo_root) / path
+
+
+def digest8(digest: str) -> str:
+    """First 8 hex digits of a brief digest such as `sha256:0123456789abcdef`."""
+    hexes = re.sub(r"[^0-9a-f]", "", digest.split(":", 1)[-1].lower())
+    return (hexes or "00000000")[:8]
+
+
+def branch_name(repo_root: Path, app_id: str) -> str:
+    return f"build/{app_id}-{digest8(brief_digest(Path(repo_root), app_id))}"
+
+
+# --- what changed since the last build --------------------------------------------------------
+
+_SKIP_COLUMN = {"primary", "foreign", "constraint", "unique", "check", "key", "index", "exclude"}
+
+
+def _section(text: str, heading: str, level: str = "## ") -> str:
+    """The body under `heading` up to the next heading of the same or a higher level."""
+    lines = text.splitlines()
+    out: list[str] = []
+    inside = False
+    depth = len(level.strip())
+    for line in lines:
+        if not inside:
+            inside = line.strip() == level + heading
+            continue
+        if inside:
+            m = re.match(r"^(#+) ", line)
+            if m and len(m.group(1)) <= depth:
+                break
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def brief_inventory(brief: str, schema: str = "") -> dict[str, set[str]]:
+    """What a brief and its schema define: screens, elements, routes, tables, columns."""
+    screens: set[str] = set()
+    elements: set[str] = set()
+    scope = _section(brief, "Screens", "### ")
+    current = ""
+    for line in scope.splitlines():
+        m = re.match(r"^\*\*([^*]+)\*\*\s*\(", line)
+        if m:
+            current = m.group(1).strip()
+            screens.add(current)
+            continue
+        row = re.match(r"^\|\s*(`[^`]+`|\*[^*|]+\*)\s*\|", line)
+        if current and row and not row.group(1).startswith("`Element"):
+            elements.add(f"{current} {row.group(1).strip('`*')}")
+    routes = {
+        m.group(1).strip()
+        for m in re.finditer(r"^\|\s*`([^`]+)`\s*\|", _section(brief, "API routes", "### "), re.M)
+        if m.group(1).strip() not in ("Route",)
+    }
+    tables = {
+        m.group(1).strip()
+        for m in re.finditer(r"^\|\s*`([^`]+)`\s*\|", _section(brief, "Tables", "### "), re.M)
+    }
+    columns: set[str] = set()
+    for name, body in _create_tables(schema):
+        tables.add(name)
+        columns.update(f"{name}.{c}" for c in _columns(body))
+    return {
+        "screens": screens,
+        "elements": elements,
+        "routes": routes,
+        "tables": tables,
+        "columns": columns,
+    }
+
+
+def _create_tables(sql: str) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    for m in re.finditer(
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"\[\]`]+)\s*\(", sql, re.I
+    ):
+        depth, i = 1, m.end()
+        while i < len(sql) and depth:
+            depth += {"(": 1, ")": -1}.get(sql[i], 0)
+            i += 1
+        name = m.group(1).strip('"[]`').split(".")[-1].strip('"[]`')
+        found.append((name.lower(), sql[m.end() : i - 1]))
+    return found
+
+
+def _columns(body: str) -> list[str]:
+    parts, depth, cur = [], 0, ""
+    for ch in body:
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    cols = []
+    for part in parts:
+        tokens = part.strip().split()
+        if tokens and tokens[0].strip('"[]`').lower() not in _SKIP_COLUMN:
+            cols.append(tokens[0].strip('"[]`').lower())
+    return cols
+
+
+def _git_show(repo_root: Path, spec: str) -> str | None:
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(repo_root), "show", spec],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (
+        done.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+        if done.returncode == 0
+        else None
+    )
+
+
+def _git_commits(repo_root: Path, rel: str) -> list[str]:
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(repo_root), "log", "-n", "2", "--format=%H", "--", rel],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return done.stdout.decode().split() if done.returncode == 0 else []
+
+
+def baseline_dir(repo_root: Path, app_id: str, state_dir: Path | None = None) -> Path:
+    return Path(state_dir or default_state_dir(repo_root)) / "builds" / app_id / "baseline"
+
+
+def record_baseline(repo_root: Path, app_id: str, state_dir: Path | None = None) -> Path:
+    """Remember the brief (and schema) a build was started from, for the next enhancement."""
+    repo_root = Path(repo_root)
+    target = baseline_dir(repo_root, app_id, state_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    app = repo_root / "apps" / app_id
+    (target / "BRIEF.md").write_bytes(_content(app / "BRIEF.md"))
+    schema = app / "db" / "schema.sql"
+    (target / "schema.sql").write_bytes(_content(schema) if schema.is_file() else b"")
+    (target / "baseline.json").write_text(
+        json.dumps(
+            {
+                "brief_digest": brief_digest(repo_root, app_id),
+                "recorded_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def previous_brief(
+    repo_root: Path, app_id: str, state_dir: Path | None = None
+) -> tuple[str, str, str] | None:
+    """(brief text, schema text, where it came from) for the build before this brief, or None.
+
+    1. The snapshot a builder stored under `<state>/builds/<app>/baseline/` when it last started.
+    2. The brief committed at HEAD, when the working copy differs from it.
+    3. The committed brief before the latest change to `apps/<app>/BRIEF.md`.
+    """
+    repo_root = Path(repo_root)
+    now = _content(repo_root / "apps" / app_id / "BRIEF.md").decode("utf-8", "replace")
+    snap = baseline_dir(repo_root, app_id, state_dir)
+    if (snap / "BRIEF.md").is_file():
+        text = (snap / "BRIEF.md").read_bytes().decode("utf-8", "replace")
+        schema = (
+            (snap / "schema.sql").read_text(encoding="utf-8")
+            if (snap / "schema.sql").is_file()
+            else ""
+        )
+        return text, schema, "the brief stored when the last build started"
+    rel = f"apps/{app_id}/BRIEF.md"
+    schema_rel = f"apps/{app_id}/db/schema.sql"
+    head = _git_show(repo_root, f"HEAD:{rel}")
+    if head is not None and head != now:
+        return (
+            head,
+            _git_show(repo_root, f"HEAD:{schema_rel}") or "",
+            "the brief at the last commit",
+        )
+    commits = _git_commits(repo_root, rel)
+    if len(commits) == 2:
+        old = _git_show(repo_root, f"{commits[1]}:{rel}")
+        if old is not None:
+            schema = _git_show(repo_root, f"{commits[1]}:{schema_rel}") or ""
+            return old, schema, f"the brief at commit {commits[1][:10]}"
+    return None
+
+
+def _items(label: str, items: list[str], cap: int = 25) -> list[str]:
+    if not items:
+        return []
+    shown = [f"  - `{i}`" for i in sorted(items)[:cap]]
+    more = len(items) - cap
+    if more > 0:
+        shown.append(f"  - ... and {more} more")
+    return [f"- {label} ({len(items)}):", *shown]
+
+
+def whats_new(repo_root: Path, app_id: str, state_dir: Path | None = None) -> str:
+    """A short "what is new" section comparing this brief with the one the app was built from."""
+    repo_root = Path(repo_root)
+    old = previous_brief(repo_root, app_id, state_dir)
+    if old is None:
+        return (
+            "No earlier brief is stored, so this task cannot list what changed. Run "
+            f"`git log -p -- apps/{app_id}/BRIEF.md` and compare the brief with what the app does "
+            "today before you change anything."
+        )
+    old_brief, old_schema, source = old
+    app = repo_root / "apps" / app_id
+    new_brief = _content(app / "BRIEF.md").decode("utf-8", "replace")
+    schema_file = app / "db" / "schema.sql"
+    new_schema = _content(schema_file).decode("utf-8", "replace") if schema_file.is_file() else ""
+    before, after = brief_inventory(old_brief, old_schema), brief_inventory(new_brief, new_schema)
+    lines: list[str] = []
+    labels = {
+        "screens": "New screens",
+        "elements": "New elements (screen, then selector or label)",
+        "routes": "New routes",
+        "tables": "New tables",
+        "columns": "New columns (table.column)",
+    }
+    for key, label in labels.items():
+        lines += _items(label, sorted(after[key] - before[key]))
+    removed: list[str] = []
+    for key, label in (
+        ("screens", "screens"),
+        ("elements", "elements"),
+        ("routes", "routes"),
+        ("tables", "tables"),
+        ("columns", "columns"),
+    ):
+        gone = sorted(before[key] - after[key])
+        if gone:
+            removed += _items(f"No longer in the brief: {label}", gone, cap=10)
+    head = f"Compared with {source}."
+    if not lines and not removed:
+        if old_brief.strip() == new_brief.strip():
+            return (
+                head + " The brief has not changed: only check that the existing app still passes."
+            )
+        return (
+            head + " No screen, element, route, table or column was added or removed; wording, "
+            "rules or behaviour notes changed. Read the brief against the app and fix the "
+            "differences."
+        )
+    return "\n".join([head, "", *lines, *removed])
+
+
+def _stack_text(repo_root: Path, app_id: str) -> str:
+    brief = repo_root / "apps" / app_id / "BRIEF.md"
+    text = _content(brief).decode("utf-8", "replace")
+    body = _section(text, "Stack to pin")
+    return "\n".join(f"   > {line}" if line else "   >" for line in body.splitlines()[:14])
+
+
+def _engine_text(engine: str, db_var: str) -> str:
+    e = (engine or "postgres").lower()
+    if e in ("postgres", "postgresql"):
+        return "**PostgreSQL**: include its driver."
+    if e in ("mssql", "sqlserver", "sql server"):
+        return "**SQL Server**: include its driver (for example `mssql+pymssql://`)."
+    if e == "sqlite":
+        return (
+            "**SQLite**: a single database file, no server. Read its location from "
+            f"`{db_var}` (`sqlite:///<path>`) and keep the file outside the image."
+        )
+    if e == "oracle":
+        return "**Oracle**: include its driver."
+    return (
+        f"the lab's **named database server `{engine}`**. Which engine that is depends on the "
+        "lab's server list, so do not hard-code one: read `DB_ENGINE` at start-up and connect "
+        "with the matching driver (include drivers for PostgreSQL and SQL Server)."
+    )
+
+
+def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | None = None) -> str:
+    """The task text for the coding agent. Pasted unchanged by a person, or passed by a builder."""
+    repo_root = Path(repo_root)
+    _check_inputs(repo_root, app_id)
+    conf = _app_yaml(repo_root, app_id)
+    digest = brief_digest(repo_root, app_id)
+    branch = f"build/{app_id}-{digest8(digest)}"
+    # Only registered automations can be replayed; requested flows have nothing to run.
+    built_for = [
+        str(a) for a in conf.get("built_for") or []
+        if (repo_root / "automations" / str(a) / "automation.yaml").is_file()
+    ]  # fmt: skip
+    engine = ((conf.get("stack") or {}).get("db") or {}).get("engine") or "postgres"
+    db_var, port, health = _run_env(conf)
+    db_var = db_var or "DATABASE_URL"  # the lab's convention when the evidence names none
+    port_text = str(port) if port else "<container port>"
+    health_text = f"`{health}`" if health else "`/api/health`"
+    app = f"apps/{app_id}"
+    if repo:
+        repo_line = (
+            f"1. Use the GitHub repository **`{normalize_repo(repo)}`**. If you are not already "
+            "inside a checkout of it, clone it and start from its default branch (normally "
+            "`main`). Do not use any other repository."
+        )
+    else:
+        repo_line = (
+            "1. Use the repository you were given, the one that contains `AGENTS.md` and an "
+            "`apps/` folder at its root. If you are already inside a checkout of it, work there. "
+            "If there is more than one such repository, or none, stop and ask which to use."
+        )
+    if built_for:
+        conformance = "\n".join(f"   python -m labctl conformance {a}" for a in built_for)
+        conformance_step = (
+            "6. Conformance, one run per automation the app is built for. First run "
+            "`python -m labctl --help`; if it lists `lab` and `conformance` commands, start the "
+            "app in the lab (it needs the ports under `lab:` in `app.yaml` to be free), check, "
+            "and stop it:\n\n"
+            f"   ```bash\n   python -m labctl lab up {app_id}\n{conformance}\n"
+            f"   python -m labctl lab down {app_id} --wipe\n   ```\n\n"
+            "   Every automation must report READY. A BLOCKED report names each missing selector, "
+            "route or table: fix the app, never the automation or the check.\n"
+            '   If the commands do not exist yet, do not write them; record "conformance: not '
+            'available in this repository" in BUILD-NOTES.md and the pull request.'
+        )
+    else:
+        conformance_step = (
+            "6. Conformance: `app.yaml` lists no automations under `built_for`, so there is "
+            "nothing to run. Say so in BUILD-NOTES.md."
+        )
+    enhance = (repo_root / "apps" / app_id / "Dockerfile").is_file()
+    if enhance:
+        brief_rule = (
+            "   - **This app already exists: this is an enhancement.** The brief was regenerated "
+            "from new evidence (a new flow, screens, fields, routes or tables), and a person has "
+            "committed it to the default branch. If the repository's `BRIEF.md` differs from the "
+            "package's, stop and ask: never replace a brief yourself (CI refuses it). Then change "
+            "the existing app: keep everything that works and every element id, route and table "
+            "it already has; add what the new brief adds; remove only what the brief now lists as "
+            "out of scope. `git log -p` on `BRIEF.md` shows what changed."
+        )
+        enhance_rule = (
+            "\n7. Enhancement: every automation that was READY before must still be READY. In "
+            'BUILD-NOTES.md, add a section "Enhancement" listing what you added, changed and '
+            "removed, and why."
+        )
+        title = f"{app_id}: enhance from brief {digest}"
+        new_section = (
+            f"## What is new in this brief (enhancement)\n\n`{app}/` already holds a built app, "
+            "so this is an **enhancement**, not a new build. Extend the app and its schema "
+            "without breaking any existing screen, selector, route, table or row of data. "
+            "Change only what the brief now adds or removes.\n\n"
+            f"{whats_new(repo_root, app_id, state_dir)}\n\n"
+            "Run the app's existing checks first, so you know what passed before you start.\n\n"
+        )
+    else:
+        brief_rule = (
+            f"   - If the repository already has a `{app}/BRIEF.md` that differs from the package, "
+            "stop and ask which one to build from."
+        )
+        enhance_rule = ""
+        title = f"{app_id}: demo app from brief {digest}"
+        new_section = ""
+    db_example = _db_example(engine, app_id, db_var, port_text)
+    stack = _stack_text(repo_root, app_id)
+    stack_block = f"\n{stack}\n" if stack.strip() else ""
+    return f"""# Twin Lab build task: `{app_id}`
+
+You are a coding agent. Build the demo app `{app_id}` for Twin Lab from its build brief and hand
+the result back as one pull request (or, if you cannot open one, as one branch). Follow the steps
+below in order. Brief digest: `{digest}`.
+
+The Twin Lab package (`twinlab-{app_id}-*.zip`) holds this task, the brief and its inputs at
+their repository paths. `MANIFEST.json` in the package lists every file with its sha256. If you
+are working inside the repository, the files are already there.
+
+## What a demo app is for
+
+A demo app is a look-alike of a real application that Twin Lab builds from recordings of it. Its
+purpose is to let automations (UiPath processes, Python scripts, test bots) run against
+something safe: synthetic data, no real systems. Fidelity to what was recorded is therefore the
+whole job: an automation that passes on your app must find the same screens, selectors, routes
+and fields it would find in the real one. You do not need the original business logic beyond the
+behaviours the brief lists.
+
+## Same technology, same structure
+
+Rebuild in the **same technology the brief's "Stack to pin" section names**: the front-end
+framework and version, the server technology and the UI library. Do not substitute another
+because it is easier. If that section names none, use the default it states and record that in
+BUILD-NOTES.md. From the brief, as it stands:
+{stack_block}
+Keep **every recorded selector, element id, class, `name`, iframe and shadow-DOM structure**
+exactly as the brief's screen tables and `{app}/pages/*.html` show them: automations find
+elements by these, and a changed id breaks them silently.
+
+## Database
+
+The database engine to target is {_engine_text(engine, db_var)} Only the **tables and data** are
+needed: create the tables from `{app}/db/schema.sql` and fill them with synthetic rows. Do not
+rebuild the original system's business logic, stored procedures or jobs beyond the behaviours the
+brief lists.
+
+{new_section}## 1. Repository and branch
+
+{repo_line}
+2. Work on a branch named `{branch}`, created from the default branch (if you are already on a
+   branch you were told to use, stay on it). Do all work on it. Never push to the default branch.
+
+## 2. Read before you build
+
+1. Read `AGENTS.md`, then `docs/factory-playbook.md`. Their rules apply to everything below.
+2. Read `{app}/BRIEF.md`.
+   - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
+     attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json` and `{app}/pages/*.html` where present. Check each
+     against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
+     message `{app_id}: brief {digest} from Twin Lab package`.
+{brief_rule}
+3. Read what the brief builds from. If it lists source files, read them and only what they
+   import. Otherwise (no source code, the usual case) read `{app}/pages/*.html`: value-free
+   snapshots of each recorded screen, with the real element ids, classes, labels and layout;
+   `{app}/behaviours.json` and the brief's "Behaviour seen in the recordings": what each screen
+   does; and `{app}/model.yaml`: request and response shapes, codes and timings. Files under
+   `evidence/{app_id}/screenshots/` in the package show how screens look; use them for
+   reference only and do not commit them (`evidence/` is Git-ignored on purpose).
+
+## 3. Build
+
+1. Build only what the brief puts in scope. Nothing under "Out of scope" is built, linked or
+   stubbed.
+2. Files go under `{app}/`: the Dockerfile, the application code and `BUILD-NOTES.md`.
+   Write only under `{app}/`. Do not change any file outside it.
+3. Never edit `{app}/BRIEF.md` or `{app}/db/schema.sql`, and never edit a check (a test, an
+   automation, a flow or a condition) to make it pass. In `{app}/app.yaml`, change only the
+   `run:` section. Every rule keeps `verification: hypothesis`.
+4. Same framework and versions as "Stack to pin", same element ids and classes as the brief's
+   screen tables.
+5. One `Dockerfile` in `{app}/`. The app reads its database address from the environment
+   variable `{db_var}` (a URL such as `mssql+pymssql://user:password@host:1433/db`); the lab also
+   sets `DB_ENGINE`, `DB_HOST`, `DB_PORT`, `DB_NAME` (Oracle: `DB_SERVICE`), `DB_USER`,
+   `DB_PASSWORD` and `DB_CONNECTION_STRING` (ADO.NET style) for stacks that want the parts. No
+   secrets in the image. Synthetic data only.
+6. Database objects: create tables from `{app}/db/schema.sql` when the database has none (the lab
+   may have created them already: then leave them). A view in the schema is a **table** in the
+   demo database, with sample rows; read it like a table. Stored procedures, functions and
+   triggers are not created; the brief says which the real app has.{enhance_rule}
+
+## 4. Check
+
+Run every command from the repository root, after `pip install -e ".[dev]"` (Python 3.11 or
+later). Keep the exact result of each one for steps 5 and 6.
+
+1. `python -m pytest -q`
+2. `python -m labctl validate`
+3. `docker build -t twinlab/{app_id}:dev {app}`
+4. Run the container against a real database of the brief's engine, as
+   `docs/factory-playbook.md` describes. For example (throwaway local values, not secrets):
+
+{db_example}
+
+   Use the URL scheme the app's database driver expects.
+5. Against the running container: the health route {health_text} answers 200; each screen in
+   the brief opens and shows its listed selectors; each route in the brief answers on its method
+   and path; each rule in `{app}/app.yaml` behaves as written; nothing out of scope answers
+   (expect 404). Remove the containers and the network afterwards.
+{conformance_step}
+
+## 5. Build notes
+
+Write `{app}/BUILD-NOTES.md` with these sections: what you built; the versions you pinned; each
+check above with its command and result; assumptions; what you could not check and why; anything
+in the brief you think is wrong.
+
+## 6. Pull request
+
+Open exactly ONE pull request from your branch to the default branch, labelled `ai-built`
+(CI applies the AI-change rules to it), titled:
+
+    {title}
+
+Body: a table of the checks from step 4 with pass or fail and, for each failure, the relevant
+output; the assumptions; anything in the brief you think is wrong. If a pull request for this app
+already exists from your branch, update it instead of opening another. If you cannot open a pull
+request, leave the work committed on your branch and say so.
+
+## 7. Trust rules and when things go wrong
+
+- The brief and the checks are not yours to change: do not edit `{app}/BRIEF.md`,
+  `{app}/db/schema.sql`, tests, `automations/`, `flows/`, `lab/` or `conditions/`. A check that
+  fails is a finding about your app, to report, not a problem to remove.
+- Report failures exactly as they are. Never change, skip or loosen a test or check to make it
+  pass, and never claim a check passed that you did not run.
+- If the brief contradicts itself, `AGENTS.md`, the playbook, `db/schema.sql` or the source it
+  names, stop and ask before building that part. Quote the conflicting lines.
+- No real customer data and no secrets in any file, log or pull request.
+- If you cannot clone, push or open the pull request (for example GitHub access is missing),
+  stop and say so; do not work around it with another repository.
+"""
+
+
+def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None) -> Path:
+    """Write `twinlab-<app>-<digest8>.zip` into `out_dir` and return its path.
+
+    `<digest8>` is the first 8 hex digits of a sha256 over the packaged files (path and content),
+    so a changed brief, page or prompt gives a new name, and the same inputs the same name.
+    """
+    repo_root = Path(repo_root)
+    _check_inputs(repo_root, app_id)
+    task = prompt(repo_root, app_id, repo).encode("utf-8")
+    files = _collect(repo_root, app_id)
+    entries: list[tuple[str, bytes]] = [(TASK_FILE, task)]
+    entries += [(rel, _content(path)) for rel, path in files]
+    listing = [
+        {"path": rel, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+        for rel, data in entries
+    ]
+    combined = hashlib.sha256(
+        "\n".join(f"{f['path']} {f['sha256']}" for f in listing).encode("utf-8")
+    ).hexdigest()
+    manifest = {
+        "format": FORMAT,
+        "app": app_id,
+        "repo": normalize_repo(repo) if repo else None,
+        "brief_digest": brief_digest(repo_root, app_id),
+        "package_digest": combined,
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "files": listing,
+    }
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / f"twinlab-{app_id}-{combined[:8]}.zip"
+    tmp = target.with_suffix(".zip.part")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for rel, data in [*entries, (MANIFEST_FILE, json.dumps(manifest, indent=2).encode())]:
+            info = zipfile.ZipInfo(rel, date_time=_ZIP_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            zf.writestr(info, data)
+    tmp.replace(target)
+    return target
+
+
+def read_manifest(package: Path) -> dict:
+    with zipfile.ZipFile(package) as zf:
+        return json.loads(zf.read(MANIFEST_FILE))
+
+
+TEXT_SUFFIXES = {".md", ".yaml", ".yml", ".json", ".sql", ".html", ".txt", ".css", ".js"}
+
+
+def _content(path: Path) -> bytes:
+    """File bytes as the repository stores them: text with Unix line endings (a Windows checkout
+    may hold CRLF), so the checksums in MANIFEST.json match the files on GitHub."""
+    data = path.read_bytes()
+    return data.replace(b"\r\n", b"\n") if path.suffix.lower() in TEXT_SUFFIXES else data

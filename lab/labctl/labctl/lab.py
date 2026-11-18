@@ -2,6 +2,9 @@
 
 browser / bot -> lab agent :<lab.port> -> app -> lab agent DB proxy -> Postgres
                                 \\-> admin API /_lab/*         (bots' SQL also via :<lab.db_port>)
+
+On SQLite (`lab.database: sqlite`) there is no database container and no DB proxy: the app and
+the agent open the same file on a shared volume.
 """
 
 from __future__ import annotations
@@ -117,6 +120,11 @@ def compose(root: Path, app_id: str) -> dict:
     bind = bind_address(root)
     pw = db_password(root)  # not "lab": the DB port can be reachable from the network
     choice = dbservers.choice(app.lab.database)
+    if choice == "sqlite":
+        doc = _compose_sqlite(root, app_id, app, app_port, db_env, schema, token, bind)
+        return {**doc, "name": project(lab_id)}
+    if app.lab.db_port is None:
+        raise LabError(f"apps/{app_id}/app.yaml: `lab.db_port` is needed for a {choice} database")
     if choice != "postgres":
         doc = _compose_other(root, app_id, app, choice, app_port, db_env, schema, token, bind)
         return {**doc, "name": project(lab_id)}
@@ -271,6 +279,63 @@ def _compose_other(root, app_id, app, choice, app_port, db_env, schema, token, b
     return {"name": project(app_id), "services": services, "volumes": volumes}
 
 
+SQLITE_DIR = "/var/lib/twinlab-db"  # in both containers; the agent image makes it open to all
+
+
+def sqlite_path(app_id: str) -> str:
+    return f"{SQLITE_DIR}/{app_id}.db"
+
+
+def sqlite_app_env(app_id: str, db_env: str) -> dict:
+    """What a demo app on SQLite gets: a SQLAlchemy URL in its database variable (four slashes:
+    an absolute path), the path itself, and the ADO.NET-style string Microsoft.Data.Sqlite takes."""
+    path = sqlite_path(app_id)
+    return {db_env: f"sqlite:///{path}", "DB_ENGINE": "sqlite", "DB_PATH": path,
+            "DB_CONNECTION_STRING": f"Data Source={path}"}  # fmt: skip
+
+
+def _compose_sqlite(root, app_id, app, app_port, db_env, schema, token, bind) -> dict:
+    """SQLite: no database container and no database link. The file is on the volume `sqlite`,
+    mounted into the app and the agent (WAL mode, so the agent's reads never block the app).
+    Loads, resets, baselines and sessions work as on every engine; database slowdowns cannot
+    (there is no connection to slow down), and the agent says so when one is applied."""
+    url = f"sqlite:///{sqlite_path(app_id)}"
+    volumes = [f"{schema.as_posix()}:/lab/schema.sql:ro", "state:/var/lib/twinlab",
+               f"sqlite:{SQLITE_DIR}"]  # fmt: skip
+    agent = {
+        "image": AGENT_IMAGE,
+        "environment": {
+            "APP_ID": app_id,
+            "APP_UPSTREAM": f"http://app:{app_port}",
+            "ADMIN_DATABASE_URL": url,
+            "SCHEMA_PATH": "/lab/schema.sql",
+            "STATE_DIR": "/var/lib/twinlab",
+            "LAB_PORT": "9000",
+            "LAB_TOKEN": token,
+            "APP_HEALTH_PATH": app.run.api.health if app.run.api else "/",
+        },
+        "volumes": volumes,
+        "ports": [f"{bind}:{app.lab.port}:9000"],
+        "restart": "unless-stopped",
+    }
+    return {
+        "name": project(app_id),
+        "services": {
+            "agent": agent,
+            "app": {
+                "image": f"twinlab/{app_id}:dev",
+                "build": {"context": (root / "apps" / app_id).resolve().as_posix()},
+                "environment": sqlite_app_env(app_id, db_env),
+                "volumes": [f"sqlite:{SQLITE_DIR}"],
+                "depends_on": ["agent"],
+                "restart": "unless-stopped",
+            },
+        },
+        # Not `db`: an app switched from Postgres keeps that volume, whose folder Postgres owns.
+        "volumes": {"state": {}, "sqlite": {}},
+    }
+
+
 def compose_file(root: Path, app_id: str) -> Path:
     """Write the Compose file only when it changed, atomically (a running `up` may be reading it)."""
     path = state_dir(root) / "compose" / f"{app_id}.yml"
@@ -358,6 +423,8 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
     lab_id, app = app_id, load_app(root, app_id)
     app_id = app.id  # the database inside the lab is named after the app, also in a copy
     choice = dbservers.choice(app.lab.database)
+    if choice == "sqlite":
+        return _up_sqlite(root, lab_id, file, build)
     if choice != "postgres":
         return _up_other(root, lab_id, file, choice, build)
     # 1. The database alone, so its logins match this machine's passwords before the app and the
@@ -479,6 +546,38 @@ def _up_other(root: Path, app_id: str, file: Path, choice: str, build: bool) -> 
             lab_agent.baseline()
     except LabError:
         pass
+    return out.stdout + out.stderr
+
+
+def _take_first_baseline(root: Path, lab_id: str) -> None:
+    try:
+        lab_agent = agent(root, lab_id)
+        if not (lab_agent.info() or {}).get("baseline"):
+            lab_agent.baseline()
+    except LabError:
+        pass  # the app runs; the baseline can be set from the portal
+
+
+def _up_sqlite(root: Path, lab_id: str, file: Path, build: bool) -> str:
+    """SQLite: the file and the app's tables are made first, by the agent's image on the shared
+    volume (`python -m lab_agent.sqlite_init`), so an app that expects its tables finds them."""
+    init = _docker(["compose", "-f", str(file), "run", "--rm", "--no-deps", "-T", "agent",
+                    "python", "-m", "lab_agent.sqlite_init"], timeout=300)  # fmt: skip
+    if init.returncode != 0:
+        raise LabError(f"preparing the SQLite database of {lab_id} failed:\n"
+                       f"{(init.stderr or init.stdout)[-3000:]}")  # fmt: skip
+    said = [line for line in init.stdout.splitlines() if line.startswith("sqlite:")]
+    if said:
+        print(f"{lab_id}: {said[-1]}")
+    args = ["compose", "-f", str(file), "up", "-d", "--wait", "--wait-timeout", "240"]
+    if build:
+        args.append("--build")
+    out = _docker(args)
+    if out.returncode != 0:
+        raise LabError(
+            f"`docker compose up` failed for {lab_id}:\n{(out.stderr or out.stdout)[-3000:]}"
+        )
+    _take_first_baseline(root, lab_id)
     return out.stdout + out.stderr
 
 

@@ -439,6 +439,12 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
     model.flows = _union(model.flows, part.flows)
     if not model.stack.frontend and not model.stack.backend:
         model.stack = part.stack
+    else:  # a recording's detected server technology and libraries add to a stack read from source
+        if part.stack.server and not model.stack.server:
+            model.stack.server = part.stack.server
+        for kind in ("libraries", "detected"):
+            have = getattr(model.stack, kind)
+            have += [x for x in getattr(part.stack, kind) if x not in have]
     for screen in part.screens:
         have = _find_screen(model.screens, screen)
         if have:

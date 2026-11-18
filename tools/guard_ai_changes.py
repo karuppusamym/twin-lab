@@ -5,7 +5,7 @@ Rules (AGENTS.md states them; this makes CI enforce them):
 1. No self-approval, on every pull request. No rule in `apps/<app>/app.yaml` may be raised to
    `owner_approved` or `reference_verified` unless the pull request has the `owner-approved`
    label, added by the application owner after their review.
-2. Inputs stay as generated, on AI-built pull requests (branch `devin/...` or label `ai-built`).
+2. Inputs stay as generated, on AI-built pull requests (branch `devin/...` or `build/...`, or label `ai-built`).
    The builder may not edit what the factory generated from the evidence: `BRIEF.md`,
    `model.yaml`, `db/schema.sql`, `behaviours.json`, `pages/`, or anything in `app.yaml` outside
    its `run:` section.
@@ -119,7 +119,7 @@ def main(argv: list[str]) -> int:
     changed = [p for p in git("diff", "--name-only", base, "HEAD").splitlines() if p.strip()]
     labels = {x.strip() for x in os.environ.get("TWINLAB_PR_LABELS", "").split(",") if x.strip()}
     branch = os.environ.get("TWINLAB_PR_BRANCH", "")
-    ai_built = branch.startswith("devin/") or "ai-built" in labels
+    ai_built = branch.startswith(("devin/", "build/")) or "ai-built" in labels
     problems = check(changed, lambda p: show(base, p), lambda p: show("HEAD", p), labels, ai_built)
     kind = "AI-built" if ai_built else "person-made"
     print(f"guard: {len(changed)} file(s) changed since {base[:10]}; {kind}; labels: "

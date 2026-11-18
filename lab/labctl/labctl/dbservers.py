@@ -5,6 +5,9 @@ Each app's `app.yaml` names it in `lab.database`:
 - not set, or `postgres`: a Postgres container Twin Lab starts and owns (the default);
 - `sqlserver`: a SQL Server 2022 container Twin Lab starts and owns (Developer edition: for
   testing only, under Microsoft's licence; nothing to configure);
+- `sqlite`: one SQLite file on a Docker volume the app and the lab agent share; no database
+  container and no database port (so no slow-database condition, and bots get no database
+  address). For small demo apps;
 - any other name: a server the DBA set up, configured once per machine in `twinlab.local.yaml`
   (Git-ignored) or in environment variables:
 
@@ -37,13 +40,13 @@ from urllib.parse import quote
 import yaml
 
 LOCAL_FILE = "twinlab.local.yaml"
-BUILT_IN = {"postgres": "postgresql", "sqlserver": "mssql"}
-ENGINES = {"mssql", "oracle", "postgresql"}
+BUILT_IN = {"postgres": "postgresql", "sqlserver": "mssql", "sqlite": "sqlite"}
+ENGINES = {"mssql", "oracle", "postgresql"}  # what a DBA's server may be
 ENGINE_NAMES = {"mssql": "mssql", "sqlserver": "mssql", "sql server": "mssql", "oracle": "oracle",
                 "postgresql": "postgresql", "postgres": "postgresql", "pg": "postgresql"}  # fmt: skip
 DEFAULT_PORT = {"mssql": 1433, "oracle": 1521, "postgresql": 5432}
 DRIVER = {"mssql": "mssql+pymssql", "oracle": "oracle+oracledb", "postgresql": "postgresql"}
-LABEL = {"mssql": "SQL Server", "oracle": "Oracle", "postgresql": "PostgreSQL"}
+LABEL = {"mssql": "SQL Server", "oracle": "Oracle", "postgresql": "PostgreSQL", "sqlite": "SQLite"}
 
 
 class DbServerError(Exception):
@@ -167,7 +170,7 @@ def load(root: Path, env: dict | None = None) -> dict[str, DbServer]:
 
 
 def choice(app_database: str | None) -> str:
-    """'postgres', 'sqlserver' or a configured server's name."""
+    """'postgres', 'sqlserver', 'sqlite' or a configured server's name."""
     return (app_database or "postgres").strip() or "postgres"
 
 

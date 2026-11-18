@@ -108,11 +108,11 @@
   {% if not has_brief %}<p class="muted">Generate the brief first.</p>{% else %}
   <div class="grid">
     <div>
-      <h3>By hand in Devin</h3>
-      <p class="small muted">Download the package, open Devin, attach the zip and paste <code>DEVIN_TASK.md</code> as the task. Devin opens a pull request in {{ repo_name or "the repository" }}. Then record the pull request below.</p>
-      <a class="button" href="/apps/{{ app_id }}/package">Download the Devin package</a>
+      <h3>By hand in a coding agent</h3>
+      <p class="small muted">Download the package, open your coding agent (Claude, Copilot or Devin), attach the zip and paste <code>BUILD_TASK.md</code> as the task. The agent opens a pull request in {{ repo_name or "the repository" }}. Then record the pull request below. To start a Claude session from this machine: <code>labctl build start {{ app_id }} --builder claude</code>.</p>
+      <a class="button" href="/apps/{{ app_id }}/package">Download the build package</a>
       <form method="post" action="/apps/{{ app_id }}/devin/manual" class="row">
-        <div><label for="mpr">Pull request Devin opened</label><input id="mpr" type="url" name="pr_url" placeholder="https://github.com/owner/repo/pull/12" required></div>
+        <div><label for="mpr">Pull request the agent opened</label><input id="mpr" type="url" name="pr_url" placeholder="https://github.com/owner/repo/pull/12" required></div>
         <div><button type="submit" class="secondary">Record it</button></div>
       </form>
     </div>
@@ -159,7 +159,7 @@
   {% if not app %}<p class="muted">Generate the brief first.</p>
   {% else %}
     {% if app.lab %}
-      <p>Front door <code>http://127.0.0.1:{{ app.lab.port }}</code> · database (through the slowdown proxy) <code>127.0.0.1:{{ app.lab.db_port }}</code></p>
+      <p>Front door <code>http://127.0.0.1:{{ app.lab.port }}</code> · database {% if app.lab.db_port %}(through the slowdown proxy) <code>127.0.0.1:{{ app.lab.db_port }}</code>{% else %}SQLite file, no port{% endif %}</p>
       {% if status %}
         <p>{% if status.running %}<span class="pill ok">running</span>{% else %}<span class="pill">stopped</span>{% endif %}
           {% for svc, st in status.services.items() %}<span class="pill">{{ svc }}: {{ st }}</span> {% endfor %}
@@ -185,7 +185,7 @@
       <details {{ 'open' if lab_copies }}><summary>Copies for a run ({{ lab_copies|length }} running)</summary>
         <p class="small muted">A copy is this lab again, with its own data, on its own ports: nobody's run disturbs it, and it disturbs nobody. Point a bot at it with <code>labctl bindings &lt;automation&gt; --on {{ app_id }}.run-1</code>, then drop it.</p>
         {% for c in lab_copies %}
-        <div><code>{{ c.lab }}</code> on <a href="http://127.0.0.1:{{ c.port }}" target="_blank" rel="noopener">port {{ c.port }}</a>, database port {{ c.db_port }}, data: {{ c.data }}
+        <div><code>{{ c.lab }}</code> on <a href="http://127.0.0.1:{{ c.port }}" target="_blank" rel="noopener">port {{ c.port }}</a>{% if c.db_port %}, database port {{ c.db_port }}{% endif %}, data: {{ c.data }}
           <form method="post" action="/apps/{{ app_id }}/copies/{{ c.name }}/drop" class="inline" data-confirm="Drop {{ c.lab }} and its data?"><button type="submit" class="secondary">Drop</button></form></div>
         {% endfor %}
         <form method="post" action="/apps/{{ app_id }}/copies" class="row">
@@ -220,7 +220,7 @@
       <form method="post" action="/apps/{{ app_id }}/lab-settings">
         <div class="row">
           <div><label for="lport">Front door port</label><input id="lport" type="number" name="port" value="{{ app.lab.port if app.lab else '' }}" required></div>
-          <div><label for="dport">Database port</label><input id="dport" type="number" name="db_port" value="{{ app.lab.db_port if app.lab else '' }}" required></div>
+          <div><label for="dport">Database port</label><input id="dport" type="number" name="db_port" value="{{ app.lab.db_port if app.lab and app.lab.db_port else '' }}"></div>
           <div><label for="luser">Test user</label><input id="luser" type="text" name="username" value="{{ app.lab.credentials.username if app.lab else '' }}"></div>
           <div><label for="lpass">Test password</label><input id="lpass" type="text" name="password" value="{{ app.lab.credentials.password if app.lab else '' }}"></div>
         </div>

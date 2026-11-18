@@ -27,7 +27,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import parse_qsl, urlsplit
 
 from labctl import sanitize
@@ -261,6 +261,10 @@ class Exchange:
     ms: float
     kind: str  # document | form | api | asset | other
     values: set[str] = field(default_factory=set)  # words of the values sent and received
+    resp_headers: dict[str, str] = field(
+        default_factory=dict
+    )  # Server, X-Powered-By...: products only
+    cookies: set[str] = field(default_factory=set)  # cookie NAMES sent or set; never a value
 
 
 def _text(content: dict) -> str | None:
@@ -377,13 +381,979 @@ def exchanges(har: dict) -> list[Exchange]:
                 ms=float(entry.get("time") or 0),
                 kind=kind,
                 values=seen,
+                resp_headers=sanitize.tech_headers(resp.get("headers")),
+                cookies=sanitize.cookie_names(entry),
             )
         )  # fmt: skip
     return out
 
 
-# --- framework -------------------------------------------------------------------------------------
+# --- technology ------------------------------------------------------------------------------------
+#
+# What the recording shows about the technology, from signals that are cheap and reliable: response
+# header product names, cookie NAMES, address extensions, script and style file names, element ids,
+# classes, field names, attribute names. Values are never read or kept: a marker is a label written
+# here, not text copied from the recording. Each finding has a confidence: certain (only this
+# technology does it), likely (usually it, but another could), guess (a convention others share).
 
+CERTAIN, LIKELY, GUESS = "certain", "likely", "guess"
+RANK = {CERTAIN: 3, LIKELY: 2, GUESS: 1}
+GENERIC_FRAMEWORKS = {"ASP.NET", "JSP/Servlet"}  # a more specific framework of the same wins
+UI_ORDER = ["Bootstrap"]  # component suites outrank Bootstrap as "the" ui_library
+
+
+class _Rule(NamedTuple):
+    source: str  # where to look: cookie, header:<name>, path, url, host, script, link, class, ...
+    rx: re.Pattern
+    kind: str  # server | web | front | lib | ui
+    name: str  # server: the technology; others: the product
+    conf: str
+    marker: str
+    fw: str | None = None  # server: the framework within the technology
+    implies: tuple[str, str | None] | None = None  # a server technology (and framework) it proves
+    version: str | None = None  # when the signal fixes the version without showing it
+
+
+def _rule(source: str, rx: str, kind: str, name: str, conf: str, marker: str, **kw) -> _Rule:
+    return _Rule(source, re.compile(rx, re.I), kind, name, conf, marker, **kw)
+
+
+def _srv(source, rx, tech, fw, conf, marker, **kw):
+    return _rule(source, rx, "server", tech, conf, marker, fw=fw, **kw)
+
+
+C_, L_, G_ = CERTAIN, LIKELY, GUESS
+VER = r"(?:/(?P<v>\d[\w.]*))?"
+
+SERVER_RULES: list[_Rule] = [
+    # response headers
+    _srv("header:x-powered-by", r"\bPHP" + VER, "PHP", None, C_, "X-Powered-By header names PHP"),
+    _srv("header:x-powered-by", r"\bExpress\b", "Node.js", "Express", C_, "X-Powered-By: Express"),
+    _srv("header:x-powered-by", r"ASP\.NET", ".NET", "ASP.NET", C_, "X-Powered-By: ASP.NET"),
+    _srv(
+        "header:x-powered-by",
+        r"\b(?:Servlet|JSP)\b" + VER,
+        "Java",
+        "JSP/Servlet",
+        C_,
+        "X-Powered-By names Servlet/JSP",
+    ),
+    _srv(
+        "header:x-powered-by",
+        r"\b(?:Undertow|JBoss|WildFly)\b",
+        "Java",
+        None,
+        C_,
+        "X-Powered-By names a Java application server",
+    ),
+    _srv(
+        "header:x-powered-by",
+        r"Phusion Passenger",
+        "Ruby",
+        None,
+        L_,
+        "X-Powered-By: Phusion Passenger",
+    ),
+    _srv(
+        "header:x-aspnet-version",
+        r"^(?P<v>\d[\d.]*)?",
+        ".NET",
+        "ASP.NET",
+        C_,
+        "X-AspNet-Version header",
+    ),
+    _srv(
+        "header:x-aspnetmvc-version",
+        r"^(?P<v>\d[\d.]*)?",
+        ".NET",
+        "ASP.NET MVC",
+        C_,
+        "X-AspNetMvc-Version header",
+    ),
+    _srv(
+        "header:x-generator", r"Drupal(?: (?P<v>\d+))?", "PHP", "Drupal", L_, "X-Generator: Drupal"
+    ),
+    _srv("header:x-generator", r"WordPress", "PHP", "WordPress", L_, "X-Generator: WordPress"),
+    _srv("header:x-runtime", r"^", "Ruby", "Rails", G_, "X-Runtime header (a Rails convention)"),
+    _srv(
+        "header:x-pingback",
+        r"^",
+        "PHP",
+        "WordPress",
+        G_,
+        "X-Pingback header (a WordPress convention)",
+    ),
+    # cookie names
+    _srv("cookie", r"^PHPSESSID$", "PHP", None, C_, "PHPSESSID cookie"),
+    _srv("cookie", r"^laravel_session$", "PHP", "Laravel", C_, "laravel_session cookie"),
+    _srv(
+        "cookie",
+        r"^XSRF-TOKEN$",
+        "PHP",
+        "Laravel",
+        G_,
+        "XSRF-TOKEN cookie (Laravel; Angular and Spring use the name too)",
+    ),
+    _srv(
+        "cookie",
+        r"^(wordpress_|wp-settings-|wordpress_logged_in)",
+        "PHP",
+        "WordPress",
+        C_,
+        "WordPress cookie names",
+    ),
+    _srv("cookie", r"^(ci_session)$", "PHP", "CodeIgniter", L_, "ci_session cookie"),
+    _srv("cookie", r"^(CAKEPHP)$", "PHP", "CakePHP", L_, "CAKEPHP cookie"),
+    _srv("cookie", r"^SSESS[0-9a-f]+$", "PHP", "Drupal", L_, "SSESS... cookie (Drupal)"),
+    _srv("cookie", r"^JSESSIONID$", "Java", None, C_, "JSESSIONID cookie"),
+    _srv("cookie", r"^ASP\.NET_SessionId$", ".NET", "ASP.NET", C_, "ASP.NET_SessionId cookie"),
+    _srv("cookie", r"^\.ASPXAUTH$", ".NET", "ASP.NET", C_, ".ASPXAUTH cookie"),
+    _srv("cookie", r"^\.AspNetCore\.", ".NET", "ASP.NET Core", C_, ".AspNetCore.* cookies"),
+    _srv("cookie", r"^\.AspNet\.", ".NET", "ASP.NET", C_, ".AspNet.* cookies (OWIN)"),
+    _srv("cookie", r"^ASPSESSIONID", "Classic ASP", None, C_, "ASPSESSIONID* cookie"),
+    _srv("cookie", r"^csrftoken$", "Python", "Django", L_, "csrftoken cookie (Django)"),
+    _srv(
+        "cookie",
+        r"^sessionid$",
+        "Python",
+        "Django",
+        G_,
+        "sessionid cookie (Django's name; others use it)",
+    ),
+    _srv("cookie", r"^session$", "Python", "Flask", G_, "session cookie (Flask's default name)"),
+    _srv("cookie", r"^_[\w-]+_session$", "Ruby", "Rails", L_, "_*_session cookie (Rails)"),
+    _srv("cookie", r"^rack\.session$", "Ruby", None, L_, "rack.session cookie"),
+    _srv(
+        "cookie", r"^(connect\.sid|express:sess)$", "Node.js", "Express", L_, "connect.sid cookie"
+    ),
+    _srv("cookie", r"^(CFID|CFTOKEN)$", "ColdFusion", None, C_, "CFID/CFTOKEN cookies"),
+    _srv(
+        "cookie",
+        r"^(ORA_WWV_|WWV_FLOW)",
+        "Oracle",
+        "Oracle APEX",
+        C_,
+        "ORA_WWV_* cookie (Oracle APEX)",
+    ),
+    _srv(
+        "cookie",
+        r"^(sap-usercontext|SAP_SESSIONID_|MYSAPSSO2|sap-ssr)",
+        "SAP",
+        None,
+        C_,
+        "SAP cookie names",
+    ),
+    _srv(
+        "cookie",
+        r"^(glide_user_route|glide_session_store|glide_user_activity|glide_user)$",
+        "ServiceNow",
+        None,
+        C_,
+        "glide_* cookies",
+    ),
+    _srv(
+        "cookie",
+        r"^(BrowserId|sfdc-stream|oinfo)$",
+        "Salesforce",
+        None,
+        L_,
+        "Salesforce cookie names",
+    ),
+    # addresses
+    _srv("path", r"\.jsp[xf]?$", "Java", "JSP", C_, ".jsp addresses"),
+    _srv("path", r"\.do$", "Java", "Struts", L_, ".do addresses (Struts convention)"),
+    _srv("path", r"\.action$", "Java", "Struts", L_, ".action addresses (Struts 2 convention)"),
+    _srv("path", r"\.(xhtml|jsf|faces)$", "Java", "JSF", L_, ".xhtml/.jsf addresses (JSF)"),
+    _srv(
+        "path",
+        r"/(javax|jakarta)\.faces\.resource/",
+        "Java",
+        "JSF",
+        C_,
+        "javax.faces.resource addresses",
+    ),
+    _srv(
+        "path",
+        r"/j_spring_security_check$|/j_security_check$",
+        "Java",
+        "Spring MVC",
+        L_,
+        "j_spring_security_check address (Spring Security)",
+    ),
+    _srv("path", r"^/actuator(/|$)", "Java", "Spring MVC", L_, "/actuator address (Spring Boot)"),
+    _srv("path", r"\.nocache\.js$", "Java", "GWT", C_, ".nocache.js script (GWT)"),
+    _srv("script", r"\.nocache\.js$", "Java", "GWT", C_, ".nocache.js script (GWT)"),
+    _srv("path", r"/VAADIN/", "Java", "Vaadin", C_, "/VAADIN/ addresses"),
+    _srv(
+        "path",
+        r"/wicket/resource/|/wicket-ajax|wicket-event-jquery",
+        "Java",
+        "Wicket",
+        L_,
+        "Wicket resource addresses",
+    ),
+    _srv("flag", r"^jsessionid-in-url$", "Java", None, C_, ";jsessionid in an address"),
+    _srv("path", r"\.aspx$", ".NET", "ASP.NET Web Forms", L_, ".aspx addresses"),
+    _srv("path", r"\.(ashx|asmx|svc)$", ".NET", "ASP.NET", C_, ".ashx/.asmx/.svc addresses"),
+    _srv(
+        "path",
+        r"/(WebResource|ScriptResource)\.axd$",
+        ".NET",
+        "ASP.NET Web Forms",
+        C_,
+        "WebResource.axd / ScriptResource.axd",
+    ),
+    _srv("path", r"\.axd$", ".NET", "ASP.NET", C_, ".axd addresses"),
+    _srv(
+        "path",
+        r"/_blazor(/|$)|^/_framework/blazor\.[\w.]*js$",
+        ".NET",
+        "Blazor",
+        C_,
+        "_blazor / _framework/blazor.*.js",
+    ),
+    _srv("path", r"^/_framework/", ".NET", "Blazor", L_, "/_framework/ addresses (Blazor)"),
+    _srv("path", r"\.asp$", "Classic ASP", None, L_, ".asp addresses"),
+    _srv("path", r"\.cf[mc]$", "ColdFusion", None, C_, ".cfm/.cfc addresses"),
+    _srv("path", r"\.php\d?$", "PHP", None, L_, ".php addresses"),
+    _srv(
+        "path",
+        r"/wp-(content|includes|json|admin)/",
+        "PHP",
+        "WordPress",
+        C_,
+        "/wp-content/ addresses",
+    ),
+    _srv(
+        "path",
+        r"/(sites/default/files|core/misc/drupal)",
+        "PHP",
+        "Drupal",
+        L_,
+        "Drupal file addresses",
+    ),
+    _srv("path", r"^/(_profiler|_wdt)/", "PHP", "Symfony", C_, "Symfony profiler addresses"),
+    _srv(
+        "path",
+        r"^/assets/application-[0-9a-f]{8,}\.(js|css)$",
+        "Ruby",
+        "Rails",
+        L_,
+        "assets/application-<digest> (Rails asset pipeline)",
+    ),
+    _srv("path", r"^/rails/active_storage/", "Ruby", "Rails", C_, "rails/active_storage addresses"),
+    _srv(
+        "path", r"^/static/admin/", "Python", "Django", L_, "static/admin/ addresses (Django admin)"
+    ),
+    _srv(
+        "path",
+        r"/forms/(frmservlet|lservlet)",
+        "Oracle",
+        "Oracle Forms",
+        C_,
+        "forms/frmservlet address",
+    ),
+    _srv("path", r"^/pls/\w+/", "Oracle", None, L_, "/pls/<dad>/ address (mod_plsql)"),
+    _srv("url", r"/f\?p\b", "Oracle", "Oracle APEX", C_, "f?p= addresses (Oracle APEX)"),
+    _srv("url", r"wwv_flow", "Oracle", "Oracle APEX", C_, "wwv_flow addresses (Oracle APEX)"),
+    _srv(
+        "name",
+        r"^(p_flow_id|p_flow_step_id|wwv_flow)",
+        "Oracle",
+        "Oracle APEX",
+        C_,
+        "wwv_flow / p_flow_id fields (Oracle APEX)",
+    ),
+    _srv("path", r"/sap/(bc|public|opu)/", "SAP", None, C_, "/sap/bc/ or /webdynpro/ address"),
+    _srv("path", r"^/webdynpro/", "SAP", "WebDynpro", C_, "/webdynpro/ address"),
+    _srv("url", r"[?,](sap-client|sap-language|sap-ui-)", "SAP", None, L_, "sap-* query fields"),
+    _srv("path", r"/start\.swe$", "Siebel", None, C_, "start.swe address"),
+    _srv("url", r"[?,](SWECmd|SWEView|SWEApplet|SWEC)\b", "Siebel", None, C_, "SWE* query fields"),
+    _srv("url", r"[?,]sysparm_", "ServiceNow", None, C_, "sysparm_* query fields"),
+    _srv(
+        "path", r"/nav_to\.do$|^/api/now/", "ServiceNow", None, C_, "nav_to.do or /api/now/ address"
+    ),
+    _srv("host", r"\.service-now\.com$", "ServiceNow", None, C_, "service-now.com host"),
+    _srv(
+        "host",
+        r"\.(force|salesforce|lightning\.force)\.com$",
+        "Salesforce",
+        None,
+        C_,
+        "Salesforce host",
+    ),
+    _srv(
+        "path",
+        r"^/(aura|lightning/|s/sfsites)",
+        "Salesforce",
+        None,
+        L_,
+        "/aura or /lightning/ address",
+    ),
+    # page contents: field names, ids, meta, attributes
+    _srv(
+        "name",
+        r"^(javax|jakarta)\.faces\.ViewState$",
+        "Java",
+        "JSF",
+        C_,
+        "javax.faces.ViewState field",
+    ),
+    _srv("name", r"^(javax|jakarta)\.faces\.", "Java", "JSF", C_, "javax.faces.* field"),
+    _srv("name", r"^_csrf$", "Java", "Spring MVC", L_, "_csrf field (Spring Security)"),
+    _srv(
+        "meta", r"^_csrf(_header)?$", "Java", "Spring MVC", L_, "_csrf meta tag (Spring Security)"
+    ),
+    _srv("id", r"^__gwt_", "Java", "GWT", C_, "__gwt_* element ids"),
+    _srv("script", r"vaadinBootstrap|vaadin-flow|/VAADIN/", "Java", "Vaadin", C_, "Vaadin scripts"),
+    _srv("tag", r"^vaadin-", "Java", "Vaadin", C_, "vaadin-* elements"),
+    _srv("attr", r"^data-wicket", "Java", "Wicket", L_, "data-wicket attributes"),
+    _srv(
+        "name",
+        r"^__(VIEWSTATE|EVENTVALIDATION|VIEWSTATEGENERATOR|EVENTTARGET|EVENTARGUMENT)$",
+        ".NET",
+        "ASP.NET Web Forms",
+        C_,
+        "__VIEWSTATE / __EVENTVALIDATION fields",
+    ),
+    _srv(
+        "name",
+        r"^__RequestVerificationToken$",
+        ".NET",
+        "ASP.NET MVC / Razor",
+        L_,
+        "__RequestVerificationToken field (ASP.NET anti-forgery)",
+    ),
+    _srv(
+        "script",
+        r"/_framework/blazor\.[\w.]*js$",
+        ".NET",
+        "Blazor",
+        C_,
+        "_framework/blazor.*.js script",
+    ),
+    _srv("tag", r"^blazor-", ".NET", "Blazor", L_, "blazor-* elements"),
+    _srv(
+        "name",
+        r"^csrfmiddlewaretoken$",
+        "Python",
+        "Django",
+        C_,
+        "csrfmiddlewaretoken field (Django)",
+    ),
+    _srv("name", r"^authenticity_token$", "Ruby", "Rails", C_, "authenticity_token field (Rails)"),
+    _srv("meta", r"^csrf-param$", "Ruby", "Rails", L_, "csrf-param meta tag (Rails)"),
+    _srv(
+        "attr", r"^data-turbo(links)?$", "Ruby", "Rails", L_, "data-turbo(links) attributes (Rails)"
+    ),
+    _srv(
+        "script",
+        r"turbolinks|rails-ujs|/rails\.js$|@rails/ujs",
+        "Ruby",
+        "Rails",
+        L_,
+        "Turbolinks / rails-ujs script",
+    ),
+    _srv("name", r"^_token$", "PHP", "Laravel", L_, "_token field (Laravel)"),
+    _srv(
+        "meta",
+        r"^csrf-token$",
+        "PHP",
+        "Laravel",
+        G_,
+        "csrf-token meta tag (Laravel; Rails has it too)",
+    ),
+    _srv("name", r"\[_token\]$", "PHP", "Symfony", L_, "form[_token] field (Symfony forms)"),
+    _srv("class", r"^sf-toolbar", "PHP", "Symfony", C_, "sf-toolbar (Symfony debug bar)"),
+    _srv(
+        "name", r"^(form_build_id|form_token)$", "PHP", "Drupal", L_, "form_build_id field (Drupal)"
+    ),
+    _srv("meta", r"^generator:WordPress", "PHP", "WordPress", C_, "generator meta: WordPress"),
+    _srv("meta", r"^generator:Drupal", "PHP", "Drupal", C_, "generator meta: Drupal"),
+    _srv("meta", r"^generator:Joomla", "PHP", "Joomla", C_, "generator meta: Joomla"),
+    _srv("class", r"^wp-block-|^wp-admin$", "PHP", "WordPress", L_, "wp-* classes (WordPress)"),
+    _srv("script", r"/wp-(content|includes)/", "PHP", "WordPress", C_, "wp-content scripts"),
+    _srv(
+        "script",
+        r"sap-ui-core\.js|/sap/public/bc/ui5",
+        "SAP",
+        "SAP UI5",
+        C_,
+        "sap-ui-core.js script",
+    ),
+    _srv("tag", r"^ui5-", "SAP", "SAP UI5", L_, "ui5-* elements"),
+    _srv("class", r"^sapM|^sapUi", "SAP", "SAP UI5", C_, "sapM*/sapUi* classes (SAP UI5)"),
+    _srv(
+        "class", r"^lsSbar|^lsButton|^urBtn", "SAP", "WebDynpro", L_, "ls*/ur* classes (WebDynpro)"
+    ),
+    _srv("class", r"^slds-", "Salesforce", None, L_, "slds-* classes (Salesforce Lightning)"),
+    _srv("tag", r"^lightning-|^force:|^aura:", "Salesforce", None, C_, "lightning-* elements"),
+    _srv("attr", r"^data-aura", "Salesforce", None, C_, "data-aura* attributes"),
+    _srv("script", r"/aura_(prod|dev)|/auraFW/", "Salesforce", None, C_, "Aura framework scripts"),
+    _srv("id", r"^SWE", "Siebel", None, L_, "SWE* element ids"),
+    _srv("id", r"^gsft_main$|^sysparm_", "ServiceNow", None, C_, "gsft_main / sysparm_ ids"),
+    _srv("class", r"^(sn-|now-)\w", "ServiceNow", None, G_, "sn-* / now-* classes"),
+]
+
+# (source, pattern, product, implied server technology and framework, confidence, marker)
+WEB_RULES: list[_Rule] = [
+    _rule("header:server", r"Microsoft-IIS" + VER, "web", "IIS", C_, "Server header: IIS"),
+    _rule(
+        "header:server",
+        r"\bApache(?!-)(?! Tomcat)" + VER,
+        "web",
+        "Apache HTTP Server",
+        C_,
+        "Server header: Apache",
+    ),
+    _rule("header:server", r"\bnginx" + VER, "web", "nginx", C_, "Server header: nginx"),
+    _rule(
+        "header:server",
+        r"Tomcat" + VER,
+        "web",
+        "Tomcat",
+        C_,
+        "Server header: Tomcat",
+        implies=("Java", None),
+    ),
+    _rule(
+        "header:server",
+        r"Apache-Coyote" + VER,
+        "web",
+        "Tomcat",
+        L_,
+        "Server header: Apache-Coyote (Tomcat's connector)",
+        implies=("Java", None),
+    ),
+    _rule(
+        "header:server",
+        r"WebLogic(?: Server)?(?: (?P<v>\d[\d.]*))?",
+        "web",
+        "WebLogic",
+        C_,
+        "Server header: WebLogic",
+        implies=("Java", None),
+    ),
+    _rule(
+        "header:server",
+        r"WebSphere(?: Application Server)?" + VER,
+        "web",
+        "WebSphere",
+        C_,
+        "Server header: WebSphere",
+        implies=("Java", None),
+    ),
+    _rule(
+        "header:server",
+        r"IBM_HTTP_Server" + VER,
+        "web",
+        "IBM HTTP Server",
+        C_,
+        "Server header: IBM_HTTP_Server",
+    ),
+    _rule(
+        "header:server",
+        r"\b(JBoss|WildFly|Undertow)\b(?:-(?P<v>\d[\w.]*))?",
+        "web",
+        "JBoss",
+        C_,
+        "Server header: JBoss/WildFly",
+        implies=("Java", None),
+    ),
+    _rule(
+        "header:server",
+        r"\bJetty[ (]*(?P<v>\d[\d.]*)?",
+        "web",
+        "Jetty",
+        C_,
+        "Server header: Jetty",
+        implies=("Java", None),
+    ),
+    _rule(
+        "header:server",
+        r"\bKestrel\b",
+        "web",
+        "Kestrel",
+        C_,
+        "Server header: Kestrel",
+        implies=(".NET", "ASP.NET Core"),
+    ),
+    _rule(
+        "header:server",
+        r"Oracle-(HTTP-Server|Application-Server)",
+        "web",
+        "Oracle HTTP Server",
+        L_,
+        "Server header: Oracle HTTP Server",
+    ),
+    _rule(
+        "header:server",
+        r"\b(gunicorn|uvicorn)" + VER,
+        "web",
+        "gunicorn/uvicorn",
+        L_,
+        "Server header: gunicorn/uvicorn",
+        implies=("Python", None),
+    ),
+    _rule(
+        "header:server",
+        r"Werkzeug" + VER,
+        "web",
+        "Werkzeug",
+        L_,
+        "Server header: Werkzeug",
+        implies=("Python", "Flask"),
+    ),
+    _rule(
+        "header:server",
+        r"\b(Puma|Unicorn|Phusion_Passenger)\b",
+        "web",
+        "Ruby app server",
+        L_,
+        "Server header: Puma/Unicorn/Passenger",
+        implies=("Ruby", None),
+    ),
+]
+
+# Front-end frameworks and libraries. `implies` names the server technology a library proves.
+CLIENT_RULES: list[_Rule] = [
+    # AngularJS 1.x, distinct from Angular 2+
+    _rule(
+        "attr",
+        r"^(data-)?ng-(app|controller)$",
+        "front",
+        "AngularJS",
+        C_,
+        "ng-app / ng-controller attribute",
+    ),
+    _rule(
+        "attr", r"^ng-(model|repeat|click|bind|if)$", "front", "AngularJS", L_, "ng-* directives"
+    ),
+    _rule(
+        "script",
+        r"angular(?:js)?(?:[-.](?P<v>1\.\d+(?:\.\d+)?))?(?:\.min)?\.js$|/angularjs/",
+        "front",
+        "AngularJS",
+        C_,
+        "angular.js script",
+    ),
+    _rule(
+        "text",
+        r"AngularJS v(?P<v>1\.\d+\.\d+)",
+        "front",
+        "AngularJS",
+        C_,
+        "AngularJS banner in a bundle",
+    ),
+    _rule(
+        "script",
+        r"svelte|/_app/immutable/",
+        "front",
+        "Svelte",
+        L_,
+        "svelte script / _app/immutable",
+    ),
+    _rule("class", r"^svelte-[a-z0-9]{4,8}$", "front", "Svelte", L_, "svelte-<hash> classes"),
+    _rule("class", r"^ember-(view|application)$", "front", "Ember", L_, "ember-view classes"),
+    _rule("id", r"^ember\d+$", "front", "Ember", L_, "ember<n> element ids"),
+    _rule(
+        "script",
+        r"(^|/)ember(\.min|\.debug)?(-(?P<v>\d[\d.]*))?\.js$",
+        "front",
+        "Ember",
+        C_,
+        "ember.js script",
+    ),
+    _rule(
+        "script",
+        r"knockout(?:-(?P<v>\d[\d.]*))?(?:\.min|\.debug)?\.js$",
+        "lib",
+        "Knockout",
+        C_,
+        "knockout.js script",
+    ),
+    _rule("attr", r"^data-bind$", "lib", "Knockout", L_, "data-bind attributes"),
+    _rule(
+        "text",
+        r"Knockout JavaScript library v(?P<v>\d[\d.]*)",
+        "lib",
+        "Knockout",
+        C_,
+        "Knockout banner in a bundle",
+    ),
+    _rule(
+        "script",
+        r"backbone(?:-(?P<v>\d[\d.]*))?(?:-min|\.min)?\.js$",
+        "lib",
+        "Backbone",
+        C_,
+        "backbone.js script",
+    ),
+    _rule(
+        "text",
+        r"Backbone\.js (?P<v>\d[\d.]*)",
+        "lib",
+        "Backbone",
+        C_,
+        "Backbone banner in a bundle",
+    ),
+    _rule(
+        "id", r"^__next$|^__NEXT_DATA__$", "lib", "Next.js", C_, "__next / __NEXT_DATA__ element"
+    ),
+    _rule("script", r"/_next/static/", "lib", "Next.js", C_, "/_next/static/ scripts"),
+    _rule("header:x-powered-by", r"Next\.js", "lib", "Next.js", C_, "X-Powered-By: Next.js"),
+    _rule("id", r"^__nuxt$|^__NUXT__$", "lib", "Nuxt", C_, "__nuxt element"),
+    _rule("script", r"/_nuxt/", "lib", "Nuxt", C_, "/_nuxt/ scripts"),
+    _rule("script", r"(^|/)dojo(/dojo)?\.js$|/dijit/|/dojox/", "lib", "Dojo", C_, "dojo.js script"),
+    _rule("class", r"^dijit", "lib", "Dojo", C_, "dijit* classes"),
+    _rule(
+        "script",
+        r"(^|/)ext(-all|-debug|-all-debug|-base)?(-(?P<v>\d[\d.]*))?\.js$|/sencha|/ext-\d",
+        "lib",
+        "ExtJS",
+        L_,
+        "ext-all.js script",
+    ),
+    _rule(
+        "class",
+        r"^x-(grid3?|panel|window|btn|form-field|toolbar)\b",
+        "lib",
+        "ExtJS",
+        L_,
+        "x-panel / x-grid classes",
+    ),
+    _rule("id", r"^ext-(gen|comp)-?\d+", "lib", "ExtJS", L_, "ext-gen<n> element ids"),
+    _rule(
+        "script",
+        r"jquery(?:[-.]|/)?(?P<v>\d+\.\d+(?:\.\d+)?)?(?:\.slim)?(?:\.min)?\.js$|/jquery/jquery",
+        "lib",
+        "jQuery",
+        C_,
+        "jquery script",
+    ),
+    _rule(
+        "text",
+        r"jQuery(?: JavaScript Library)? v(?P<v>\d+\.\d+(?:\.\d+)?)",
+        "lib",
+        "jQuery",
+        C_,
+        "jQuery banner in a bundle",
+    ),
+    _rule(
+        "script",
+        r"jquery[-.]?ui(?:[-.](?P<v>\d+\.\d+(?:\.\d+)?))?|jquery\.ui\.",
+        "lib",
+        "jQuery UI",
+        C_,
+        "jquery-ui script",
+    ),
+    _rule(
+        "text",
+        r"jQuery UI(?: -)? v(?P<v>\d+\.\d+(?:\.\d+)?)",
+        "lib",
+        "jQuery UI",
+        C_,
+        "jQuery UI banner in a bundle",
+    ),
+    _rule(
+        "class",
+        r"^ui-(datepicker|autocomplete|dialog-titlebar|sortable|tabs-nav)\b",
+        "lib",
+        "jQuery UI",
+        L_,
+        "ui-datepicker / ui-dialog classes",
+    ),
+    # UI component libraries
+    _rule(
+        "script",
+        r"bootstrap(?:[-.@/]v?(?P<v>\d+\.\d+(?:\.\d+)?))?(?:\.bundle)?(?:\.min)?\.js",
+        "ui",
+        "Bootstrap",
+        C_,
+        "bootstrap script",
+    ),
+    _rule(
+        "link",
+        r"bootstrap(?:[-.@/]v?(?P<v>\d+\.\d+(?:\.\d+)?))?(?:\.min)?\.css",
+        "ui",
+        "Bootstrap",
+        C_,
+        "bootstrap stylesheet",
+    ),
+    _rule(
+        "script",
+        r"/bootstrap[@/](?P<v>\d+\.\d+\.\d+)/",
+        "ui",
+        "Bootstrap",
+        C_,
+        "bootstrap/<version> script",
+    ),
+    _rule(
+        "link",
+        r"/bootstrap[@/](?P<v>\d+\.\d+\.\d+)/",
+        "ui",
+        "Bootstrap",
+        C_,
+        "bootstrap/<version> stylesheet",
+    ),
+    _rule(
+        "text",
+        r"Bootstrap v(?P<v>\d+\.\d+\.\d+)",
+        "ui",
+        "Bootstrap",
+        C_,
+        "Bootstrap banner in a bundle",
+    ),
+    _rule(
+        "attr",
+        r"^data-bs-(toggle|target)$",
+        "ui",
+        "Bootstrap",
+        L_,
+        "data-bs-* attributes (Bootstrap 5)",
+        version="5",
+    ),
+    _rule(
+        "class",
+        r"^(col-xs-\d+|glyphicon)",
+        "ui",
+        "Bootstrap",
+        L_,
+        "col-xs-* / glyphicon classes (Bootstrap 3)",
+        version="3",
+    ),
+    _rule(
+        "class",
+        r"^(custom-select|custom-control|form-row|badge-pill)$",
+        "ui",
+        "Bootstrap",
+        L_,
+        "custom-control / form-row classes (Bootstrap 4)",
+        version="4",
+    ),
+    _rule(
+        "class",
+        r"^(form-select|visually-hidden|ms-auto|me-auto|d-grid)$",
+        "ui",
+        "Bootstrap",
+        L_,
+        "form-select / ms-auto classes (Bootstrap 5)",
+        version="5",
+    ),
+    _rule(
+        "class",
+        r"^(navbar-nav|btn-primary|container-fluid|col-(sm|md|lg)-\d+)$",
+        "ui",
+        "Bootstrap",
+        G_,
+        "navbar-nav / btn-primary / col-md-* classes",
+    ),
+    _rule(
+        "class",
+        r"^ui-(datatable|selectonemenu|inputfield|panelgrid|outputlabel|commandlink)",
+        "ui",
+        "PrimeFaces",
+        C_,
+        "ui-datatable / ui-selectonemenu classes (PrimeFaces)",
+        implies=("Java", "JSF"),
+    ),
+    _rule(
+        "path",
+        r"/primefaces[/-]|primefaces\.(js|css)",
+        "ui",
+        "PrimeFaces",
+        C_,
+        "primefaces resources",
+        implies=("Java", "JSF"),
+    ),
+    _rule(
+        "script",
+        r"primefaces",
+        "ui",
+        "PrimeFaces",
+        C_,
+        "primefaces script",
+        implies=("Java", "JSF"),
+    ),
+    _rule(
+        "class",
+        r"^rf-(dt|p|tb|tbl|pnl|ac|cal|ddm|ei)\b",
+        "ui",
+        "RichFaces",
+        L_,
+        "rf-* classes (RichFaces)",
+        implies=("Java", "JSF"),
+    ),
+    _rule(
+        "path",
+        r"/org\.richfaces/|richfaces",
+        "ui",
+        "RichFaces",
+        C_,
+        "richfaces resources",
+        implies=("Java", "JSF"),
+    ),
+    _rule(
+        "path",
+        r"/icefaces/|ice\.core|icefaces",
+        "ui",
+        "ICEfaces",
+        C_,
+        "icefaces resources",
+        implies=("Java", "JSF"),
+    ),
+    _rule(
+        "class",
+        r"^ice(Dat|Pnl|Cmd|Out|Sel|Inp)",
+        "ui",
+        "ICEfaces",
+        L_,
+        "ice* classes (ICEfaces)",
+        implies=("Java", "JSF"),
+    ),
+    _rule(
+        "class",
+        r"^(?-i:Rad(Grid|ComboBox|Window|Input|Button|TextBox|DatePicker)|rgRow|rgAltRow|riTextBox)",
+        "ui",
+        "Telerik UI for ASP.NET AJAX",
+        C_,
+        "RadGrid / RadComboBox classes",
+        implies=(".NET", "ASP.NET Web Forms"),
+    ),
+    _rule(
+        "path",
+        r"Telerik\.(Web\.UI|Sitefinity)",
+        "ui",
+        "Telerik UI for ASP.NET AJAX",
+        C_,
+        "Telerik.Web.UI.WebResource.axd",
+        implies=(".NET", "ASP.NET Web Forms"),
+    ),
+    _rule(
+        "script",
+        r"kendo(?:[-.](?P<v>\d[\d.]*))?(?:\.all|\.web|\.ui)?(?:\.min)?\.js|/kendo",
+        "ui",
+        "Kendo UI",
+        C_,
+        "kendo script",
+    ),
+    _rule(
+        "class",
+        r"^k-(grid|widget|dropdown|textbox|state-default|button)\b",
+        "ui",
+        "Kendo UI",
+        L_,
+        "k-grid / k-widget classes (Kendo UI)",
+    ),
+    _rule("tag", r"^kendo-", "ui", "Kendo UI", C_, "kendo-* elements"),
+    _rule(
+        "class",
+        r"^(dxgv|dxeEditArea|dxpc|dxm|dxbs-|dx-widget|dx-datagrid|dx-viewport)",
+        "ui",
+        "DevExpress",
+        C_,
+        "dx* classes (DevExpress)",
+    ),
+    _rule(
+        "path",
+        r"/DXR\.axd$",
+        "ui",
+        "DevExpress",
+        C_,
+        "DXR.axd",
+        implies=(".NET", "ASP.NET Web Forms"),
+    ),
+    _rule("script", r"devextreme|dx\.(all|web|viz)", "ui", "DevExpress", C_, "devextreme script"),
+    _rule(
+        "class",
+        r"^(ui-igedit|ui-iggrid|ig(Grid|Combo|Editor|Tree|Chart|Upload))",
+        "ui",
+        "Infragistics",
+        C_,
+        "ig* classes (Infragistics)",
+    ),
+    _rule(
+        "script", r"infragistics|/ig\.ui|igniteui", "ui", "Infragistics", C_, "infragistics script"
+    ),
+    _rule("script", r"syncfusion|/ej2|ej\.web\.all", "ui", "Syncfusion", C_, "syncfusion script"),
+    _rule("tag", r"^ejs-", "ui", "Syncfusion", C_, "ejs-* elements (Syncfusion)"),
+    _rule(
+        "class",
+        r"^e-(control|lib|grid|ddl)\b",
+        "ui",
+        "Syncfusion",
+        L_,
+        "e-control / e-grid classes",
+    ),
+    _rule("tag", r"^mat-", "ui", "Angular Material", C_, "mat-* elements"),
+    _rule(
+        "class",
+        r"^mat-(mdc-|form-field|toolbar|table|raised-button|card)",
+        "ui",
+        "Angular Material",
+        C_,
+        "mat-* classes",
+    ),
+    _rule(
+        "tag",
+        r"^p-(table|dropdown|calendar|button|dialog|menubar|toast|inputtext)$",
+        "ui",
+        "PrimeNG",
+        C_,
+        "p-table / p-dropdown elements (PrimeNG)",
+    ),
+    _rule(
+        "class",
+        r"^p-(datatable|component)\b",
+        "ui",
+        "PrimeNG",
+        G_,
+        "p-datatable / p-component classes (PrimeNG; PrimeReact and PrimeVue use them too)",
+    ),
+    _rule("class", r"^(?-i:Mui[A-Z]\w+)", "ui", "MUI", C_, "Mui* classes"),
+    _rule(
+        "class",
+        r"^ant-(btn|table|select|input|layout|form|modal|menu|row|col)\b",
+        "ui",
+        "Ant Design",
+        C_,
+        "ant-* classes",
+    ),
+    _rule("class", r"^ag-(root|theme-|header|cell|row)", "ui", "AG Grid", C_, "ag-* classes"),
+    _rule("script", r"ag-grid", "ui", "AG Grid", C_, "ag-grid script"),
+    _rule(
+        "class",
+        r"^(dataTables_wrapper|dataTables_length|dataTable|dt-container)\b",
+        "ui",
+        "DataTables",
+        C_,
+        "dataTables_wrapper classes",
+    ),
+    _rule(
+        "script",
+        r"datatables|dataTables(?:[-.](?P<v>\d[\d.]*))?",
+        "ui",
+        "DataTables",
+        C_,
+        "datatables script",
+    ),
+    _rule(
+        "text",
+        r"DataTables (?P<v>\d+\.\d+\.\d+)",
+        "ui",
+        "DataTables",
+        C_,
+        "DataTables banner in a bundle",
+    ),
+]
+RULES = SERVER_RULES + WEB_RULES + CLIENT_RULES
+
+ANGULARJS_SCRIPT = re.compile(
+    r"angular(?:js)?(?:[-.]1\.\d+(?:\.\d+)?)?(?:\.min)?\.js$|/angularjs/", re.I
+)
+TEXT_BANNER = 4000  # bytes of a script searched for a version banner
+
+# JavaScript bundles that show a framework by what is inside them.
 JS_MARKERS: list[tuple[str, re.Pattern, str]] = [
     ("react", re.compile(r'version:"(\d+\.\d+\.\d+[\w.-]*)",rendererPackageName:"react-dom"'),
      "react-dom bundle, rendererPackageName"),
@@ -398,10 +1368,156 @@ SCRIPT_NAMES: list[tuple[str, re.Pattern, str]] = [
     ("vue", re.compile(r"/_nuxt/|vue[.-]|chunk-vendors"), "script name"),
     ("angular", re.compile(r"angular|/main-es20\d\d|/polyfills[.-]"), "script name"),
 ]  # fmt: skip
+FRONT_KEYS = ("framework", "version", "rendering", "marker", "ui_library")
 
 
-def _framework(pages: list[sanitize.PageInfo], scripts: list[tuple[str, str | None]]) -> dict:
-    """The front-end framework, from page markers, bundles and script names, with the marker."""
+def _signals(
+    entries: list[Exchange], pages: list[sanitize.PageInfo], scripts: list[tuple[str, str | None]]
+) -> dict[str, set[str]]:
+    """Every signal the recording shows, by where it was seen. Names and file names only."""
+    out: dict[str, set[str]] = defaultdict(set)
+    for e in entries:
+        out["cookie"] |= e.cookies
+        for name, value in e.resp_headers.items():
+            out[f"header:{name}"].add(value)
+        if ";jsessionid" in e.path.lower():
+            out["flag"].add("jsessionid-in-url")
+        e_path = e.path.split(";", 1)[0]
+        out["path"].add(e_path)
+        out["url"].add(f"{e_path}?{','.join(e.query)}" if e.query else e_path)
+        out["host"].add(e.host.split(":")[0])
+        out["name"].update(f.partition(": ")[0] for f in e.req_fields)
+        out["name"].update(e.query)
+        if e_path.endswith((".js", ".mjs")):
+            out["script"].add(e_path)
+        elif e_path.endswith(".css"):
+            out["link"].add(e_path)
+    for page in pages:
+        for kind, values in page.facts.items():
+            out[kind] |= values
+        for fact in page.facts.get("url", ()):
+            out["path"].add(fact.partition("?")[0])
+        out["class"] |= page.classes
+        out["id"] |= page.ids
+    for path, text in scripts:
+        out["script"].add(path)
+        if text:
+            out["text"].add(text[:TEXT_BANNER])
+    return out
+
+
+def _hits(values: dict[str, set[str]]) -> list[dict]:
+    """Apply every rule; one hit per rule, with the version when the signal showed one."""
+    hits = []
+    for rule in RULES:
+        found, version = False, None
+        for value in values.get(rule.source, ()):
+            m = rule.rx.search(value)
+            if m:
+                found = True
+                version = version or m.groupdict().get("v")
+                if version:
+                    break
+        if found:
+            hits.append({"rule": rule, "version": version or rule.version})
+    return hits
+
+
+def _best(items: list[dict]) -> dict:
+    """The hit to report: highest confidence, then one that shows a version."""
+    top = max(items, key=lambda h: (RANK[h["rule"].conf], bool(h["version"])))
+    if top["version"]:
+        return top
+    shown = [h for h in sorted(items, key=lambda h: -RANK[h["rule"].conf]) if h["version"]]
+    return {**top, "version": shown[0]["version"]} if shown else top
+
+
+def _evidence(hits: list[dict], legacy: list[dict]) -> list[dict]:
+    out, seen = [], set()
+    for h in sorted(hits, key=lambda h: (-RANK[h["rule"].conf], h["rule"].kind, h["rule"].name)):
+        r = h["rule"]
+        name = f"{r.name} / {r.fw}" if r.kind == "server" and r.fw else r.name
+        item = {"kind": r.kind, "name": name, "marker": r.marker, "confidence": r.conf}
+        if h["version"]:
+            item["version"] = h["version"]
+        if (name, r.marker) not in seen:
+            seen.add((name, r.marker))
+            out.append(item)
+    return out + [x for x in legacy if (x["name"], x["marker"]) not in seen]
+
+
+def _pick_server(hits: list[dict]) -> dict:
+    """The server technology (with its framework and web server) the hits show. Several technologies in one recording: the best proven is reported, the others
+    as `also`."""
+    by_tech: dict[str, list[tuple[str, str | None, dict]]] = defaultdict(list)
+    for h in hits:
+        r = h["rule"]
+        if r.kind == "server":
+            by_tech[r.name].append((r.conf, r.fw, h))
+        if r.implies:  # a UI suite or web server proves its platform, never beyond "likely"
+            conf = r.conf if RANK[r.conf] <= RANK[LIKELY] else LIKELY
+            by_tech[r.implies[0]].append((conf, r.implies[1], {**h, "implied": True}))
+    web = [h for h in hits if h["rule"].kind == "web"]
+    web_info: dict = {}
+    if web:
+        h = max(
+            web, key=lambda h: (RANK[h["rule"].conf], bool(h["rule"].implies), bool(h["version"]))
+        )
+        web_info = {
+            "name": h["rule"].name,
+            "marker": h["rule"].marker,
+            "confidence": h["rule"].conf,
+        }
+        if h["version"]:
+            web_info["version"] = h["version"]
+    if not by_tech:
+        return {"web_server": web_info} if web_info else {}
+
+    def score(tech: str) -> tuple[int, int]:
+        items = by_tech[tech]
+        return max(RANK[c] for c, _, _ in items), len({h["rule"].marker for _, _, h in items})
+
+    ranked = sorted(by_tech, key=score, reverse=True)
+    top = ranked[0]
+    items = by_tech[top]
+    conf, _, hit = max(
+        items, key=lambda i: (RANK[i[0]], not i[2].get("implied"), bool(i[2]["version"]))
+    )
+    server = {"technology": top, "marker": hit["rule"].marker, "confidence": conf}
+    fws = [(c, fw, h) for c, fw, h in items if fw]
+    if fws:
+        c, fw, h = max(fws, key=lambda i: (RANK[i[0]], i[1] not in GENERIC_FRAMEWORKS,
+                                           bool(i[2]["version"])))  # fmt: skip
+        server["framework"] = fw
+        server["framework_marker"] = h["rule"].marker
+        server["framework_confidence"] = c
+    version = next((h["version"] for _, _, h in sorted(items, key=lambda i: -RANK[i[0]])
+                    if h["version"] and not h.get("implied")), None)  # fmt: skip
+    if version:
+        server["version"] = version
+    others = [{"technology": t, "marker": max(by_tech[t], key=lambda i: RANK[i[0]])[2]["rule"].marker,
+               "confidence": max(by_tech[t], key=lambda i: RANK[i[0]])[0]}
+              for t in ranked[1:] if score(t)[0] >= RANK[LIKELY]]  # fmt: skip
+    if others:
+        server["also"] = others
+    if web_info:
+        server["web_server"] = web_info
+    return server
+
+
+def _framework(
+    pages: list[sanitize.PageInfo],
+    scripts: list[tuple[str, str | None]],
+    entries: list[Exchange] | None = None,
+) -> dict:
+    """What the recording shows of the technology, with the marker that proved each part.
+
+    Keeps `framework`, `version`, `rendering`, `marker` and `ui_library` (the front end) and adds
+    `server` (technology, framework, marker, confidence, web server), `libraries` and `evidence`.
+    The front-end framework and the server technology are separate facts: a React front end on a
+    Java server reports both.
+    """
+    entries = entries or []
     found: dict[str, dict] = {}
     for page in pages:
         for name, marker in page.markers.items():
@@ -417,22 +1533,69 @@ def _framework(pages: list[sanitize.PageInfo], scripts: list[tuple[str, str | No
                 if m.groups() and not info.get("version"):
                     info["version"], info["marker"] = m.group(1), marker
         for name, pattern, marker in SCRIPT_NAMES:
+            if name == "angular" and ANGULARJS_SCRIPT.search(path):
+                continue  # angular.js is AngularJS 1.x, not Angular
             if name not in found and pattern.search(path.lower()):
                 found[name] = {
                     "marker": f"{marker} {sanitize.route_pattern(path).rsplit('/', 1)[-1]}"
                 }
-    for server in ("aspnet-webforms", "jsf"):
-        if server in found:
-            label = {"aspnet-webforms": "ASP.NET Web Forms", "jsf": "JSF"}[server]
-            return {"framework": label, "rendering": "server", "marker": found[server]["marker"]}
-    for client in ("angular", "react", "vue"):
-        if client in found:
-            return {"framework": client, "version": found[client].get("version"),
-                    "rendering": "client", "marker": found[client]["marker"]}  # fmt: skip
-    if any(p.has_content for p in pages):
-        return {"framework": "server-rendered", "rendering": "server",
-                "marker": "pages arrive with their content; no client framework marker"}  # fmt: skip
-    return {}
+    hits = _hits(_signals(entries, pages, scripts))
+    server = _pick_server(hits)
+    for h in hits:  # a certain server-side framework is the page framework, as markers show it
+        r = h["rule"]
+        if r.kind == "server" and r.conf == CERTAIN:
+            key = {"ASP.NET Web Forms": "aspnet-webforms", "JSF": "jsf"}.get(r.fw or "")
+            if key:
+                found.setdefault(key, {"marker": r.marker})
+    by_name: dict[str, list[dict]] = defaultdict(list)
+    for h in hits:
+        if h["rule"].kind in ("front", "lib", "ui"):
+            by_name[h["rule"].name].append(h)
+    best = {name: _best(items) for name, items in by_name.items()}
+
+    result: dict = {}
+    for srv in ("aspnet-webforms", "jsf"):
+        if srv in found:
+            label = {"aspnet-webforms": "ASP.NET Web Forms", "jsf": "JSF"}[srv]
+            result = {"framework": label, "rendering": "server", "marker": found[srv]["marker"]}
+            break
+    if not result:
+        for client in ("angular", "react", "vue"):
+            if client in found:
+                result = {"framework": client, "version": found[client].get("version"),
+                          "rendering": "client", "marker": found[client]["marker"]}  # fmt: skip
+                break
+    if not result:
+        for name in ("AngularJS", "Ember", "Svelte"):
+            if name in best and best[name]["rule"].kind == "front":
+                h = best[name]
+                result = {"framework": name.lower(), "version": h["version"], "rendering": "client",
+                          "marker": h["rule"].marker}  # fmt: skip
+                break
+    if not result and any(p.has_content for p in pages):
+        result = {"framework": "server-rendered", "rendering": "server",
+                  "marker": "pages arrive with their content; no client framework marker"}  # fmt: skip
+
+    libraries = []
+    chosen = (result.get("framework") or "").lower()
+    for name, h in sorted(best.items(), key=lambda kv: (-RANK[kv[1]["rule"].conf], kv[0])):
+        r = h["rule"]
+        if name.lower() == chosen:
+            continue
+        item = {"name": name, "marker": r.marker, "confidence": r.conf,
+                "role": "ui" if r.kind == "ui" else "library"}  # fmt: skip
+        if h["version"]:
+            item["version"] = h["version"]
+        libraries.append(item)
+    ui = [x for x in libraries if x["role"] == "ui" and x["confidence"] != GUESS]
+    ui.sort(key=lambda x: (x["name"] in UI_ORDER, -RANK[x["confidence"]]))
+    if ui and result:
+        result["ui_library"] = ui[0]["name"]
+
+    legacy = [{"kind": "front", "name": name, "marker": info["marker"], "confidence": CERTAIN}
+              for name, info in found.items()]  # fmt: skip
+    return {**result, "server": server, "libraries": libraries,
+            "evidence": _evidence(hits, legacy)}  # fmt: skip
 
 
 # --- analysis --------------------------------------------------------------------------------------
@@ -604,7 +1767,8 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
 
     scripts = [(e.path, e.resp_text) for e in entries if e.kind == "asset" and e.resp_text]
     all_pages = [p for s in screens.values() for p in s.pages]
-    frontend = _framework(all_pages + shells, scripts)
+    tech = _framework(all_pages + shells, scripts, entries)
+    frontend = {k: tech[k] for k in FRONT_KEYS if k in tech}
     server_rendered = frontend.get("rendering") == "server"
     # Words seen as values, to mask names in error messages. A page shows the application's own
     # messages as text too; those words count only if a request or response also held them.
@@ -696,6 +1860,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             )
         )
 
+    html_tables = _html_tables(screens, {_norm(n) for n in tables}, model.problems, ev)
     for name, cols in tables.items():
         model.tables.append(
             Table(
@@ -713,6 +1878,27 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         for k, v in sorted(codes.items())
         if k not in not_codes and 0 < len(v) <= MAX_CODES
     }
+    for t in html_tables:  # weakest evidence: JSON and DDL name the same entity better
+        first = next(iter(t.columns))
+        pk = re.search(r"(^|_)(id|no|number|code|ref|key)$", first) is not None
+        model.tables.append(
+            Table(
+                name=t.name,
+                basis="assumed",
+                **{"from": [ev]},
+                columns=[
+                    Column(
+                        name=c,
+                        type=SQL_FOR[i["type"]],
+                        nullable=not (pk and c == first),
+                        primary_key=pk and c == first,
+                    )
+                    for c, i in t.columns.items()
+                ],
+            )
+        )
+        for col, values in t.codes.items():
+            model.codes.setdefault(f"{t.name}.{col}", sorted(values))
 
     # Screens.
     pages_dir = Path(pages_dir) if pages_dir is not None else None
@@ -795,19 +1981,266 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             "elements are unknown; record again with `labctl.recorder` to capture the DOM"
         )
 
-    if frontend:
-        model.stack = Stack(
-            frontend={k: v for k, v in frontend.items() if v is not None},
-            pinned={"react-dom": frontend["version"]}
-            if frontend.get("framework") == "react" and frontend.get("version")
-            else {"@angular/core": frontend["version"]}
-            if frontend.get("framework") == "angular" and frontend.get("version")
-            else {},
-            **{"from": [ev]},
-        )
-    else:
+    # Always set, even when nothing was found: the brief then says "not identified" in plain words.
+    model.stack = Stack(
+        frontend={k: v for k, v in frontend.items() if v is not None} or None,
+        pinned={"react-dom": frontend["version"]}
+        if frontend.get("framework") == "react" and frontend.get("version")
+        else {"@angular/core": frontend["version"]}
+        if frontend.get("framework") == "angular" and frontend.get("version")
+        else {},
+        server=tech["server"] or None,
+        libraries=tech["libraries"],
+        detected=tech["evidence"],
+        **{"from": [ev]},
+    )
+    if not frontend:
         model.problems.append(f"{ev}: no framework marker found in the recorded pages or scripts")
     return model
+
+
+# --- tables from HTML grids and forms ------------------------------------------------------------
+#
+# Server-rendered applications (JSP, Web Forms, PHP) show their data in HTML tables and detail forms
+# and answer no JSON. A data grid (a header row over repeated rows) is a candidate table: columns
+# are its header labels, types are guessed from the shape of each column's cells, never kept. A
+# detail or edit form adds the columns its fields name. Both are weak evidence ("assumed"): JSON
+# responses and DDL, when they name the same entity, win.
+
+PAGE_WORDS = {"search", "find", "list", "lists", "listing", "all", "query", "browse", "manage",
+              "management", "maintenance", "edit", "detail", "details", "view", "show", "display",
+              "new", "create", "add", "update", "delete", "remove", "index", "default", "home",
+              "main", "form", "page", "results", "result", "report", "reports", "grid", "table",
+              "entry", "screen", "the", "a", "an", "of", "for", "my", "app", "action", "do", "faces",
+              "jsp", "php", "asp", "aspx", "servlet", "pages", "admin", "export", "filter"}  # fmt: skip
+NOT_ENTITY_PAGE = {"search", "find", "filter", "query", "login", "logon", "signin", "sign", "logout",
+                   "password", "forgot", "reset", "auth"}  # fmt: skip
+ID_PREFIX = re.compile(r"^(gv|gvw|grd|grid|dg|dgv|tbl|table|lst|list|rg|rpt|dt|rep)(?=[A-Z0-9_])")
+ID_SUFFIX = re.compile(r"_?(grid|gridview|table|list|view|results?|repeater|data)$")
+PLACEHOLDER = re.compile(r"^(-+|\.+|select\b.*|choose\b.*|please\b.*|all|any|none|n/?a|)$", re.I)
+FIELD_NOISE = re.compile(
+    r"^(j_?id|__|javax|jakarta|_token|csrf|authenticity|viewstate|ctl\d+$|search|q$|btn|cmd|submit|"
+    r"action|page$|sort|_method|utf8|commit|form$|ice\.|wicket)",
+    re.I,
+)
+FIELD_PREFIX = re.compile(r"^(txt|ddl|chk|cbx|rbl?|cbo|cb|lst|drp|tb|dd|ta|hid|lbl|cal|dtp|sel|inp|"
+                          r"dropdown|text|input)(?=[A-Z_])")  # fmt: skip
+COLUMN_TYPE_HINTS: list[tuple[re.Pattern, str]] = [
+    (
+        re.compile(r"(^|_)(amount|price|total|balance|rate|salary|cost|fee|tax|charge|limit)(_|$)"),
+        "decimal",
+    ),
+    (re.compile(r"(^|_)(qty|quantity|count|age|number_of|years|days)(_|$)"), "integer"),
+    (re.compile(r"(_at|_time|timestamp)$"), "datetime"),
+    (re.compile(r"(^|_)(date|dob|birth|expiry|due|start|end)(_|$)|_on$"), "date"),
+    (re.compile(r"^(is|has|active|enabled|flag)(_|$)"), "boolean"),
+]
+SQL_FOR = {"integer": "INTEGER", "decimal": "NUMERIC", "date": "DATE", "datetime": "TIMESTAMP",
+           "boolean": "BOOLEAN", "text": "TEXT"}  # fmt: skip
+NOT_A_COLUMN = {"actions", "action", "select", "edit", "delete", "view", "details", "detail"}
+
+
+def snake(text: str) -> str:
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", text)
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+def _tokens(text: str) -> list[str]:
+    return [t for t in snake(text).split("_") if t]
+
+
+def _strip_words(tokens: list[str]) -> list[str]:
+    while tokens and tokens[0] in PAGE_WORDS:
+        tokens = tokens[1:]
+    while tokens and tokens[-1] in PAGE_WORDS:
+        tokens = tokens[:-1]
+    return tokens
+
+
+def _norm(name: str) -> str:
+    """A name to compare entities by: singular, lower-case (`customers` and `customer` match)."""
+    n = name.lower()
+    if n.endswith("ies") and len(n) > 4:
+        return n[:-3] + "y"
+    if n.endswith(("sses", "xes", "ches", "shes")):
+        return n[:-2]
+    if n.endswith("s") and not n.endswith(("ss", "us", "is")) and len(n) > 3:
+        return n[:-1]
+    return n
+
+
+def _entity_from_id(gid: str | None) -> str | None:
+    """`ctl00_Main_gvOrders` -> `orders`; a generic id (`GridView1`, `results`) names nothing."""
+    if not gid:
+        return None
+    for part in reversed([p for p in re.split(r"[_$:.]+", gid) if p]):
+        part = ID_PREFIX.sub("", part)
+        tokens = _strip_words(_tokens(ID_SUFFIX.sub("", snake(re.sub(r"\d+$", "", part)))))
+        name = "_".join(tokens)
+        if name and len(name) > 1 and not name.startswith(("ctl", "content")):
+            return name
+    return None
+
+
+def _entity_from_path(pattern: str) -> str | None:
+    for seg in reversed([s for s in pattern.split("/") if s]):
+        if seg.startswith("{") or sanitize.VERSION_SEGMENT.match(seg) or seg.lower() == "api":
+            continue
+        seg = re.sub(r"\.\w{2,5}$", "", seg)
+        tokens = _strip_words(_tokens(seg))
+        if tokens and len("_".join(tokens)) > 1:
+            return "_".join(tokens)
+    return None
+
+
+def _entity_from_heading(texts: list[str]) -> str | None:
+    for text in texts:
+        head = text.split(":", 1)[0]
+        tokens = _strip_words(_tokens(re.sub(r"[^A-Za-z ]+", " ", head)))
+        if tokens and len(tokens) <= 3 and not any(set(t) <= set("x") for t in tokens):
+            return "_".join(tokens)
+    return None
+
+
+def _page_is_not_entity(pattern: str, headings: list[str]) -> bool:
+    words = set(_tokens(pattern.rsplit("/", 1)[-1]))
+    for h in headings[:2]:
+        words |= set(_tokens(h.split(":", 1)[0]))
+    return bool(words & NOT_ENTITY_PAGE)
+
+
+def _column_name(label: str | None, name: str | None, ident: str | None) -> str | None:
+    """A column name from a label (`Account number` -> `account_number`) or a field name."""
+    if label:
+        text = re.sub(r"[*:?]+$", "", label.strip())
+        tokens = _tokens(re.sub(r"[^A-Za-z0-9 _/-]+", " ", text))
+        if 0 < len(tokens) <= 5 and not any(set(t) <= set("x9") for t in tokens):
+            return "_".join(tokens)
+    for raw in (name, ident):
+        parts = [p for p in re.split(r"[$:.]+", raw or "") if p]
+        if not parts:
+            continue
+        part = FIELD_PREFIX.sub("", re.sub(r"\[\]$", "", parts[-1]))
+        col = snake(part)
+        if col and not FIELD_NOISE.match(col) and not FIELD_NOISE.match(part) and len(col) <= 40:
+            return col
+    return None
+
+
+def _guess_type(col: str, kind: str | None) -> str:
+    if kind in ("integer", "decimal", "date", "datetime", "boolean"):
+        return kind
+    for rx, t in COLUMN_TYPE_HINTS:
+        if rx.search(col):
+            return t
+    return "text"
+
+
+def _merge_type(a: str, b: str) -> str:
+    if a == b or b == "text":
+        return a
+    if a == "text":
+        return b
+    if {a, b} <= {"integer", "decimal"}:
+        return "decimal"
+    if {a, b} <= {"date", "datetime"}:
+        return "datetime"
+    return "text"
+
+
+def _code(option: str) -> str | None:
+    """An option's label as a code (`In progress` -> `IN_PROGRESS`); None for placeholders and
+    for anything that looks like data (digits, masked text)."""
+    option = " ".join(option.split())
+    if PLACEHOLDER.match(option) or re.search(r"\d", option) or set(option) <= set("Xx9 ._'-"):
+        return None
+    code = re.sub(r"[^A-Z]+", "_", option.upper()).strip("_")
+    return code if CODE_VALUE.match(code) and len(code) <= 32 else None
+
+
+class _HtmlTable:
+    def __init__(self, name: str):
+        self.name = name
+        self.columns: dict[str, dict] = {}  # column -> {"type", "optional"}
+        self.codes: dict[str, dict[str, None]] = {}  # column -> code values
+        self.screens: set[str] = set()
+
+    def add(self, col: str, kind: str, optional: bool = True) -> None:
+        have = self.columns.get(col)
+        if have is None:
+            self.columns[col] = {"type": kind, "optional": optional}
+        else:
+            have["type"] = _merge_type(have["type"], kind)
+            have["optional"] = have["optional"] and optional
+
+
+def _html_tables(screens: dict[str, _ScreenAcc], skip: set[str], problems: list[str],
+                 ev: str) -> list[_HtmlTable]:  # fmt: skip
+    """Candidate tables from the data grids and detail forms of every recorded page. `skip` holds
+    the (normalised) names JSON or DDL evidence already gives; those entities are left alone."""
+    found: dict[str, _HtmlTable] = {}
+
+    def table(name: str, pattern: str) -> _HtmlTable | None:
+        key = _norm(name)
+        if key in skip:
+            return None
+        t = found.setdefault(key, _HtmlTable(name))
+        t.screens.add(pattern)
+        return t
+
+    for acc in screens.values():
+        for info in acc.pages:
+            heads = info.headings or ([info.title] if info.title else [])
+            used: dict[str, int] = {}
+            for grid in info.grids:
+                entity = (_entity_from_id(grid["id"]) or _entity_from_path(acc.pattern)
+                          or _entity_from_heading(heads))  # fmt: skip
+                if not entity:
+                    problems.append(
+                        f"{ev}: a data grid on {acc.pattern} has no usable name; left out"
+                    )
+                    continue
+                n = used[entity] = used.get(entity, 0) + 1
+                t = table(entity if n == 1 else f"{entity}_{n}", acc.pattern)
+                if t is None:
+                    continue
+                for label, kind, optional in zip(grid["headers"], grid["types"], grid["optional"],
+                                                 strict=True):  # fmt: skip
+                    col = _column_name(label, None, None) if label else None
+                    if col and col not in NOT_A_COLUMN:
+                        t.add(col, _guess_type(col, kind), optional)
+            _form_columns(info, acc.pattern, heads, table)
+    return [t for t in found.values() if len(t.columns) >= 2]
+
+
+def _form_columns(info: sanitize.PageInfo, pattern: str, heads: list[str], table) -> None:
+    """Columns from a detail or edit form: field labels or names; selects and radios as code lists."""
+    fields = [f for f in info.fields if not f["in_grid"] and (f["name"] or f["id"])]
+    if len(fields) < 2 or _page_is_not_entity(pattern, heads):
+        return
+    if any(e["type"] == "password" for e in info.elements):
+        return
+    entity = _entity_from_path(pattern) or _entity_from_heading(heads)
+    t = table(entity, pattern) if entity else None
+    if t is None:
+        return
+    groups: dict[str, dict] = {}
+    for f in fields:
+        col = _column_name(f["label"] if f["type"] != "radio" else None, f["name"], f["id"])
+        if not col or col in NOT_A_COLUMN:
+            continue
+        g = groups.setdefault(col, {"kind": f["type"] or f["tag"], "options": []})
+        g["options"] += f["options"]
+        if f["type"] == "radio" and f["label"]:
+            g["options"].append(f["label"])
+    for col, g in groups.items():
+        kind = {"number": "integer", "date": "date", "datetime-local": "datetime",
+                "checkbox": "boolean"}.get(g["kind"])  # fmt: skip
+        t.add(col, _guess_type(col, kind))
+        codes = [_code(o) for o in g["options"] if not PLACEHOLDER.match(" ".join(o.split()))]
+        if (2 <= len(codes) <= MAX_CODES and all(codes) and not NOT_CODE_FIELD.search(col)
+                and col not in ("id",)):  # fmt: skip
+            t.codes.setdefault(col, {}).update(dict.fromkeys(codes))
 
 
 def _collect(entity, items, tables, codes, not_codes, route_tables) -> None:

@@ -97,10 +97,23 @@ people open it under another name, list that name in `TWINLAB_PORTAL_HOSTS`, or 
 Addresses handed to bots use `127.0.0.1`, not `localhost`. On Windows, `localhost` tries IPv6
 first and each connection then waits about 20 seconds, which looks like a slow app.
 
-## 4. Devin
+## 4. The coding agent that builds the apps
 
-Without Devin access, use the manual path: each app page has **Download the Devin package**. Upload
-it to Devin, paste `DEVIN_TASK.md` as the task, and record the pull request when Devin opens it.
+Any coding agent can build a demo app. Each app page has **Download the build package**: attach
+it to the agent (Claude, GitHub Copilot, Devin), paste `BUILD_TASK.md` as the task, and record the
+pull request when the agent opens it.
+
+To let Twin Lab start a Claude Code session on this machine instead:
+
+```bash
+labctl build start <app> --builder claude
+```
+
+It works in its own worktree on a branch `build/<app>-...` and keeps the session log under
+`.lab-state/builds/<app>/`. Add `--pr` to have it commit and open the pull request. Set the
+default with `builder: claude` in `twinlab.local.yaml`.
+
+Devin, when you have access:
 
 With Devin access, put the key in `twinlab.local.yaml` next to the repository (never committed):
 
@@ -176,6 +189,7 @@ Each app's lab uses one of these (App > Lab > **Database**, or `labctl db use <a
 |---|---|---|
 | `postgres` (default) | a Postgres container per app | Twin Lab, nothing to do |
 | `sqlserver` | a SQL Server 2022 Developer container per app; login `sa` for the app, `bot` for bots | Twin Lab (needs the `mcr.microsoft.com/mssql/server` image; local lab only) |
+| `sqlite` | one SQLite file on a volume the app and the lab agent share; no database container or port; slow-database conditions and bot database access are not available | Twin Lab, nothing to do |
 | a server name | a SQL Server, Oracle or Postgres server your DBA gives you | the DBA: one empty database (or schema) and two accounts |
 
 For a DBA's server, ask for: the engine, host, port, database name (Oracle: service name), an

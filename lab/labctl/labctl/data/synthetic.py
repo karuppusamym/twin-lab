@@ -4,6 +4,12 @@ No real personal data, ever: e-mail addresses end in example.test, telephone num
 fictional 555-01xx range, identifiers such as account or card numbers start with TEST. Short code
 lists (a status column with OPEN, RESOLVED, ...) are taken from `samples` when given, so the app's
 own codes survive.
+
+With an observed profile (`labctl.data.observed`, built from what a recording showed) generated rows
+follow it: code columns draw from the observed vocabulary with the observed shares, identifiers
+match observed patterns, numbers and dates stay inside observed ranges, and "anchor" rows exist for
+the records a recorded flow navigates to. Only the profile's reviewed content is used; without a
+profile nothing here changes.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
 from labctl.data import Rows
+from labctl.data import observed as obs
 from labctl.source.sqlalchemy_models import Column, Table, ordered
 
 __all__ = ["generate", "CODE_LIST_MAX"]
@@ -78,15 +85,30 @@ INT_RANGE = {"SMALLINT": 2**15 - 1, "INTEGER": 2**31 - 1, "BIGINT": 2**63 - 1}
 
 
 def generate(
-    tables: list[Table], seed: int, counts: dict[str, int], samples: Rows | None = None
-) -> Rows:
+    tables: list[Table], seed: int, counts: dict[str, int], samples: Rows | None = None,
+    profile: obs.Profile | dict | None = None, report: dict | None = None,
+) -> Rows:  # fmt: skip
     """`counts[table]` rows for each table named, parents before children.
+
+    `profile` (an `observed.Profile` or its dict) shapes the values and adds anchor rows (their
+    tables are added to `counts` when missing, and counts raised to hold them). `report`, when
+    given, receives `anchors`: where each anchor went and the identifier it got.
 
     Foreign keys point at generated parents, or at `samples` rows for parents not generated.
     Columns the database numbers itself are left out unless some generated row refers to them.
     Raises ValueError with a plain explanation when the request cannot be met.
     """
     samples = samples or {}
+    if profile is not None and not isinstance(profile, obs.Profile):
+        profile = obs.Profile(profile)
+    counts = dict(counts)
+    if profile is not None:
+        for t in tables:
+            anchors = len(profile.anchors(t.name))
+            if anchors and counts.get(t.name, -1) != 0:
+                counts[t.name] = max(counts.get(t.name, 0), anchors)
+    if report is not None:
+        report.setdefault("anchors", [])
     by_name = {t.name: t for t in tables}
     unknown = sorted(set(counts) - set(by_name))
     if unknown:
@@ -102,18 +124,21 @@ def generate(
     out: Rows = {}
     for table in plan:
         out[table.name] = _TableGen(table, seed, counts[table.name], samples, out, needed,
-                                    by_name).rows()  # fmt: skip
+                                    by_name, profile, report).rows()  # fmt: skip
     return out
 
 
 class _TableGen:
     def __init__(self, table: Table, seed: int, n: int, samples: Rows, done: Rows,
-                 needed: set, by_name: dict[str, Table]):  # fmt: skip
+                 needed: set, by_name: dict[str, Table], profile: obs.Profile | None = None,
+                 report: dict | None = None):  # fmt: skip
+        self.profile, self.report = profile, report
         self.table, self.seed, self.n = table, seed, n
         self.samples, self.done, self.needed, self.by_name = samples, done, needed, by_name
         self.rngs: dict[str, random.Random] = {}
         self.used: dict[str, set] = {c.name: set() for c in table.columns if _unique(table, c)}
         self.staff = self._staff()
+        self.anchors = self._anchor_plan()
         self.rows_out: list[dict[str, Any]] = []
 
     def rng(self, key: str) -> random.Random:
@@ -125,12 +150,113 @@ class _TableGen:
         r = random.Random(f"{self.seed}:staff")
         return [f"{r.choice(FIRST)[0]}{r.choice(LAST)}".lower() for _ in range(6)]
 
+    # -- observed profile --
+
+    def _info(self, col: Column) -> dict[str, Any] | None:
+        return self.profile.column(self.table.name, col.name) if self.profile else None
+
+    def _anchor_plan(self) -> list[dict[str, Any]]:
+        """Anchor rows for this table: key column, identifier (kept or a stand-in) and state."""
+        if self.profile is None:
+            return []
+        plan = []
+        cols = {obs.key(c.name): c for c in self.table.columns}
+        pk = next((c for c in self.table.columns if c.primary_key), None)
+        for k, a in enumerate(self.profile.anchors(self.table.name)):
+            spec = a.get("key") or {}
+            col = cols.get(obs.key(spec.get("column", ""))) or pk
+            if col is None or col.references:
+                continue
+            numeric = col.type in INT_RANGE or col.type.startswith("NUMERIC")
+            limit = _length(col.type)
+            kept = spec.get("id") if spec.get("verbatim") and not numeric else None
+            if kept is not None and limit is not None and len(kept) > limit:
+                kept = None
+            if kept is not None:
+                ident: Any = kept
+            elif spec.get("stand_in") is not None:
+                ident = spec["stand_in"]
+            elif numeric:
+                ident = k + 1
+            else:
+                width = max(3, str(spec.get("shape", "")).count("#"))
+                ident = f"TEST{k + 1:0{width}d}"
+                if limit is not None and len(ident) > limit:
+                    ident = ident[-limit:]
+            plan.append({"column": col, "id": ident, "kept": kept is not None,
+                         "state": a.get("state") or {}, "shape": spec.get("shape")})  # fmt: skip
+        return plan
+
+    def _anchor_rows(self) -> None:
+        if self.report is not None:
+            for i, a in enumerate(self.anchors):
+                self.report["anchors"].append({
+                    "table": self.table.name, "column": a["column"].name, "row": i + 1,
+                    "identifier": a["id"], "identifier_kept_from_recording": a["kept"],
+                    "stand_in_for_shape": None if a["kept"] else a["shape"],
+                    "starting_state": dict(a["state"]),
+                })  # fmt: skip
+
+    def _profile_choice(self, col: Column, info: dict, rng: random.Random) -> str | None:
+        limit = _length(col.type)
+        values = [v for v in (info.get("values") or {}) if limit is None or len(v) <= limit]
+        if not values:
+            return None
+        weights = [float(info["values"][v]) or 0.01 for v in values]
+        return rng.choices(values, weights=weights, k=1)[0]
+
+    def _profile_value(self, col: Column, i: int, attempt: int, rng: random.Random) -> Any:
+        """A value that follows the profile's shape for this column, or None to fall through."""
+        info = self._info(col)
+        if not info:
+            return None
+        kind, ctype = info.get("kind"), col.type
+        if kind == "identifier" and info.get("pattern") and _is_text(ctype):
+            unique = col.name in self.used
+            made = obs.make_from_pattern(info["pattern"], i + 1 + 1000 * (attempt > 0) + attempt,
+                                         None if unique and attempt == 0 else rng)  # fmt: skip
+            return _fit(made, _length(ctype), 0, rng, i)
+        lo_hi = info.get("range")
+        if kind == "number" and lo_hi and col.name not in self.used:
+            lo, hi = lo_hi
+            if ctype in INT_RANGE:
+                return rng.randint(int(lo), max(int(lo), int(hi)))
+            if ctype.startswith("NUMERIC") or ctype == "DOUBLE PRECISION":
+                scale = int(info.get("scale", 2))
+                m = re.fullmatch(r"NUMERIC\((\d+),(\d+)\)", ctype)
+                if m:
+                    scale = int(m.group(2))
+                    hi = min(hi, 10 ** (int(m.group(1)) - scale) - 1)
+                    lo = min(lo, hi)
+                value = round(rng.uniform(lo, hi), scale)
+                return format(Decimal(str(value)), "f") if ctype.startswith("NUMERIC") else value
+        if (
+            kind in ("date", "datetime")
+            and lo_hi
+            and ctype in ("DATE", "TIMESTAMP", "TIMESTAMP WITH TIME ZONE")
+        ):
+            first = date.fromisoformat(lo_hi[0] + "-01")
+            y, m = int(lo_hi[1][:4]), int(lo_hi[1][5:7])
+            last = date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1)
+            day = first + timedelta(days=rng.randint(0, max(0, (last - first).days)))
+            if ctype == "DATE":
+                return day.isoformat()
+            moment = datetime(day.year, day.month, day.day, rng.randint(6, 20), rng.randint(0, 59),
+                              tzinfo=UTC)  # fmt: skip
+            return moment.replace(tzinfo=None).isoformat() if ctype == "TIMESTAMP" \
+                else moment.isoformat()  # fmt: skip
+        return None
+
     # -- rows --
 
     def rows(self) -> list[dict[str, Any]]:
         table = self.table
         pk = [c for c in table.columns if c.primary_key]
         seen_pk: set[tuple] = set()
+        for a in self.anchors:  # no generated row may take an anchor's identifier
+            if a["column"].name in self.used:
+                self.used[a["column"].name].add(a["id"])
+        self._anchor_rows()
         for i in range(self.n):
             for attempt in range(ATTEMPTS):
                 row = self.row(i, attempt)
@@ -146,6 +272,15 @@ class _TableGen:
             self.rows_out.append(row)
         return self.rows_out
 
+    def _apply_anchor(self, i: int, values: dict[str, Any]) -> None:
+        a = self.anchors[i]
+        values[a["column"].name] = a["id"]
+        for name, state in a["state"].items():
+            col = next((c for c in self.table.columns if obs.key(c.name) == obs.key(name)), None)
+            limit = _length(col.type) if col is not None else None
+            if col is not None and not col.references and (limit is None or len(state) <= limit):
+                values[col.name] = state
+
     def row(self, i: int, attempt: int) -> dict[str, Any]:
         table = self.table
         person = self.rng("#person")
@@ -158,10 +293,14 @@ class _TableGen:
             if col.name in values or col.references:
                 continue
             if col.autoincrement:
-                if (table.name, col.name) in self.needed:
+                if (table.name, col.name) in self.needed or any(
+                    a["column"] is col for a in self.anchors
+                ):
                     values[col.name] = i + 1
                 continue
             values[col.name] = self.value(col, i, attempt, ctx)
+        if i < len(self.anchors):
+            self._apply_anchor(i, values)
         return {c.name: values[c.name] for c in table.columns if c.name in values}
 
     def _fk_order(self) -> list[Column]:
@@ -228,6 +367,9 @@ class _TableGen:
         seen = [r[col.name] for r in rows if col.name in r]
         if seen:
             return sum(1 for v in seen if v is None) / len(seen)
+        info = self._info(col)
+        if info and "null_share" in info and info.get("seen", 0) >= 3:
+            return float(info["null_share"])
         return NULL_SHARE
 
     def _code_list(self, col: Column) -> list[str] | None:
@@ -242,12 +384,19 @@ class _TableGen:
         if col.nullable and not col.primary_key and rng.random() < self._null_share(col):
             return None
         unique = col.name in self.used
+        info = self._info(col)
+        if info and info.get("kind") == "code" and _is_text(col.type) and not unique:
+            chosen = self._profile_choice(col, info, rng)
+            if chosen is not None:
+                return chosen
         if _is_text(col.type) and not unique:
             codes = self._code_list(col)
             if codes:
                 return rng.choice(codes)
         for tries in range(ATTEMPTS):
-            candidate = self.fresh(col, i, attempt + tries, ctx, rng)
+            candidate = self._profile_value(col, i, attempt + tries, rng)
+            if candidate is None:
+                candidate = self.fresh(col, i, attempt + tries, ctx, rng)
             if not unique:
                 return candidate
             if candidate not in self.used[col.name]:
