@@ -145,7 +145,8 @@ the page around it.
   the Citrix session, Twin Lab's `evidence attach` works against a browser started there with
   a debugging port). Otherwise build from the database schema, API descriptions and the
   robot's logs, which give a backend-only app.
-- **Plug-ins and native windows** (Java applets, ActiveX, a desktop client) are the same case.
+- **Plug-ins and native windows** (Java applets, ActiveX) are the same case. A Windows desktop
+  client is recorded by `labctl desktop` instead ([09-desktop.md](09-desktop.md)).
 - **Pictures of text inside images** are read only on canvases, not in `<img>`. The picture of
   every step is kept for a person to look at.
 

@@ -279,11 +279,20 @@ class DataStack(Contract):
     overridden: bool = False  # a person named the kind (`labctl brief --data`)
 
 
+class DesktopStack(Contract):
+    toolkit: str
+    version: str | None = None
+    runtime: str | None = None
+    marker: str | None = None  # what identified the toolkit in a desktop recording
+    process: str | None = None  # the real application's executable name
+
+
 class Stack(Contract):
     frontend: FrontendStack | None = None
     backend: BackendStack | None = None
     db: DbStack | None = None
     data: DataStack | None = None  # absent: a database-backed app, as before R07
+    desktop: DesktopStack | None = None  # a Windows desktop application (docs/09-desktop.md)
 
 
 class WebRun(Contract):
@@ -299,9 +308,14 @@ class RunEnv(Contract):
     database_url: str = "DATABASE_URL"
 
 
+class DesktopRun(Contract):
+    exe: str  # the built executable, relative to apps/<app>/
+
+
 class Run(Contract):
     web: WebRun | None = None
     api: ApiRun | None = None
+    desktop: DesktopRun | None = None
     env: RunEnv = RunEnv()
 
 

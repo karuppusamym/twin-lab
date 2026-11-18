@@ -1,0 +1,38 @@
+id: casedesk
+name: CaseDesk (demo copy)
+mode: reconstruction
+copies:
+  system: CaseDesk
+  source: null
+  ref: sha256:b470b13ad64a3bc4
+  analysed: '2026-11-17'
+stack:
+  db:
+    engine: sqlite
+  desktop:
+    toolkit: WinForms
+    marker: FrameworkId WinForm
+    process: CaseDesk.exe
+    runtime: .NET 6.0.3
+run:
+  desktop:
+    exe: publish/casedesk/CaseDesk.exe
+db:
+  schema: db/schema.sql
+  derived_from:
+  - desktop:casedesk-flow
+built_for:
+- casedesk-update
+rules:
+- id: R1
+  where: Sign in
+  rule: 'after Sign in: message box "Sign in": Enter your user name and password.'
+  verification: hypothesis
+- id: R2
+  where: Case X-9999
+  rule: 'after Save: message box "Case": A resolved or closed case needs a summary of at least 10 characters.'
+  verification: hypothesis
+- id: R3
+  where: Case X-9999
+  rule: A resolved or closed case needs a summary of at least 10 characters
+  verification: hypothesis

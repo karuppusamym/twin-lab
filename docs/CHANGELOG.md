@@ -2,6 +2,36 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — Desktop applications, phase 1: record, model, brief, package, verify
+- **`labctl desktop`** (`lab/labctl/labctl/desktop/`, [09-desktop.md](09-desktop.md)) records a
+  person using a Windows application: UI Automation events, low-level mouse and keyboard hooks
+  and window polling for WinForms, WPF, UWP/WinUI, Win32/MFC and JavaFX; the **Java Access
+  Bridge** (ctypes, loaded per run, no `jabswitch`) for Swing/AWT. Each step has its window, a
+  canonical locator (`uia:AutomationId=txtCase;ControlType=Edit`, `jab:Name=Save;Role=push
+  button`) with ancestor path, fallbacks and UiPath/pywinauto/WinAppDriver forms, and the
+  value-free control tree after it. Typed values and shown data keep only their shape.
+- Toolkit detection (FrameworkId, window classes, module names, .NET runtime folders, version
+  resource); Electron is sent to the web recorder; Delphi/VCL, Qt, VB6, PowerBuilder and
+  Citrix/RDP are detected and reported not supported.
+- Desktop recordings feed the app model (windows as screens, controls with UIA properties,
+  menus, grids as candidate tables, drop-down code lists, message boxes as rules), the brief
+  ("Desktop windows and controls"; SQLite by default) and a desktop build task (same toolkit and
+  UIA properties, `build.ps1`, `dotnet publish` folder and zip, no Dockerfile). `labctl desktop
+  split` gives one evidence set per executable; `verify` replays a recording against a built
+  app and writes a fidelity report the readiness gate reads (new checks `changed`, `ambiguous`).
+- Reference apps `reference/desktop/CaseDesk` (.NET 6 WinForms) and `CaseDeskSwing` (Java 11
+  Swing), each recorded by a scripted flow and verified against its own recording; a wrong
+  CaseDesk build is caught (missing, extra, ambiguous). The demo app built from the package
+  (`apps/casedesk/`) comes on its own `build/` branch. Live tests run only with
+  `TWINLAB_DESKTOP_GUI=1`.
+- The R12 capability table now says what covers desktop: web DOM replay does not; `labctl
+  desktop` does for WinForms, WPF, UWP, Win32 (UI Automation) and Swing (Access Bridge).
+  Citrix/RDP, Delphi, Qt, VB6 and PowerBuilder are out of scope by decision.
+- Proven live: WinForms (CaseDesk) and Swing (CaseDeskSwing). Left open: WPF, UWP/WinUI,
+  Win32/MFC and JavaFX, and the Electron hand-off, are tested on fixtures only, not on a live
+  app; WinForms raises no Invoke events (clicks come from the mouse hook only); snapshots are
+  taken after a batch of quick actions; Java typing and selection are polled.
+
 ## 2026-11-18 — One replay across applications and tabs; trial findings; R09, R10, R12
 - **The recorder sends each action the moment it happens** and numbers it on arrival. Before, a
   step ended by a navigation was sent while the page unloaded, and newer Chromium drops that

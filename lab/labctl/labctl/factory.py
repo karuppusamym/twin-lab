@@ -4,6 +4,7 @@ Used by `labctl brief` and by the portal so both produce exactly the same files.
 
 Evidence for an app is discovered under `evidence/<app>/` (Git-ignored):
     <recording-id>/recording.har (+ dom/, steps.jsonl)   browser recordings
+    <recording-id>/desktop.json (+ steps.jsonl, trees/)  desktop recordings (labctl.desktop)
     *.har                                                bare HAR files
     *.sql                                                DDL exports
     openapi*.json|yaml|yml, *.postman_collection.json    API descriptions
@@ -35,9 +36,11 @@ class Evidence:
     ddl: list[Path] = field(default_factory=list)
     openapi: list[Path] = field(default_factory=list)
     screenshots: list[Path] = field(default_factory=list)
+    desktop: list[Path] = field(default_factory=list)
 
     def kinds(self) -> list[str]:
-        return [k for k in ("recordings", "ddl", "openapi", "screenshots") if getattr(self, k)]
+        return [k for k in ("recordings", "desktop", "ddl", "openapi", "screenshots")
+                if getattr(self, k)]  # fmt: skip
 
 
 def evidence_dir(root: Path, app_id: str) -> Path:
@@ -51,7 +54,9 @@ def discover(root: Path, app_id: str) -> Evidence:
         return found
     for path in sorted(base.iterdir()):
         name = path.name.lower()
-        if path.is_dir() and name == "screenshots":
+        if path.is_dir() and (path / "desktop.json").is_file() and (path / "steps.jsonl").is_file():
+            found.desktop.append(path)
+        elif path.is_dir() and name == "screenshots":
             found.screenshots = sorted(p for p in path.iterdir() if p.is_file())
         elif path.is_dir() and ((path / "recording.har").exists() or any(path.glob("*.har"))):
             found.recordings.append(path)
@@ -108,6 +113,8 @@ def build_model(
         parts.append(mb.from_source(app_id, source, root))
     for rec in evidence.recordings:
         parts.append(mb.from_recording(app_id, rec, root, pages_dir))
+    for rec in evidence.desktop:
+        parts.append(mb.from_desktop(app_id, rec))
     for spec in evidence.openapi:
         parts.append(mb.from_openapi(app_id, spec))
     if evidence.ddl:
@@ -153,6 +160,8 @@ def generate(
     # screen no longer recorded) must not stay and travel to Devin. The backup keeps the old set.
     shutil.rmtree(out / "pages", ignore_errors=True)
     model = build_model(root, app_id, source)
+    if db_engine is None and model.stack.desktop and not model.stack.db:
+        db_engine = "sqlite"  # a desktop demo app keeps its data in a local file
     result = brief_mod.scope(app_id, system or app_id, model, db_engine, data)
     schema_file.parent.mkdir(parents=True, exist_ok=True)
     _write(
@@ -185,7 +194,8 @@ def generate(
         text = text.replace(marker, cross + marker, 1) if marker in text else f"{text}\n{cross}"
     _write(brief_file, text)
     _write(schema_file, brief_mod.schema(result, root))
-    write_workflow(root, app_id)
+    if not model.stack.desktop:  # the app pipeline builds a container; a desktop app has none
+        write_workflow(root, app_id)
     kept = app_file.exists()
     if not kept:
         _write(

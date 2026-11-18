@@ -213,4 +213,6 @@ Demo apps use whatever the application they copy uses.
 - The portal does not start automations and cannot tell that one finished; a person stops the session.
 - Isolation is per deployed app. Two people using the same app at once will see each other's
   changes until leases are added.
-- Browser applications, APIs and databases only. Desktop, Citrix and mainframe screens are out.
+- Browser applications, APIs and databases; Windows desktop applications through UI Automation
+  and the Java Access Bridge ([09-desktop.md](09-desktop.md)), built and installed on a Windows
+  machine instead of a container. Citrix/remote screens and mainframe terminals are out.

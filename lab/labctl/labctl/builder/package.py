@@ -709,6 +709,11 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
     stack = _stack_text(repo_root, app_id)
     stack_block = f"\n{stack}\n" if stack.strip() else ""
     cross_section = _cross_app_text(repo_root, app_id)
+    if (conf.get("stack") or {}).get("desktop"):  # a Windows desktop app: no container
+        from labctl.desktop import brief as desktop_brief
+
+        return desktop_brief.task(repo_root, app_id, conf, digest, repo_line, branch, brief_rule,
+                                  stack_block)  # fmt: skip
     return f"""# Twin Lab build task: `{app_id}`
 
 You are a coding agent. Build the demo app `{app_id}` for Twin Lab from its build brief and hand

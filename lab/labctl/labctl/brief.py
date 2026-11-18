@@ -16,6 +16,7 @@ from pathlib import Path
 from labctl import model_build as mb
 from labctl import source as src
 from labctl.appmodel import AppModel, Flow, Route, Screen, Table
+from labctl.desktop import brief as desktop_brief
 from labctl.models import Automation
 from labctl.source import sqlalchemy_models as sam
 
@@ -137,7 +138,7 @@ def screen_mode(model: AppModel, screen: Screen) -> str:
     seen = {kinds.get(f, f.split(":", 1)[0]) for f in screen.from_}
     if "source" in seen:
         return "copy"
-    if "har" in seen:
+    if seen & {"har", "desktop"}:
         return "reconstruction"
     if seen & {"automation", "openapi", "postman", "ddl"}:
         return "skeleton"
@@ -253,6 +254,14 @@ def scope(
         same = [r for r in model.routes if r.method == method]
         return src.best_match(path, same, key=lambda r: r.path)
 
+    # A desktop message box is needed when the window whose action opens it is.
+    needed_names = {s.name for s in model.screens if any(f.startswith(NEED) for f in s.from_)}
+    for screen in model.screens:
+        opener = (screen.desktop or {}).get("opened_from")
+        if opener in needed_names and not any(f.startswith(NEED) for f in screen.from_):
+            screen.from_ = screen.from_ + [f for s in model.screens if s.name == opener
+                                           for f in s.from_ if f.startswith(NEED)]  # fmt: skip
+
     # Screens somebody needs, and the API calls they make.
     for screen in model.screens:
         need = [f for f in screen.from_ if f.startswith(NEED)]
@@ -318,7 +327,7 @@ def scope(
     health = [r for r in model.routes if r.method == "GET" and HEALTH.search(r.path)]
     for route in health[:1]:
         _add(brief.routes, route.key, "health check for the lab agent")
-    if not health:
+    if not health and not (desktop_brief.is_desktop(model) and not model.routes):
         brief.gaps.append("no health route in the evidence; the demo app must add GET /api/health")
 
     # Fields a bot's code reads that the recorded answer does not have: the bot would break.
@@ -357,6 +366,22 @@ def scope(
             if listed & set(table.from_):
                 _add(brief.tables, table.name,
                      f"may be read by {names}: no source code shows which tables these screens use")  # fmt: skip
+    # A desktop window shows its data in grids and fields, not through routes: the tables read
+    # from the same desktop recording are what its in-scope windows show.
+    for scope_ in brief.screens:
+        if scope_.screen.surface != "desktop":
+            continue
+        rec_ids = {f for f in scope_.screen.from_ if f.startswith("desktop:")}
+        d = scope_.screen.desktop or {}
+        first = (scope_.screen.name or "").split(" ")[0].lower().rstrip("s")
+        for table in model.tables:
+            shows = bool(d.get("grids")) or first == table.name.lower().rstrip("s")
+            if rec_ids & set(table.from_) and shows:
+                _add(
+                    brief.tables,
+                    table.name,
+                    f"shown in window {scope_.screen.name} (grid or fields)",
+                )
     for table in model.tables:
         callers = _by([f for f in table.from_ if f.startswith("automation:")])
         if callers:
@@ -517,6 +542,15 @@ def app_yaml(brief: Brief, repo_root: Path) -> dict:
         }
     if brief.model.stack.backend:
         stack["backend"] = brief.model.stack.backend
+    if brief.model.stack.desktop:
+        d = brief.model.stack.desktop
+        stack["desktop"] = {
+            k: d[k] for k in ("toolkit", "version", "marker", "process") if d.get(k)
+        }
+        if (d.get("runtime") or {}).get("name"):
+            stack["desktop"]["runtime"] = " ".join(
+                x for x in (d["runtime"]["name"], d["runtime"].get("version")) if x
+            )
     source = brief.source
     return {
         "id": brief.app,
@@ -740,6 +774,9 @@ def render(brief: Brief, repo_root: Path) -> str:
                 "and say which in BUILD-NOTES.md, unless the reviewer has named the version the real "
                 "application runs.\n"
             )
+    elif desktop_brief.is_desktop(model):
+        for line in desktop_brief.stack_lines(model, brief.db_engine):
+            w(line)
     elif brief.browser_only and not (model.stack.frontend or {}).get("marker"):
         w("No evidence shows the stack. No server database is shown (see *Browser storage*).\n")
     elif not (model.stack.frontend or {}).get("marker"):
@@ -775,6 +812,10 @@ def render(brief: Brief, repo_root: Path) -> str:
             w(f"- **{mode}**: {MODES[mode]}.")
         if others:
             w("")
+
+    if desktop_brief.is_desktop(model):
+        for line in desktop_brief.section(brief):
+            w(line)
 
     w("## In scope\n")
     w("### Screens\n")
@@ -899,6 +940,30 @@ def render(brief: Brief, repo_root: Path) -> str:
     w("")
 
     w("## Running in the lab\n")
+    if desktop_brief.is_desktop(model):
+        for line in desktop_brief.running_lines(brief):
+            w(line)
+    else:
+        _running_web(brief, model, w)
+
+    w("## Acceptance checks\n")
+    if desktop_brief.is_desktop(model):
+        for line in desktop_brief.acceptance_lines():
+            w(line)
+    else:
+        _acceptance_web(brief, w)
+
+    w("## Open questions for the reviewer\n")
+    if brief.gaps:
+        for gap in brief.gaps:
+            w(f"- {gap}")
+    else:
+        w("- None found by the analysers. A person still reviews this brief before it is built.")
+    w("")
+    return "\n".join(out)
+
+
+def _running_web(brief: Brief, model: AppModel, w) -> None:
     w(f"- Read configuration from the same environment variables as the evidence shows: "
       f"{', '.join(f'`{e}`' for e in model.stack.env) or 'none found'}.")  # fmt: skip
     if brief.browser_only:
@@ -914,7 +979,8 @@ def render(brief: Brief, repo_root: Path) -> str:
       "packs over it.")  # fmt: skip
     w("- One Dockerfile for the app, no lab code inside it.\n")
 
-    w("## Acceptance checks\n")
+
+def _acceptance_web(brief: Brief, w) -> None:
     w(
         "1. Every element with a selector under *Screens* resolves on its screen (`labctl conformance`, T-07)."
     )
@@ -929,12 +995,3 @@ def render(brief: Brief, repo_root: Path) -> str:
         w("3. `db/schema.sql` applies unchanged and the app works on it.")
     w("4. Every rule under *Rules* behaves as stated; each stays `hypothesis` in `app.yaml`.")
     w("5. Nothing under *Out of scope* exists in the demo app.\n")
-
-    w("## Open questions for the reviewer\n")
-    if brief.gaps:
-        for gap in brief.gaps:
-            w(f"- {gap}")
-    else:
-        w("- None found by the analysers. A person still reviews this brief before it is built.")
-    w("")
-    return "\n".join(out)

@@ -21,13 +21,23 @@ STRENGTH: dict[str, int] = {
     "assumed": 1,
 }
 EvidenceKind = Literal[
-    "source", "automation", "flow", "har", "ddl", "openapi", "postman", "screenshots", "robot_log"
+    "source",
+    "automation",
+    "flow",
+    "har",
+    "desktop",
+    "ddl",
+    "openapi",
+    "postman",
+    "screenshots",
+    "robot_log",
 ]
 Area = Literal["screens", "routes", "tables"]
 # When evidence of different kinds disagrees, the earlier kind wins (docs/06-evidence.md).
 PRIORITY: tuple[str, ...] = (
     "source",
     "har",
+    "desktop",  # a UI Automation recording of a desktop application (labctl.desktop)
     "ddl",
     "openapi",
     "postman",
@@ -68,6 +78,9 @@ class Element(Item):
     type: str | None = None
     classes: list[str] = []
     options: list[str] = []  # option texts of a select
+    # Desktop recordings: the control's UI Automation properties, ancestor path, fallback
+    # locators and their UiPath / pywinauto / WinAppDriver forms (labctl.desktop.locator).
+    uia: dict | None = None
 
 
 class Call(Contract):
@@ -88,6 +101,10 @@ class Screen(Item):
     elements: list[Element] = []  # elements somebody needs
     calls: list[Call] = []  # API calls the screen makes
     snapshots: int | None = None  # recordings: page snapshots seen; 0 means address only
+    # Desktop recordings: "desktop" for a window or dialog, with its window locator, menus,
+    # grids, tab order and keyboard shortcuts seen (labctl.desktop.model). None for web screens.
+    surface: str | None = None
+    desktop: dict | None = None
 
 
 class Timing(Contract):
@@ -163,6 +180,8 @@ class Stack(Contract):
     # Where the business data lives (R07): kind browser | server | unknown, storage kinds seen,
     # storage keys, record shapes (masked) and the evidence for it. See models.DataStack.
     data: dict | None = None
+    # Desktop recordings: the toolkit, its runtime and the executable (labctl.desktop.detect).
+    desktop: dict | None = None
     from_: list[str] = Field(default_factory=list, alias="from")
 
 

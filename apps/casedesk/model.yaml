@@ -1,0 +1,1707 @@
+app: casedesk
+evidence:
+- id: desktop:casedesk-flow
+  kind: desktop
+  ref: sha256:7a19d1a14c51b443
+  complete: []
+- id: flow:casedesk-update
+  kind: flow
+  ref: Twin Lab desktop round (reference app CaseDesk)
+  complete: []
+stack:
+  pinned: {}
+  env: []
+  libraries: []
+  detected:
+  - kind: desktop
+    name: WinForms
+    marker: FrameworkId WinForm
+    confidence: certain
+  - kind: desktop
+    name: WinForms
+    marker: window class WindowsForms10.*
+    confidence: certain
+  - kind: desktop
+    name: WinForms
+    marker: System.Windows.Forms.dll loaded
+    confidence: certain
+  - kind: desktop
+    name: Win32
+    marker: FrameworkId Win32 (also every toolkit's plain windows)
+    confidence: guess
+  - kind: desktop
+    name: Win32
+    marker: 'dialog class #32770 (also message boxes of any toolkit)'
+    confidence: guess
+  - kind: runtime
+    name: .NET
+    marker: 'shared runtime folder of loaded modules: Microsoft.NETCore.App 6.0.3, Microsoft.WindowsDesktop.App
+      6.0.3'
+    confidence: certain
+    version: 6.0.3
+  desktop:
+    surface: desktop
+    toolkit: WinForms
+    marker: FrameworkId WinForm
+    confidence: certain
+    support: full
+    runtime:
+      name: .NET
+      version: 6.0.3
+      marker: 'shared runtime folder of loaded modules: Microsoft.NETCore.App 6.0.3, Microsoft.WindowsDesktop.App
+        6.0.3'
+      confidence: certain
+    executable:
+      file: CaseDesk.exe
+      description: CaseDesk case management (reference)
+      product: CaseDesk
+      product_version: 1.2.0
+      file_version: 1.2.0.0
+    supported: true
+    process: CaseDesk.exe
+  from:
+  - desktop:casedesk-flow
+screens:
+- basis: observed
+  from:
+  - desktop:casedesk-flow
+  - flow:casedesk-update
+  name: Sign in
+  aliases:
+  - LoginForm
+  files: []
+  ids:
+  - btnCancel
+  - btnSignIn
+  - lblPassword
+  - lblUser
+  - txtPassword
+  - txtUser
+  classes: []
+  elements:
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=lblUser;ControlType=Text
+    label: User name
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: lblUser
+      name: User name
+      class_name: WindowsForms10.Static.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=LoginForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=User name;ControlType=Text
+      - uia:AutomationId=lblUser;Name=User name;ControlType=Text
+      - uia:AutomationId=lblUser;ControlType=Text;ClassName=WindowsForms10.Static.app.0.*
+      - uia:ControlType=Text;ClassName=WindowsForms10.Static.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 27
+      - 68
+      - 90
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='LoginForm' /><uia automationid='lblUser' role='text' />
+      pywinauto:
+        auto_id: lblUser
+        control_type: Text
+      winappdriver:
+        using: accessibility id
+        value: lblUser
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=txtUser;ControlType=Edit
+    label: User name
+    actions:
+    - type
+    classes: []
+    options: []
+    uia:
+      control_type: Edit
+      automation_id: txtUser
+      name: User name
+      class_name: WindowsForms10.Edit.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=LoginForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=User name;ControlType=Edit
+      - uia:AutomationId=txtUser;Name=User name;ControlType=Edit
+      - uia:AutomationId=txtUser;ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*
+      - uia:ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*;Index=0
+      enabled: true
+      visible: true
+      access_key: Alt+u
+      rect:
+      - 121
+      - 65
+      - 180
+      - 31
+      uipath: <wnd app='casedesk.exe' ctrlname='LoginForm' /><uia automationid='txtUser' role='editable
+        text' />
+      pywinauto:
+        auto_id: txtUser
+        control_type: Edit
+      winappdriver:
+        using: accessibility id
+        value: txtUser
+      value_shapes:
+      - ''
+      - xxxxxx
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=lblPassword;ControlType=Text
+    label: Password
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: lblPassword
+      name: Password
+      class_name: WindowsForms10.Static.app.0.*
+      framework_id: WinForm
+      index: 1
+      path:
+      - uia:AutomationId=LoginForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Password;ControlType=Text
+      - uia:AutomationId=lblPassword;Name=Password;ControlType=Text
+      - uia:AutomationId=lblPassword;ControlType=Text;ClassName=WindowsForms10.Static.app.0.*
+      - uia:ControlType=Text;ClassName=WindowsForms10.Static.app.0.*;Index=1
+      enabled: true
+      visible: true
+      rect:
+      - 27
+      - 102
+      - 90
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='LoginForm' /><uia automationid='lblPassword' role='text'
+        />
+      pywinauto:
+        auto_id: lblPassword
+        control_type: Text
+      winappdriver:
+        using: accessibility id
+        value: lblPassword
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=txtPassword;ControlType=Edit
+    label: Password
+    actions:
+    - type
+    classes: []
+    options: []
+    uia:
+      control_type: Edit
+      automation_id: txtPassword
+      name: Password
+      class_name: WindowsForms10.Edit.app.0.*
+      framework_id: WinForm
+      index: 1
+      path:
+      - uia:AutomationId=LoginForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Password;ControlType=Edit
+      - uia:AutomationId=txtPassword;Name=Password;ControlType=Edit
+      - uia:AutomationId=txtPassword;ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*
+      - uia:ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*;Index=1
+      enabled: true
+      visible: true
+      access_key: Alt+p
+      rect:
+      - 121
+      - 99
+      - 180
+      - 31
+      uipath: <wnd app='casedesk.exe' ctrlname='LoginForm' /><uia automationid='txtPassword' role='editable
+        text' />
+      pywinauto:
+        auto_id: txtPassword
+        control_type: Edit
+      winappdriver:
+        using: accessibility id
+        value: txtPassword
+      password: true
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=btnSignIn;ControlType=Button
+    label: Sign in
+    actions:
+    - click
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      automation_id: btnSignIn
+      name: Sign in
+      class_name: WindowsForms10.Button.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=LoginForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Sign in;ControlType=Button
+      - uia:AutomationId=btnSignIn;Name=Sign in;ControlType=Button
+      - uia:AutomationId=btnSignIn;ControlType=Button;ClassName=WindowsForms10.Button.app.0.*
+      - uia:ControlType=Button;ClassName=WindowsForms10.Button.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 121
+      - 137
+      - 85
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='LoginForm' /><uia automationid='btnSignIn' role='push
+        button' />
+      pywinauto:
+        auto_id: btnSignIn
+        control_type: Button
+      winappdriver:
+        using: accessibility id
+        value: btnSignIn
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=btnCancel;ControlType=Button
+    label: Cancel
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      automation_id: btnCancel
+      name: Cancel
+      class_name: WindowsForms10.Button.app.0.*
+      framework_id: WinForm
+      index: 1
+      path:
+      - uia:AutomationId=LoginForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Cancel;ControlType=Button
+      - uia:AutomationId=btnCancel;Name=Cancel;ControlType=Button
+      - uia:AutomationId=btnCancel;ControlType=Button;ClassName=WindowsForms10.Button.app.0.*
+      - uia:ControlType=Button;ClassName=WindowsForms10.Button.app.0.*;Index=1
+      enabled: true
+      visible: true
+      rect:
+      - 216
+      - 137
+      - 85
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='LoginForm' /><uia automationid='btnCancel' role='push
+        button' />
+      pywinauto:
+        auto_id: btnCancel
+        control_type: Button
+      winappdriver:
+        using: accessibility id
+        value: btnCancel
+  calls: []
+  snapshots: 6
+  surface: desktop
+  desktop:
+    kind: window
+    window:
+      selector: uia:AutomationId=LoginForm;ControlType=Window
+      props:
+        ControlType: Window
+        AutomationId: LoginForm
+        Name: Sign in
+        ClassName: WindowsForms10.Window.8.app.0.*
+        FrameworkId: WinForm
+      process: CaseDesk.exe
+      uipath: <wnd app='casedesk.exe' /><uia automationid='LoginForm' role='window' />
+    titles:
+    - Sign in
+    menus: []
+    grids: []
+    tab_order_seen: []
+    keys_seen: []
+    shortcuts: []
+    access_keys:
+    - 'Password: Alt+p'
+    - 'User name: Alt+u'
+    messages:
+    - Enter your user name and password.
+    snapshots: 6
+    opened_from: null
+- basis: observed
+  from:
+  - desktop:casedesk-flow
+  - flow:casedesk-update
+  name: Sign in (message box)
+  aliases: []
+  files: []
+  ids:
+  - '2'
+  - '65535'
+  classes: []
+  elements:
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:Name=OK;ControlType=Button
+    label: OK
+    actions:
+    - click
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      automation_id: '2'
+      name: OK
+      class_name: Button
+      framework_id: Win32
+      index: 0
+      path:
+      - uia:Name=Sign in;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:ControlType=Button;ClassName=Button;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 290
+      - 189
+      - 113
+      - 40
+      uipath: <wnd app='casedesk.exe' title='Sign in' cls='#32770' /><uia name='OK' role='push button'
+        />
+      pywinauto:
+        title: OK
+        control_type: Button
+      winappdriver:
+        using: xpath
+        value: //Button[@Name='OK']
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:ControlType=Text;ClassName=Static;Index=0
+    label: Enter your user name and password.
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: '65535'
+      name: Enter your user name and password.
+      class_name: Static
+      framework_id: Win32
+      index: 0
+      path:
+      - uia:Name=Sign in;ControlType=Window
+      matches: 1
+      candidates: []
+      enabled: true
+      visible: true
+      rect:
+      - 101
+      - 97
+      - 281
+      - 26
+      uipath: <wnd app='casedesk.exe' title='Sign in' cls='#32770' /><uia cls='Static' role='text' idx='1'
+        />
+      pywinauto:
+        control_type: Text
+        class_name: Static
+        found_index: 0
+      winappdriver:
+        using: xpath
+        value: //Text[@ClassName='Static'][1]
+  calls: []
+  snapshots: 2
+  surface: desktop
+  desktop:
+    kind: message box
+    window:
+      selector: uia:Name=Sign in;ControlType=Window;ClassName=#32770
+      props:
+        ControlType: Window
+        Name: Sign in
+        ClassName: '#32770'
+        FrameworkId: Win32
+      process: CaseDesk.exe
+      uipath: <wnd app='casedesk.exe' /><uia cls='#32770' name='Sign in' role='window' />
+    titles:
+    - Sign in
+    menus: []
+    grids: []
+    tab_order_seen: []
+    keys_seen: []
+    shortcuts: []
+    access_keys: []
+    messages: []
+    snapshots: 2
+    opened_from: Sign in
+- basis: observed
+  from:
+  - desktop:casedesk-flow
+  - flow:casedesk-update
+  name: CaseDesk - Cases
+  aliases:
+  - MainForm
+  files: []
+  ids:
+  - btnOpen
+  - btnSearch
+  - dgvCases
+  - lblSearch
+  - menuMain
+  - statusMain
+  - txtSearch
+  classes: []
+  elements:
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=lblSearch;ControlType=Text
+    label: Case or name
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: lblSearch
+      name: Case or name
+      class_name: WindowsForms10.Static.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Case or name;ControlType=Text
+      - uia:AutomationId=lblSearch;Name=Case or name;ControlType=Text
+      - uia:AutomationId=lblSearch;ControlType=Text;ClassName=WindowsForms10.Static.app.0.*
+      - uia:ControlType=Text;ClassName=WindowsForms10.Static.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 23
+      - 84
+      - 76
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia automationid='lblSearch' role='text'
+        />
+      pywinauto:
+        auto_id: lblSearch
+        control_type: Text
+      winappdriver:
+        using: accessibility id
+        value: lblSearch
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=txtSearch;ControlType=Edit
+    label: Case or name
+    actions:
+    - type
+    classes: []
+    options: []
+    uia:
+      control_type: Edit
+      automation_id: txtSearch
+      name: Case or name
+      class_name: WindowsForms10.Edit.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Case or name;ControlType=Edit
+      - uia:AutomationId=txtSearch;Name=Case or name;ControlType=Edit
+      - uia:AutomationId=txtSearch;ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*
+      - uia:ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*;Index=0
+      enabled: true
+      visible: true
+      access_key: Alt+n
+      rect:
+      - 101
+      - 81
+      - 220
+      - 31
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia automationid='txtSearch' role='editable
+        text' />
+      pywinauto:
+        auto_id: txtSearch
+        control_type: Edit
+      winappdriver:
+        using: accessibility id
+        value: txtSearch
+      value_shapes:
+      - X-999
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=btnSearch;ControlType=Button
+    label: Search
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      automation_id: btnSearch
+      name: Search
+      class_name: WindowsForms10.Button.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Search;ControlType=Button
+      - uia:AutomationId=btnSearch;Name=Search;ControlType=Button
+      - uia:AutomationId=btnSearch;ControlType=Button;ClassName=WindowsForms10.Button.app.0.*
+      - uia:ControlType=Button;ClassName=WindowsForms10.Button.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 331
+      - 79
+      - 80
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia automationid='btnSearch' role='push button'
+        />
+      pywinauto:
+        auto_id: btnSearch
+        control_type: Button
+      winappdriver:
+        using: accessibility id
+        value: btnSearch
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=btnOpen;ControlType=Button
+    label: Open
+    actions:
+    - click
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      automation_id: btnOpen
+      name: Open
+      class_name: WindowsForms10.Button.app.0.*
+      framework_id: WinForm
+      index: 1
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Open;ControlType=Button
+      - uia:AutomationId=btnOpen;Name=Open;ControlType=Button
+      - uia:AutomationId=btnOpen;ControlType=Button;ClassName=WindowsForms10.Button.app.0.*
+      - uia:ControlType=Button;ClassName=WindowsForms10.Button.app.0.*;Index=1
+      enabled: true
+      visible: true
+      rect:
+      - 421
+      - 79
+      - 80
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia automationid='btnOpen' role='push button'
+        />
+      pywinauto:
+        auto_id: btnOpen
+        control_type: Button
+      winappdriver:
+        using: accessibility id
+        value: btnOpen
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=dgvCases;ControlType=DataGrid
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: DataGrid
+      automation_id: dgvCases
+      class_name: WindowsForms10.Window.8.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:AutomationId=dgvCases;ControlType=DataGrid;ClassName=WindowsForms10.Window.8.app.0.*
+      - uia:ControlType=DataGrid;ClassName=WindowsForms10.Window.8.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 23
+      - 117
+      - 560
+      - 220
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia automationid='dgvCases' role='datagrid'
+        />
+      pywinauto:
+        auto_id: dgvCases
+        control_type: DataGrid
+      winappdriver:
+        using: accessibility id
+        value: dgvCases
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=statusMain;ControlType=StatusBar
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: StatusBar
+      automation_id: statusMain
+      class_name: WindowsForms10.Window.8.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:AutomationId=statusMain;ControlType=StatusBar;ClassName=WindowsForms10.Window.8.app.0.*
+      - uia:ControlType=StatusBar;ClassName=WindowsForms10.Window.8.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 11
+      - 343
+      - 590
+      - 32
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia automationid='statusMain' role='status
+        bar' />
+      pywinauto:
+        auto_id: statusMain
+        control_type: StatusBar
+      winappdriver:
+        using: accessibility id
+        value: statusMain
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=menuMain;ControlType=MenuBar
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: MenuBar
+      automation_id: menuMain
+      class_name: WindowsForms10.Window.8.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:AutomationId=menuMain;ControlType=MenuBar;ClassName=WindowsForms10.Window.8.app.0.*
+      - uia:ControlType=MenuBar;ClassName=WindowsForms10.Window.8.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 11
+      - 45
+      - 590
+      - 33
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia automationid='menuMain' role='menu bar'
+        />
+      pywinauto:
+        auto_id: menuMain
+        control_type: MenuBar
+      winappdriver:
+        using: accessibility id
+        value: menuMain
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:Name=File;ControlType=MenuItem
+    label: File
+    actions:
+    - menu
+    classes: []
+    options: []
+    uia:
+      control_type: MenuItem
+      name: File
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      - uia:AutomationId=menuMain;ControlType=MenuBar
+      matches: 1
+      candidates:
+      - uia:ControlType=MenuItem;Index=0
+      enabled: true
+      visible: true
+      access_key: Alt+f
+      rect:
+      - 17
+      - 47
+      - 54
+      - 29
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia name='File' role='menu item' />
+      pywinauto:
+        title: File
+        control_type: MenuItem
+      winappdriver:
+        using: xpath
+        value: //MenuItem[@Name='File']
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:Name=Case;ControlType=MenuItem
+    label: Case
+    actions:
+    - menu
+    classes: []
+    options: []
+    uia:
+      control_type: MenuItem
+      name: Case
+      index: 1
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      - uia:AutomationId=menuMain;ControlType=MenuBar
+      matches: 1
+      candidates:
+      - uia:ControlType=MenuItem;Index=1
+      enabled: true
+      visible: true
+      access_key: Alt+c
+      rect:
+      - 71
+      - 47
+      - 65
+      - 29
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia name='Case' role='menu item' />
+      pywinauto:
+        title: Case
+        control_type: MenuItem
+      winappdriver:
+        using: xpath
+        value: //MenuItem[@Name='Case']
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:Name=Help;ControlType=MenuItem
+    label: Help
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: MenuItem
+      name: Help
+      index: 2
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      - uia:AutomationId=menuMain;ControlType=MenuBar
+      matches: 1
+      candidates:
+      - uia:ControlType=MenuItem;Index=2
+      enabled: true
+      visible: true
+      access_key: Alt+h
+      rect:
+      - 136
+      - 47
+      - 65
+      - 29
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia name='Help' role='menu item' />
+      pywinauto:
+        title: Help
+        control_type: MenuItem
+      winappdriver:
+        using: xpath
+        value: //MenuItem[@Name='Help']
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:Name=Open case;ControlType=MenuItem
+    label: Open case
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: MenuItem
+      name: Open case
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      - uia:Name=Case;ControlType=Menu
+      matches: 1
+      candidates:
+      - uia:ControlType=MenuItem;Index=0
+      enabled: true
+      visible: true
+      access_key: o
+      accel: Ctrl+O
+      rect:
+      - 71
+      - 77
+      - 262
+      - 34
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia name='Open case' role='menu item' />
+      pywinauto:
+        title: Open case
+        control_type: MenuItem
+      winappdriver:
+        using: xpath
+        value: //MenuItem[@Name='Open case']
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:Name=Refresh;ControlType=MenuItem
+    label: Refresh
+    actions:
+    - menu
+    classes: []
+    options: []
+    uia:
+      control_type: MenuItem
+      name: Refresh
+      index: 1
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      - uia:Name=Case;ControlType=Menu
+      matches: 1
+      candidates:
+      - uia:ControlType=MenuItem;Index=1
+      enabled: true
+      visible: true
+      access_key: r
+      accel: F5
+      rect:
+      - 71
+      - 111
+      - 262
+      - 34
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia name='Refresh' role='menu item' />
+      pywinauto:
+        title: Refresh
+        control_type: MenuItem
+      winappdriver:
+        using: xpath
+        value: //MenuItem[@Name='Refresh']
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:Name=Exit;ControlType=MenuItem
+    label: Exit
+    actions:
+    - menu
+    classes: []
+    options: []
+    uia:
+      control_type: MenuItem
+      name: Exit
+      index: 0
+      path:
+      - uia:AutomationId=MainForm;ControlType=Window
+      - uia:Name=File;ControlType=Menu
+      matches: 1
+      candidates:
+      - uia:ControlType=MenuItem;Index=0
+      enabled: true
+      visible: true
+      access_key: x
+      rect:
+      - 17
+      - 77
+      - 141
+      - 34
+      uipath: <wnd app='casedesk.exe' ctrlname='MainForm' /><uia name='Exit' role='menu item' />
+      pywinauto:
+        title: Exit
+        control_type: MenuItem
+      winappdriver:
+        using: xpath
+        value: //MenuItem[@Name='Exit']
+  calls: []
+  snapshots: 8
+  surface: desktop
+  desktop:
+    kind: window
+    window:
+      selector: uia:AutomationId=MainForm;ControlType=Window
+      props:
+        ControlType: Window
+        AutomationId: MainForm
+        Name: CaseDesk - Cases
+        ClassName: WindowsForms10.Window.8.app.0.*
+        FrameworkId: WinForm
+      process: CaseDesk.exe
+      uipath: <wnd app='casedesk.exe' /><uia automationid='MainForm' role='window' />
+    titles:
+    - CaseDesk - Cases
+    menus:
+    - menu: File
+      access_key: Alt+f
+      items:
+      - name: Exit
+        accel: null
+        access_key: x
+    - menu: Case
+      access_key: Alt+c
+      items:
+      - name: Open case
+        accel: Ctrl+O
+        access_key: o
+      - name: Refresh
+        accel: F5
+        access_key: r
+    - menu: Help
+      access_key: Alt+h
+      items: []
+    grids:
+    - selector: uia:AutomationId=dgvCases;ControlType=DataGrid
+      columns:
+      - Case No
+      - Customer
+      - Status
+      - Opened
+      rows_seen: 4
+    tab_order_seen: []
+    keys_seen:
+    - Enter
+    shortcuts:
+    - Ctrl+O
+    - Enter
+    - F5
+    access_keys:
+    - 'Case or name: Alt+n'
+    - 'Case: Alt+c'
+    - 'Exit: x'
+    - 'File: Alt+f'
+    - 'Help: Alt+h'
+    - 'Open case: o'
+    - 'Refresh: r'
+    messages: []
+    snapshots: 8
+    opened_from: null
+- basis: observed
+  from:
+  - desktop:casedesk-flow
+  - flow:casedesk-update
+  name: Case X-9999
+  aliases:
+  - CaseDetailForm
+  files: []
+  ids:
+  - btnCancel
+  - btnSave
+  - cboStatus
+  - chkUrgent
+  - lblCaseNo
+  - lblCustomer
+  - lblStatus
+  - lblSummary
+  - txtCaseNo
+  - txtCustomer
+  - txtSummary
+  classes: []
+  elements:
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=lblCaseNo;ControlType=Text
+    label: Case No
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: lblCaseNo
+      name: Case No
+      class_name: WindowsForms10.Static.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Case No;ControlType=Text
+      - uia:AutomationId=lblCaseNo;Name=Case No;ControlType=Text
+      - uia:AutomationId=lblCaseNo;ControlType=Text;ClassName=WindowsForms10.Static.app.0.*
+      - uia:ControlType=Text;ClassName=WindowsForms10.Static.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 27
+      - 64
+      - 90
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='lblCaseNo' role='text'
+        />
+      pywinauto:
+        auto_id: lblCaseNo
+        control_type: Text
+      winappdriver:
+        using: accessibility id
+        value: lblCaseNo
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=txtCaseNo;ControlType=Edit
+    label: Customer
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Edit
+      automation_id: txtCaseNo
+      name: Customer
+      class_name: WindowsForms10.Edit.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Customer;ControlType=Edit
+      - uia:AutomationId=txtCaseNo;Name=Customer;ControlType=Edit
+      - uia:AutomationId=txtCaseNo;ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*
+      - uia:ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*;Index=0
+      enabled: true
+      visible: true
+      access_key: Alt+c
+      rect:
+      - 121
+      - 61
+      - 240
+      - 31
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='txtCaseNo' role='editable
+        text' />
+      pywinauto:
+        auto_id: txtCaseNo
+        control_type: Edit
+      winappdriver:
+        using: accessibility id
+        value: txtCaseNo
+      readonly: true
+      value_shapes:
+      - X-9999
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=lblCustomer;ControlType=Text
+    label: Customer
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: lblCustomer
+      name: Customer
+      class_name: WindowsForms10.Static.app.0.*
+      framework_id: WinForm
+      index: 1
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Customer;ControlType=Text
+      - uia:AutomationId=lblCustomer;Name=Customer;ControlType=Text
+      - uia:AutomationId=lblCustomer;ControlType=Text;ClassName=WindowsForms10.Static.app.0.*
+      - uia:ControlType=Text;ClassName=WindowsForms10.Static.app.0.*;Index=1
+      enabled: true
+      visible: true
+      rect:
+      - 27
+      - 96
+      - 90
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='lblCustomer' role='text'
+        />
+      pywinauto:
+        auto_id: lblCustomer
+        control_type: Text
+      winappdriver:
+        using: accessibility id
+        value: lblCustomer
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=txtCustomer;ControlType=Edit
+    label: Customer
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Edit
+      automation_id: txtCustomer
+      name: Customer
+      class_name: WindowsForms10.Edit.app.0.*
+      framework_id: WinForm
+      index: 1
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Customer;ControlType=Edit
+      - uia:AutomationId=txtCustomer;Name=Customer;ControlType=Edit
+      - uia:AutomationId=txtCustomer;ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*
+      - uia:ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*;Index=1
+      enabled: true
+      visible: true
+      access_key: Alt+c
+      rect:
+      - 121
+      - 93
+      - 240
+      - 31
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='txtCustomer' role='editable
+        text' />
+      pywinauto:
+        auto_id: txtCustomer
+        control_type: Edit
+      winappdriver:
+        using: accessibility id
+        value: txtCustomer
+      value_shapes:
+      - Xxx Xxxxxxx
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=lblSummary;ControlType=Text
+    label: Summary
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: lblSummary
+      name: Summary
+      class_name: WindowsForms10.Static.app.0.*
+      framework_id: WinForm
+      index: 2
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Summary;ControlType=Text
+      - uia:AutomationId=lblSummary;Name=Summary;ControlType=Text
+      - uia:AutomationId=lblSummary;ControlType=Text;ClassName=WindowsForms10.Static.app.0.*
+      - uia:ControlType=Text;ClassName=WindowsForms10.Static.app.0.*;Index=2
+      enabled: true
+      visible: true
+      rect:
+      - 27
+      - 128
+      - 90
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='lblSummary' role='text'
+        />
+      pywinauto:
+        auto_id: lblSummary
+        control_type: Text
+      winappdriver:
+        using: accessibility id
+        value: lblSummary
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=txtSummary;ControlType=Edit
+    label: Summary
+    actions:
+    - type
+    classes: []
+    options: []
+    uia:
+      control_type: Edit
+      automation_id: txtSummary
+      name: Summary
+      class_name: WindowsForms10.Edit.app.0.*
+      framework_id: WinForm
+      index: 2
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Summary;ControlType=Edit
+      - uia:AutomationId=txtSummary;Name=Summary;ControlType=Edit
+      - uia:AutomationId=txtSummary;ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*
+      - uia:ControlType=Edit;ClassName=WindowsForms10.Edit.app.0.*;Index=2
+      enabled: true
+      visible: true
+      access_key: Alt+m
+      rect:
+      - 121
+      - 125
+      - 240
+      - 60
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='txtSummary' role='editable
+        text' />
+      pywinauto:
+        auto_id: txtSummary
+        control_type: Edit
+      winappdriver:
+        using: accessibility id
+        value: txtSummary
+      value_shapes:
+      - Xxxx
+      - Xxxx xxxxxx xx xxxxxxx
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=lblStatus;ControlType=Text
+    label: Status
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: lblStatus
+      name: Status
+      class_name: WindowsForms10.Static.app.0.*
+      framework_id: WinForm
+      index: 3
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Status;ControlType=Text
+      - uia:AutomationId=lblStatus;Name=Status;ControlType=Text
+      - uia:AutomationId=lblStatus;ControlType=Text;ClassName=WindowsForms10.Static.app.0.*
+      - uia:ControlType=Text;ClassName=WindowsForms10.Static.app.0.*;Index=3
+      enabled: true
+      visible: true
+      rect:
+      - 27
+      - 198
+      - 90
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='lblStatus' role='text'
+        />
+      pywinauto:
+        auto_id: lblStatus
+        control_type: Text
+      winappdriver:
+        using: accessibility id
+        value: lblStatus
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=cboStatus;ControlType=ComboBox
+    label: Status
+    actions:
+    - expand
+    - select
+    - collapse
+    classes: []
+    options:
+    - Open
+    - In progress
+    - Resolved
+    - Closed
+    uia:
+      control_type: ComboBox
+      automation_id: cboStatus
+      name: Status
+      class_name: WindowsForms10.ComboBox.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Status;ControlType=ComboBox
+      - uia:AutomationId=cboStatus;Name=Status;ControlType=ComboBox
+      - uia:AutomationId=cboStatus;ControlType=ComboBox;ClassName=WindowsForms10.ComboBox.app.0.*
+      - uia:ControlType=ComboBox;ClassName=WindowsForms10.ComboBox.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 121
+      - 195
+      - 160
+      - 33
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='cboStatus' role='combo
+        box' />
+      pywinauto:
+        auto_id: cboStatus
+        control_type: ComboBox
+      winappdriver:
+        using: accessibility id
+        value: cboStatus
+      value_shapes:
+      - Xxxx
+      - Xxxxxxxx
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:ControlType=Button;Index=0
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      index: 0
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      - uia:AutomationId=cboStatus;ControlType=ComboBox
+      matches: 1
+      candidates: []
+      enabled: true
+      visible: true
+      access_key: Alt+Down Arrow
+      rect:
+      - 256
+      - 196
+      - 24
+      - 31
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia role='push button' idx='1' />
+      pywinauto:
+        control_type: Button
+        found_index: 0
+      winappdriver:
+        using: xpath
+        value: //Button[1]
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=chkUrgent;ControlType=CheckBox
+    label: Urgent
+    actions:
+    - toggle
+    classes: []
+    options: []
+    uia:
+      control_type: CheckBox
+      automation_id: chkUrgent
+      name: Urgent
+      class_name: WindowsForms10.Button.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Urgent;ControlType=CheckBox
+      - uia:AutomationId=chkUrgent;Name=Urgent;ControlType=CheckBox
+      - uia:AutomationId=chkUrgent;ControlType=CheckBox;ClassName=WindowsForms10.Button.app.0.*
+      - uia:ControlType=CheckBox;ClassName=WindowsForms10.Button.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 121
+      - 227
+      - 100
+      - 24
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='chkUrgent' role='check
+        box' />
+      pywinauto:
+        auto_id: chkUrgent
+        control_type: CheckBox
+      winappdriver:
+        using: accessibility id
+        value: chkUrgent
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=btnSave;ControlType=Button
+    label: Save
+    actions:
+    - click
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      automation_id: btnSave
+      name: Save
+      class_name: WindowsForms10.Button.app.0.*
+      framework_id: WinForm
+      index: 0
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Save;ControlType=Button
+      - uia:AutomationId=btnSave;Name=Save;ControlType=Button
+      - uia:AutomationId=btnSave;ControlType=Button;ClassName=WindowsForms10.Button.app.0.*
+      - uia:ControlType=Button;ClassName=WindowsForms10.Button.app.0.*;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 191
+      - 265
+      - 80
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='btnSave' role='push
+        button' />
+      pywinauto:
+        auto_id: btnSave
+        control_type: Button
+      winappdriver:
+        using: accessibility id
+        value: btnSave
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:AutomationId=btnCancel;ControlType=Button
+    label: Cancel
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      automation_id: btnCancel
+      name: Cancel
+      class_name: WindowsForms10.Button.app.0.*
+      framework_id: WinForm
+      index: 1
+      path:
+      - uia:AutomationId=CaseDetailForm;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:Name=Cancel;ControlType=Button
+      - uia:AutomationId=btnCancel;Name=Cancel;ControlType=Button
+      - uia:AutomationId=btnCancel;ControlType=Button;ClassName=WindowsForms10.Button.app.0.*
+      - uia:ControlType=Button;ClassName=WindowsForms10.Button.app.0.*;Index=1
+      enabled: true
+      visible: true
+      rect:
+      - 281
+      - 265
+      - 80
+      - 23
+      uipath: <wnd app='casedesk.exe' ctrlname='CaseDetailForm' /><uia automationid='btnCancel' role='push
+        button' />
+      pywinauto:
+        auto_id: btnCancel
+        control_type: Button
+      winappdriver:
+        using: accessibility id
+        value: btnCancel
+  calls: []
+  snapshots: 9
+  surface: desktop
+  desktop:
+    kind: window
+    window:
+      selector: uia:AutomationId=CaseDetailForm;ControlType=Window
+      props:
+        ControlType: Window
+        AutomationId: CaseDetailForm
+        Name: Case X-9999
+        ClassName: WindowsForms10.Window.8.app.0.*
+        FrameworkId: WinForm
+      process: CaseDesk.exe
+      uipath: <wnd app='casedesk.exe' /><uia automationid='CaseDetailForm' role='window' />
+    titles:
+    - Case X-9999
+    menus: []
+    grids: []
+    tab_order_seen: []
+    keys_seen: []
+    shortcuts: []
+    access_keys:
+    - 'Customer: Alt+c'
+    - 'Summary: Alt+m'
+    messages:
+    - A resolved or closed case needs a summary of at least 10 characters.
+    snapshots: 9
+    opened_from: null
+- basis: observed
+  from:
+  - desktop:casedesk-flow
+  - flow:casedesk-update
+  name: Case (message box)
+  aliases: []
+  files: []
+  ids:
+  - '2'
+  - '65535'
+  classes: []
+  elements:
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:Name=OK;ControlType=Button
+    label: OK
+    actions:
+    - click
+    classes: []
+    options: []
+    uia:
+      control_type: Button
+      automation_id: '2'
+      name: OK
+      class_name: Button
+      framework_id: Win32
+      index: 0
+      path:
+      - uia:Name=Case;ControlType=Window
+      matches: 1
+      candidates:
+      - uia:ControlType=Button;ClassName=Button;Index=0
+      enabled: true
+      visible: true
+      rect:
+      - 450
+      - 189
+      - 113
+      - 40
+      uipath: <wnd app='casedesk.exe' title='Case' cls='#32770' /><uia name='OK' role='push button' />
+      pywinauto:
+        title: OK
+        control_type: Button
+      winappdriver:
+        using: xpath
+        value: //Button[@Name='OK']
+  - basis: observed
+    from:
+    - desktop:casedesk-flow
+    selector: uia:ControlType=Text;ClassName=Static;Index=0
+    label: A resolved or closed case needs a summary of at least 10 characters.
+    actions: []
+    classes: []
+    options: []
+    uia:
+      control_type: Text
+      automation_id: '65535'
+      name: A resolved or closed case needs a summary of at least 10 characters.
+      class_name: Static
+      framework_id: Win32
+      index: 0
+      path:
+      - uia:Name=Case;ControlType=Window
+      matches: 1
+      candidates: []
+      enabled: true
+      visible: true
+      rect:
+      - 101
+      - 85
+      - 441
+      - 49
+      uipath: <wnd app='casedesk.exe' title='Case' cls='#32770' /><uia cls='Static' role='text' idx='1'
+        />
+      pywinauto:
+        control_type: Text
+        class_name: Static
+        found_index: 0
+      winappdriver:
+        using: xpath
+        value: //Text[@ClassName='Static'][1]
+  calls: []
+  snapshots: 2
+  surface: desktop
+  desktop:
+    kind: message box
+    window:
+      selector: uia:Name=Case;ControlType=Window;ClassName=#32770
+      props:
+        ControlType: Window
+        Name: Case
+        ClassName: '#32770'
+        FrameworkId: Win32
+      process: CaseDesk.exe
+      uipath: <wnd app='casedesk.exe' /><uia cls='#32770' name='Case' role='window' />
+    titles:
+    - Case
+    menus: []
+    grids: []
+    tab_order_seen: []
+    keys_seen: []
+    shortcuts: []
+    access_keys: []
+    messages: []
+    snapshots: 2
+    opened_from: Case X-9999
+routes: []
+tables:
+- basis: assumed
+  from:
+  - desktop:casedesk-flow
+  name: cases
+  columns:
+  - name: case_no
+    type: TEXT
+    nullable: false
+    primary_key: true
+    unique: false
+    index: false
+    autoincrement: false
+  - name: customer
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: status
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: opened
+    type: DATE
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: summary
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: urgent
+    type: BOOLEAN
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+rules:
+- basis: observed
+  from:
+  - desktop:casedesk-flow
+  text: 'after Sign in: message box "Sign in": Enter your user name and password.'
+  where:
+  - Sign in
+- basis: observed
+  from:
+  - desktop:casedesk-flow
+  text: 'after Save: message box "Case": A resolved or closed case needs a summary of at least 10 characters.'
+  where:
+  - Case X-9999
+- basis: described
+  from:
+  - flow:casedesk-update
+  text: A resolved or closed case needs a summary of at least 10 characters
+  where:
+  - Case X-9999
+flows:
+- casedesk-update
+codes:
+  cases.status:
+  - Closed
+  - In progress
+  - Open
+  - Resolved
+conflicts: []
+problems:
+- 'desktop:casedesk-flow: table `cases` is inferred from the grid uia:AutomationId=dgvCases;ControlType=DataGrid
+  and the fields of the windows around it (weakest evidence): names and types are guesses'

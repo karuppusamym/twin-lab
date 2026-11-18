@@ -1,0 +1,98 @@
+{
+ "format": "twinlab-desktop-recording/1",
+ "surface": "desktop",
+ "recorder": "labctl.desktop.recorder",
+ "started": "2026-11-18T04:23:41.134Z",
+ "ended": "2026-11-18T04:24:03.144Z",
+ "steps": 32,
+ "processes": [
+  {
+   "process": "java.exe",
+   "pid": 26244,
+   "technology": {
+    "surface": "desktop",
+    "toolkit": "Java Swing / AWT",
+    "marker": "window class SunAwtFrame/SunAwtDialog",
+    "confidence": "certain",
+    "support": "full through the Java Access Bridge (labctl.desktop.java): enabled for all Java programs with `jabswitch -enable` (then restart the application), or for one run with -Djavax.accessibility.assistive_technologies=com.sun.java.accessibility.AccessBridge",
+    "executable": {
+     "file": "java.exe",
+     "description": "OpenJDK Platform binary",
+     "product": "OpenJDK Platform 11",
+     "product_version": "11.0.12",
+     "file_version": "11.0.12"
+    },
+    "supported": true,
+    "evidence": [
+     {
+      "kind": "desktop",
+      "name": "Java Swing / AWT",
+      "marker": "window class SunAwtFrame/SunAwtDialog",
+      "confidence": "certain"
+     },
+     {
+      "kind": "desktop",
+      "name": "Java Swing / AWT",
+      "marker": "Java VM loaded (jvm.dll/awt.dll)",
+      "confidence": "likely"
+     },
+     {
+      "kind": "desktop",
+      "name": "Java Swing / AWT",
+      "marker": "Java Access Bridge loaded",
+      "confidence": "likely"
+     }
+    ]
+   },
+   "signals": {
+    "process": "java.exe",
+    "modules": [
+     "awt.dll",
+     "javaaccessbridge.dll",
+     "jvm.dll"
+    ],
+    "runtimes": [],
+    "exe": {
+     "file": "java.exe",
+     "description": "OpenJDK Platform binary",
+     "product": "OpenJDK Platform 11",
+     "product_version": "11.0.12",
+     "file_version": "11.0.12",
+     "original_file": "java.exe"
+    },
+    "files": [],
+    "framework_ids": [
+     "Java"
+    ],
+    "classes": [
+     "SunAwtDialog",
+     "SunAwtFrame"
+    ]
+   }
+  }
+ ],
+ "capture": {
+  "uia_events": [
+   "Invoke_Invoked",
+   "SelectionItem_ElementSelected",
+   "ValueProperty changed",
+   "ToggleState changed",
+   "ExpandCollapseState changed",
+   "FocusChanged"
+  ],
+  "hooks": [
+   "WH_MOUSE_LL",
+   "WH_KEYBOARD_LL"
+  ],
+  "polled": [
+   "top-level windows of the recorded processes (open, close, menus)",
+   "foreground window",
+   "edit value when focus leaves it"
+  ],
+  "screenshots": false
+ },
+ "privacy": "names and values that may be data are kept as their shape only (labctl.desktop.privacy); typed values are never stored",
+ "notes": [
+  "Java window: read through the Java Access Bridge; typing and selection are polled (see labctl.desktop.java)"
+ ]
+}

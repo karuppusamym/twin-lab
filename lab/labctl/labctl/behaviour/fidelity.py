@@ -49,6 +49,10 @@ from labctl.botlog.recording import load as load_recording
 Check = Literal[
     "missing", "extra", "visibility", "enabled", "options", "value_format", "action", "target",
     "value", "url", "unsupported",
+    # "changed" and "ambiguous" come from desktop verify (labctl.desktop.verify): a control
+    # found by its locator whose ClassName, FrameworkId or parent path differs, and a locator
+    # that matches more than one control.
+    "changed", "ambiguous",
 ]  # fmt: skip
 SUPPORTED = {
     "goto",
