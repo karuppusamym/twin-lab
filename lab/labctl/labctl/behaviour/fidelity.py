@@ -1462,6 +1462,21 @@ def _infer_causes(rec: Recording) -> None:
     """An older recording has no `caused_by`. Its recorder kept a click and the submit (or
     navigation) it caused in one batch, the snapshot after the last of them only: such a submit
     or navigation is implied by the click, as a newer recording says, not performed again."""
+    for prev, step in zip(rec.steps, rec.steps[1:], strict=False):
+        # A recorder between the two generations named the click that caused a submit but not
+        # the page load the submit caused, and kept the form as the submit's snapshot. A load
+        # within half a second of a submit, in the same tab, is that submit's result.
+        if (
+            step.action == "goto"
+            and step.caused_by is None
+            and step.nav in (None, "navigate")
+            and prev.action == "submit"
+            and prev.tab == step.tab
+            and prev.ts
+            and step.ts
+            and 0 <= (step.ts - prev.ts).total_seconds() < 0.5
+        ):
+            step.caused_by = prev.caused_by or prev.seq
     if bindings_mod.new_format(rec):
         return
     for prev, step in zip(rec.steps, rec.steps[1:], strict=False):
