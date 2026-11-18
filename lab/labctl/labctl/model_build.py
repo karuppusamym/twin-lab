@@ -436,6 +436,11 @@ def _merge_screen(have: Screen, new: Screen) -> None:
         have.snapshots = (have.snapshots or 0) + new.snapshots
     have.surface = have.surface or new.surface
     have.desktop = have.desktop or new.desktop
+    have.messages = have.messages + [m for m in new.messages if m not in have.messages]
+    have.frames = have.frames + [f for f in new.frames if f not in have.frames]
+    have.embedded = have.embedded or new.embedded
+    have.grids = have.grids + [g for g in new.grids
+                               if g["selector"] not in {x["selector"] for x in have.grids}]  # fmt: skip
     have.calls = have.calls + [
         c for c in new.calls if (c.method, c.path) not in {(x.method, x.path) for x in have.calls}
     ]
@@ -457,6 +462,7 @@ def _merge_screen(have: Screen, new: Screen) -> None:
                 setattr(same, attr, getattr(same, attr) or getattr(el, attr))
             for attr in ("classes", "options"):
                 setattr(same, attr, _union(getattr(same, attr), getattr(el, attr)))
+            same.rules = same.rules or el.rules
             same.actions = _union(same.actions, el.actions)
             same.from_ = _union(same.from_, el.from_)
             same.basis = stronger(same.basis, el.basis)
@@ -541,6 +547,7 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
             extra = []
         have.name, have.model, have.at = strong.name, strong.model, strong.at
         have.columns = list(strong.columns) + extra
+        have.seen_on = _union(have.seen_on, table.seen_on)
         have.basis = stronger(have.basis, table.basis)
         have.from_ = _union(have.from_, table.from_)
     for rule in part.rules:

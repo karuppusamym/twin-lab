@@ -487,3 +487,15 @@ def test_command_proposes_then_applies(rec, tmp_path, monkeypatch):
     assert r.exit_code == 0
     r = runner.invoke(cli_app, ["split", str(tmp_path / "missing")])
     assert r.exit_code == 2
+
+
+def test_a_value_that_travels_is_named_by_the_element_that_showed_it():
+    """Trial finding 11: a value shown in one application and typed into another is said by
+    element (`b#savedNumber`), not by shape alone."""
+    html = (
+        "<html><body><p id='savedMessage'>Order <b id='savedNumber'>A-9</b> was saved.</p>"
+        "<dl><dd id='savedTotal'>9.9</dd><dd id='savedPhone'>9 9 9</dd></dl></body></html>"
+    )
+    assert sp._shown_in(html, "A-9") == "b#savedNumber"  # the smallest element, not its paragraph
+    assert sp._shown_in(html, "9.9") == "dd#savedTotal"
+    assert sp._shown_in(html, "A9A") is None

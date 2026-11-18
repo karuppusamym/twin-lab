@@ -39,8 +39,13 @@ Owns: `labctl/har.py`, `labctl/sanitize.py`, `labctl/openapi.py`, `labctl/model_
   and the DOM recorded around them, API routes with request and response field shapes, status
   codes, error bodies as `observed` rules, timings, framework markers, code lists (low-cardinality
   values), tables `inferred` from payloads. Drops cookies and credential headers immediately. Never
-  stores a recorded value: text is shape-masked (`Smith` -> `Xxxxx`, `1001` -> `9999`) except
-  labels, headings, buttons, table headers, options and titles.
+  stores a recorded value: data is shape-masked (`Smith` -> `Xxxxx`, `1001` -> `9999`). Page text
+  follows `TWINLAB_PAGE_TEXT`: `interface` (default) keeps the application's own interface text
+  verbatim (labels, headings, buttons, table headers, options, links, titles, placeholders,
+  validation and status messages) and masks data in it (cells, field values, names the data
+  shows, numbers, dates, e-mail addresses, what changes between snapshots of a screen); `strict`
+  masks every text and style. The rule is in `labctl/sanitize.py`; typed values are already
+  replaced by their shape by the recorder.
 - Writes value-free page snapshots to `apps/<app>/pages/<n>.html` for the builder.
 - `from_openapi(app, spec_path) -> AppModel` (`declared` routes with shapes; OpenAPI 3 and Postman
   v2.1).

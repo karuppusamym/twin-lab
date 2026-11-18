@@ -22,7 +22,12 @@ from labctl.source import sqlalchemy_models as sam
 
 HEALTH = re.compile(r"/(health|healthz|ready|actuator/health)$")
 NEED = ("automation:", "flow:")
-DEFAULT_STACK = "React, FastAPI and Postgres (the lab default)"
+DEFAULT_DB = "sqlite"  # nothing shows the database and nobody chose one: the simplest built-in
+DEFAULT_DB_NAME = "SQLite"
+DEFAULT_DB_NOTE = "a default, not evidence"  # the brief's words for it (the package reads them)
+DEFAULT_STACK = "React, FastAPI and SQLite (the lab defaults)"
+ENGINE_NAMES = {"postgres": "PostgreSQL", "sqlite": "SQLite", "mssql": "SQL Server",
+                "oracle": "Oracle", "mysql": "MySQL", "db2": "Db2"}  # fmt: skip
 check_selector = mb.check_selector  # kept here for callers of the T-05 interface
 
 # What gets built, by the evidence a screen (or the app) rests on (docs/06-evidence.md).
@@ -56,6 +61,8 @@ class ScreenScope:
     reasons: list[str]
     elements: list[ElementView]
     mode: str = "sample"
+    # The document of another origin a frame on an in-scope screen showed: built as a stand-in.
+    standin: dict | None = None
 
 
 @dataclass
@@ -66,6 +73,19 @@ class Brief:
     needed_by: list[str]
     db_engine: str = "postgres"
     db_engine_set: bool = False  # True when a person named the engine
+    db_default: bool = False  # True when nothing named or showed it: DEFAULT_DB
+
+    @property
+    def db_text(self) -> str:
+        """The engine in words, saying where the choice came from."""
+        name = ENGINE_NAMES.get(self.db_engine, self.db_engine)
+        if self.db_default:
+            return (f"{name} ({DEFAULT_DB_NOTE}: nothing in the evidence shows the database and "
+                    "none was chosen at onboarding)")  # fmt: skip
+        if self.db_engine_set:
+            return f"{name} (chosen for this app)"
+        return f"{name} (found in the evidence)"
+
     screens: list[ScreenScope] = field(default_factory=list)
     routes: dict[str, list[str]] = field(default_factory=dict)  # route key -> reasons
     tables: dict[str, list[str]] = field(default_factory=dict)  # table name -> reasons
@@ -235,14 +255,23 @@ def scope(
     brief.data = data_location(model, data)
 
     found = brief.found_engine
-    brief.db_engine = db_engine or (found if found in sam.ENGINES else "postgres")
+    db_engine = sam.ALIASES.get(db_engine, db_engine) if db_engine else None
+    brief.db_engine = db_engine or (found if found in sam.ENGINES else DEFAULT_DB)
     brief.db_engine_set = db_engine is not None
     if brief.browser_only:
         pass  # there is no database whose engine could be unknown
     elif db_engine is None and found is None:
-        brief.gaps.append("no evidence shows the database engine; postgres assumed (--db-engine)")
+        brief.db_default = True
+        brief.gaps.append(
+            "no evidence shows the database engine and none was chosen at onboarding "
+            f"(`lab.database` in app.yaml); {DEFAULT_DB_NAME} is used as the default, not as "
+            "evidence (choose with `labctl db use <app> <name>` or --db-engine)"
+        )
     elif db_engine is None and found not in sam.ENGINES:
-        brief.gaps.append(f"database engine '{found}' not recognised; postgres assumed")
+        brief.db_default = True
+        brief.gaps.append(
+            f"database engine '{found}' not recognised; {DEFAULT_DB_NAME} is used as the default"
+        )
     elif db_engine is None and found == "sqlite":
         brief.gaps.append(
             "the source only shows SQLite (often a development default); name the engine the "
@@ -300,6 +329,17 @@ def scope(
                 continue
             origin = call.at.file if call.at else "recorded"
             _add(brief.routes, route.key, f"called by screen {screen.path} ({origin})")
+
+    # A frame on an in-scope screen that showed a document of another origin: the page needs it,
+    # so that document is in scope as a stand-in this app serves (the frame keeps its element).
+    in_scope = {s.screen.path for s in brief.screens}
+    for screen in model.screens:
+        emb = screen.embedded or {}
+        if emb.get("in") in in_scope and screen.path not in in_scope:
+            reason = f"shown in `{emb.get('element')}` on {emb['in']}: a stand-in (another origin)"
+            brief.screens.append(ScreenScope(screen, [reason], [], screen_mode(model, screen),
+                                             standin=emb))  # fmt: skip
+            in_scope.add(screen.path)
 
     # A server-rendered screen is served by a GET route on its own path: that route is the page.
     for scope_ in brief.screens:
@@ -521,11 +561,13 @@ def schema(brief: Brief, repo_root: Path) -> str:
         )
     left_out = ", ".join(t.name for t in brief.out_tables) or "none"
     evidence = ", ".join(e.id for e in brief.model.evidence)
+    dialect = brief.db_engine + (f" ({DEFAULT_DB_NOTE})" if brief.db_default else "")
     header = (
         f"Schema for the {brief.app} demo app. Generated by labctl brief; do not edit by hand.\n"
         f"From the app model ({evidence}).\n"
         f"Only tables something needs. Left out: {left_out}.\n"
-        f"Dialect: {brief.db_engine}. Table and column names must not change."
+        f"Dialect: {dialect}. Table and column names must not change (quoted where an engine "
+        "reserves them)."
     )
     return sam.ddl(sam_tables(brief.model, list(brief.tables)), header, brief.db_engine)
 
@@ -724,6 +766,55 @@ def browser_storage(brief: Brief) -> list[str]:
     return out + [""]
 
 
+CREDENTIAL_FIELD = re.compile(r"pass|user(name)?$|login|csrf|token|captcha|otp|remember", re.I)
+
+
+def _unstored(brief: Brief) -> list[str]:
+    """Fields in-scope forms post that no in-scope table has a column for."""
+    columns = {c.name.lower() for n in brief.tables for c in brief.table(n).columns}
+
+    def stored(name: str) -> bool:  # `customer_name` is the `customer` column
+        n = name.lower()
+        return n in columns or (n.endswith("_name") and n[:-5] in columns)
+
+    rows = []
+    for key in brief.routes:
+        route = brief.route(key)
+        if route.method == "GET" or not route.body:
+            continue
+        names = [b.split(":", 1)[0].strip() for b in route.body]
+        missing = [n for n in names if not stored(n) and not CREDENTIAL_FIELD.search(n)]
+        if missing:
+            rows.append(f"- `{key}` posts {', '.join(f'`{n}`' for n in missing)}")
+    if not rows:
+        return []
+    return ["Fields the recorded forms post that no table above has a column for. The schema "
+            "holds only what the recorded answers showed; keep these with their record the way "
+            "the screens need (shown again on a later screen, sent on to another), in a table "
+            "of the app's own created next to these (leave `db/schema.sql` unchanged), and name "
+            "it in BUILD-NOTES.md:\n", *rows, ""]  # fmt: skip
+
+
+def _fields(screen: Screen) -> list[str]:
+    """The screen's form fields: what each posts as, its type, what it accepts, its options."""
+    rows = []
+    for el in screen.elements:
+        if el.tag not in ("input", "select", "textarea") or (el.type or "") == "hidden":
+            continue
+        kind = el.tag if el.tag != "input" else f"input {el.type or 'text'}"
+        accepts = ", ".join(k if v is True else f"{k} {v}" for k, v in (el.rules or {}).items())
+        options = ", ".join(f"`{o}`" for o in el.options[:12]) + (" ..." if len(el.options) > 12
+                                                                    else "")  # fmt: skip
+        rows.append(f"| `{el.selector}` | {el.label or '-'} | `{el.name or '-'}` | {kind} | "
+                    f"{accepts or '-'} | {options or '-'} |")  # fmt: skip
+    if not rows:
+        return []
+    return ["\nFields (posted as `name`; *Accepts* is what the field's own attributes say; nothing "
+            "required or limited beyond that was recorded, except as *Messages* show):\n",
+            "| Field | Label | Posted as | Type | Accepts | Options |",
+            "|---|---|---|---|---|---|", *rows]  # fmt: skip
+
+
 def render(brief: Brief, repo_root: Path) -> str:
     model = brief.model
     out: list[str] = []
@@ -766,6 +857,8 @@ def render(brief: Brief, repo_root: Path) -> str:
         )
         if brief.browser_only:
             w("| database | none: no server write observed (see *Browser storage*) |\n")
+        elif brief.db_default:
+            w(f"| database | {brief.db_text} |\n")
         else:
             w(f"| database | {brief.db_engine} ({origin}) |\n")
         if any(v and not v[0].isdigit() for v in versions):
@@ -780,7 +873,7 @@ def render(brief: Brief, repo_root: Path) -> str:
     elif brief.browser_only and not (model.stack.frontend or {}).get("marker"):
         w("No evidence shows the stack. No server database is shown (see *Browser storage*).\n")
     elif not (model.stack.frontend or {}).get("marker"):
-        w(f"No evidence shows the stack. Use {DEFAULT_STACK}; database: {brief.db_engine}.\n")
+        w(f"No evidence shows the stack. Use {DEFAULT_STACK}; database: {brief.db_text}.\n")
     front = model.stack.frontend or {}
     if front.get("marker"):
         name = " ".join(str(front[k]) for k in ("framework", "version") if front.get(k))
@@ -792,7 +885,7 @@ def render(brief: Brief, repo_root: Path) -> str:
               "them.")  # fmt: skip
         elif not model.stack.backend:
             w("No evidence shows the backend: use FastAPI (the lab default) and say so in "
-              f"BUILD-NOTES.md; database: {brief.db_engine}.")  # fmt: skip
+              f"BUILD-NOTES.md; database: {brief.db_text}.")  # fmt: skip
         w("")
     for line in detected_stack(model.stack):
         w(line)
@@ -831,7 +924,8 @@ def render(brief: Brief, repo_root: Path) -> str:
         if screen.snapshots == 0:
             w("Recorded by address only: no page content was captured, so its elements are "
               "unknown. Do not invent them as if they were observed.\n")  # fmt: skip
-        w("| Element | Used for | By | Basis | In evidence |\n|---|---|---|---|---|")
+        if scope.elements:
+            w("| Element | Used for | By | Basis | In evidence |\n|---|---|---|---|---|")
         for el in scope.elements:
             mark = {"found": "yes", "missing": "**missing**", "unchecked": "not checked"}[el.status]
             note = f" ({el.detail})" if el.detail else ""
@@ -839,6 +933,36 @@ def render(brief: Brief, repo_root: Path) -> str:
             w(
                 f"| {name} | {', '.join(el.actions) or '-'} | {', '.join(el.by)} | {el.basis} | {mark}{note} |"
             )
+        if scope.standin:
+            emb = scope.standin
+            calls = ", ".join(f"`{c}`" for c in emb.get("calls") or []) or "none"
+            w(f"\n**Embedded page, built as a stand-in.** In the recording this page came from "
+              f"another origin and loaded only inside `{emb.get('element')}` on `{emb['in']}`. "
+              f"Keep that frame element with its id, title, size and attributes. Serve this page "
+              f"from this application at `{screen.path}` and point the frame's `src` there "
+              f"(relative: `{screen.path}`, so it loads from this app's own address). Give it the "
+              "structure the snapshot below shows (same elements, ids and classes) with fixed "
+              "synthetic rows where the snapshot is masked. Its own requests in the recording "
+              f"({calls}) are not rebuilt: the stand-in needs none.")  # fmt: skip
+        for f in screen.frames:
+            if f.get("src"):
+                title = f', title "{f["title"]}"' if f.get("title") else ""
+                w(f"\nFrame `{f['selector']}` (src `{f['src']}`{title}): keep it; what it shows is "
+                  f"the screen `{f['src']}` in this brief.")  # fmt: skip
+        for line in _fields(screen):
+            w(line)
+        for g in screen.grids:
+            cols = ", ".join(f"{h or '(no header)'} ({t or 'empty'})"
+                             for h, t in zip(g["headers"], g["types"], strict=False))  # fmt: skip
+            cells = ", ".join(f"`td.{c.split()[0]}`" for c in g.get("cell_classes") or [] if c)
+            row = f" Rows are `tr.{g['row_class'].split()[0]}`" if g.get("row_class") else " Rows"
+            w(f"\nList `{g['selector']}`: columns {cols}.{row}"
+              + (f"; cells {cells}" if cells else "") + f"; up to {g['rows']} row(s) were shown "
+              "at once.")  # fmt: skip
+        if screen.messages:
+            w("\nMessages this screen showed, as written (data in them masked):\n")
+            for m in screen.messages:
+                w(f'- `{m["selector"]}`: "{m["text"]}"')
         if screen.files:
             files = ", ".join(f"`{f}`" for f in screen.files)
             w(f"\nRead: {files}. Reproduce what these files render and do on this screen, "
@@ -903,6 +1027,9 @@ def render(brief: Brief, repo_root: Path) -> str:
         )
         w(f"| `{name}` | {table.basis} | {where} | {'; '.join(reasons)} |")
     w("")
+    if not brief.browser_only:
+        for line in _unstored(brief):
+            w(line)
 
     codes = {k: v for k, v in model.codes.items() if k.split(".", 1)[0] in brief.tables}
     if codes:
@@ -933,8 +1060,18 @@ def render(brief: Brief, repo_root: Path) -> str:
             f"`{s.path or s.name}`" + (f" ({s.component})" if s.component else "") for s in brief.out_screens))  # fmt: skip
     if brief.out_routes:
         w("- Routes: " + ", ".join(f"`{r.key}`" for r in brief.out_routes))
-    if brief.out_tables:
-        w("- Tables: " + ", ".join(f"`{t.name}`" for t in brief.out_tables))
+    answered = [t for t in brief.out_tables if t.basis != "assumed"]
+    guessed = [t for t in brief.out_tables if t.basis == "assumed"]
+    if answered:
+        w("- Tables: " + ", ".join(
+            f"`{t.name}`" + (f" (from the answers of {', '.join(f'`{s}`' for s in t.seen_on)})"
+                             if t.seen_on else f" ({t.basis})") for t in answered))  # fmt: skip
+    if guessed:
+        w("- Not tables of the recorded database, only guesses from a screen's layout (a form or "
+          "a grid; no request or answer showed such a table): " + ", ".join(
+            f"`{t.name}`" + (f" ({', '.join(t.seen_on)})" if t.seen_on else "")
+            for t in guessed) + ". The screens they came from are in scope as listed above; "
+          "what their forms post is under *Tables* (fields no table holds).")  # fmt: skip
     if not (brief.out_screens or brief.out_routes or brief.out_tables):
         w("- Nothing: everything in the evidence is needed.")
     w("")
@@ -970,6 +1107,11 @@ def _running_web(brief: Brief, model: AppModel, w) -> None:
         w("- There is no database. The container only serves the files; where the data lives and "
           "whether it persists is in *Browser storage*. Its health is hosting health, not "
           "business-data health.")  # fmt: skip
+    elif brief.db_engine == "sqlite":
+        w(f"- The database is {brief.db_text}: one SQLite file whose location the lab gives in "
+          "`DATABASE_URL` (`sqlite:////data/<app>.db`), outside the image. Read `DB_ENGINE` and "
+          "`DATABASE_URL` at start-up all the same: the lab may give another engine. Create "
+          "tables from `db/schema.sql` when the database has none.")  # fmt: skip
     else:
         w(f"- The database is a {brief.db_engine} server outside the container, reached through "
           "the address in the environment, so the lab can put a proxy in front of it. Include its "

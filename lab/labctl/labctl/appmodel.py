@@ -81,6 +81,9 @@ class Element(Item):
     # Desktop recordings: the control's UI Automation properties, ancestor path, fallback
     # locators and their UiPath / pywinauto / WinAppDriver forms (labctl.desktop.locator).
     uia: dict | None = None
+    # What a form field accepts, from its own attributes: required, min, max, maxlength, pattern,
+    # step, inputmode... (`True` for a bare attribute). Never what it held.
+    rules: dict = {}
 
 
 class Call(Contract):
@@ -105,6 +108,15 @@ class Screen(Item):
     # grids, tab order and keyboard shortcuts seen (labctl.desktop.model). None for web screens.
     surface: str | None = None
     desktop: dict | None = None
+    # Recordings: messages the screen showed ({selector, text} with data masked), its frames
+    # ({selector, src path, title}), and, for a document that only ever loaded inside a frame of
+    # another origin, where: {in: screen path, element: selector}.
+    messages: list[dict] = []
+    frames: list[dict] = []
+    embedded: dict | None = None
+    # Data grids the screen showed: {selector, headers, types, rows (most seen), row_class,
+    # cell_classes}. Never a cell's text.
+    grids: list[dict] = []
 
 
 class Timing(Contract):
@@ -150,6 +162,9 @@ class Table(Item):
     model: str | None = None
     at: Where | None = None
     columns: list[Column] = []
+    # Where a table guessed from the evidence was seen: the route whose answer, or the screen whose
+    # grid or form, gave its columns (`GET /api/orders`, `grid on /orders/search`).
+    seen_on: list[str] = []
 
 
 class Rule(Item):

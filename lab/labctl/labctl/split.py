@@ -622,6 +622,26 @@ def _token_shapes(html: str) -> set[str]:
     return out
 
 
+def _shown_in(html: str, shape: str) -> str | None:
+    """The element a page shows a value of this shape in (`b#savedNumber`): the one with the
+    shortest text holding a word of that shape; None when no element with an id or name does."""
+    from labctl.behaviour import dom as domlib
+
+    best: tuple[int, str] | None = None
+    for key, el in domlib.snapshot(html).elements.items():
+        text = el.text if el.tag not in ("input", "select", "textarea") else el.value
+        if not text:
+            continue
+        shapes = {domlib.shape(t.strip(".,;:()[]{}!?")) for t in TOKEN.findall(text)}
+        if shape not in shapes:
+            continue
+        sel = f"{el.tag}{key}" if key.startswith("#") else key
+        rank = (len(text) + (1000 if el.container else 0), sel)
+        if best is None or rank < best:
+            best = rank
+    return best[1] if best else None
+
+
 def _distinct(shape: str | None, shown: bool) -> bool:
     """A shape worth matching across applications: a value typed in both can be anything but a
     lone word or number; one shown in one and typed in the other must hold a digit and more."""
@@ -669,10 +689,12 @@ def _travels(rec: Path, steps: list[_Step], router: _Router) -> list[dict]:
         if key in seen:  # the same value going the same way again: said once
             continue
         seen.add(key)
+        shown_in = _shown_in(_read(rec / p.data["dom"]), shape) if how == "shown" else None
         out.append({"shape": shape, "guess": True, "how": how,
                     "from": {"app": router.step_app[p.index].id, "step": p.seq,
                              "screen": screen_name(_pattern(p.path)),
-                             **({"field": p.data.get("selector")} if how == "typed" else {})},
+                             **({"field": p.data.get("selector")} if how == "typed" else {}),
+                             **({"element": shown_in} if shown_in else {})},
                     "to": {"app": app, "step": s.seq, "screen": screen_name(_pattern(s.path)),
                            "field": s.data.get("selector")}})  # fmt: skip
     return out

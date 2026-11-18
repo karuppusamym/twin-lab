@@ -373,7 +373,8 @@ def _data_text(brief) -> str:
         return ""
     ev = (data.get("evidence") or [""])[0]
     if kind == "server":
-        engine = brief.db_engine + ("" if brief.db_engine_set or brief.found_engine else " assumed")
+        engine = brief.db_engine + ("" if brief.db_engine_set or brief.found_engine
+                                    else ", a default")  # fmt: skip
         return f"server database ({engine}): {ev}"
     return f"{kind}: {ev}"
 
@@ -510,6 +511,47 @@ def _runs(data: dict) -> list[tuple[str, int, int]]:
     return [tuple(r) for r in out]
 
 
+def address_variable(app_id: str) -> str:
+    """The environment variable that holds an application's address in the lab: `BILLING_URL`."""
+    return re.sub(r"[^A-Z0-9]+", "_", app_id.upper()).strip("_") + "_URL"
+
+
+def _lab_port(root: Path, app_id: str) -> int | None:
+    path = Path(root) / "apps" / app_id / "app.yaml"
+    try:
+        conf = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, yaml.YAMLError):
+        return None
+    port = ((conf or {}).get("lab") or {}).get("port") if isinstance(conf, dict) else None
+    return int(port) if isinstance(port, int) else None
+
+
+def sequence_copy(root: Path, app_id: str) -> list[Path]:
+    """`apps/<app>/steps/<recording>.sequence.yaml`: the order of the whole recording across
+    applications (step number, application, screen, address pattern, what was done), for the
+    package. Structure only, as the sequence file is; travels lose their shapes."""
+    out_dir = Path(root) / "apps" / app_id / "steps"
+    written = []
+    for old in out_dir.glob("*.sequence.yaml") if out_dir.is_dir() else []:
+        old.unlink()
+    for _path, data in sequences_of(root, app_id):
+        doc = {k: data[k] for k in ("recording", "apps", "tabs", "counts", "handovers")
+               if k in data}  # fmt: skip
+        doc["travels"] = [{"how": t.get("how"), "guess": True,
+                           "from": {k: v for k, v in t["from"].items()},
+                           "to": dict(t["to"])} for t in data.get("travels") or []]  # fmt: skip
+        doc["steps"] = [{k: r[k] for k in ("n", "app", "tab", "screen", "path", "do") if k in r}
+                        for r in data.get("steps") or [] if not r.get("excluded")]  # fmt: skip
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{data.get('recording')}.sequence.yaml"
+        head = ("# The order of recording " + str(data.get("recording")) + " across applications "
+                "(step numbers are the whole recording's). Structure only: no value.\n")  # fmt: skip
+        path.write_bytes((head + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
+                                                width=100)).replace("\r\n", "\n").encode())  # fmt: skip
+        written.append(path)
+    return written
+
+
 def cross_app_section(root: Path, app_id: str) -> str:
     """Markdown for the brief ("" when the app's evidence comes from no recording across
     applications)."""
@@ -517,23 +559,50 @@ def cross_app_section(root: Path, app_id: str) -> str:
     if not found:
         return ""
     out = [f"## {SECTION}\n"]
-    for path, data in found:
+    for _path, data in found:
         runs = _runs(data)
         others = [a for a in dict.fromkeys(r[0] for r in runs) if a != app_id]
         if not others:
             continue
+        rec = data.get("recording")
+        paths = {r["n"]: r.get("path") for r in data.get("steps") or []}
         chain = " → ".join(
             (f"**{a}**" if a == app_id else f"`{a}`")
             + (f" (steps {s} to {e})" if s != e else f" (step {s})")
             for a, s, e in runs
         )
-        rel = path.relative_to(Path(root)).as_posix()
-        out.append(f"Recording `{data.get('recording')}` went through {len(runs)} stretch(es) in "
-                   f"{len(others) + 1} applications (`{rel}`): {chain}. Build only this "
-                   "application; each of the others has its own brief. Keep the elements where the "
-                   "flow leaves or enters this application with the same ids, names and link "
-                   "targets, so the hand-over works the same way; a link to another application "
-                   "goes to that application's address in the lab.\n")  # fmt: skip
+        out.append(f"Recording `{rec}` went through {len(runs)} stretch(es) in "
+                   f"{len(others) + 1} applications: {chain}. Step numbers in this section are the "
+                   "whole recording's. This application's own steps, in order, are in "
+                   f"`apps/{app_id}/steps/{rec}.json` (each with its `global` number); the order "
+                   f"across applications is in `apps/{app_id}/steps/{rec}.sequence.yaml`. Build only "
+                   "this application; each of the others has its own brief. Keep the elements "
+                   "where the flow leaves or enters this application with the same ids, names and "
+                   "link targets, so the hand-over works the same way.\n")  # fmt: skip
+        # Where the other applications are: one environment variable each.
+        hand = [h for h in data.get("handovers") or []
+                if app_id in (h["from"]["app"], h["to"]["app"])]  # fmt: skip
+        out.append("- Addresses of the other applications: read each from its environment variable "
+                   "at start-up (the lab sets them; a local run sets them by hand):")  # fmt: skip
+        for other in others:
+            port = _lab_port(root, other)
+            default = (f"in the lab `http://127.0.0.1:{port}` (its `lab.port`)" if port
+                       else "no lab port chosen yet for it")  # fmt: skip
+            links = [h for h in hand if h["from"]["app"] == app_id and h["to"]["app"] == other
+                     and str(h["from"].get("do", "")).startswith(("click ", "keypress ", "submit "))
+                     and h.get("how") != "back to a tab already open"]  # fmt: skip
+            said = "; ".join(
+                f"`{h['from'].get('do', '').removeprefix('click ').strip()}` on "
+                f"`{paths.get(h['from']['step']) or h['from']['screen']}` goes to "
+                f"`${{{address_variable(other)}}}{paths.get(h['to']['step']) or ''}` "
+                f"({h.get('how', '')})" for h in links)  # fmt: skip
+            out.append(f"  - `{address_variable(other)}`: the address of `{other}` ({default})."
+                       + (f" Elements that lead there: {said}." if said else
+                          " Nothing in this application links to it; it hands over to this one."))  # fmt: skip
+        out.append("  - When a variable is unset, the element keeps its id, classes and target and "
+                   "its link keeps the other application's path on this application's own address "
+                   "(so it fails visibly instead of leaving the lab); log one warning at start-up "
+                   "naming the variable.")  # fmt: skip
         before, after = [], []
         for n, (a, _s, _e) in enumerate(runs):
             if a != app_id:
@@ -548,29 +617,36 @@ def cross_app_section(root: Path, app_id: str) -> str:
         out.append(
             f"- Comes before: {', '.join(dict.fromkeys(after)) or 'nothing: the flow ends here'}."
         )
-        hand = [h for h in data.get("handovers") or []
-                if app_id in (h["from"]["app"], h["to"]["app"])]  # fmt: skip
         if hand:
             out.append("- Hand-overs:")
             for h in hand:
                 f, t = h["from"], h["to"]
                 out.append(f"  - step {f['step']} → {t['step']}: from `{f['app']}` screen "
                            f"`{f['screen']}` (`{f.get('do', '')}`) to `{t['app']}` screen "
-                           f"`{t['screen']}`, {h.get('how', '')}.")  # fmt: skip
+                           f"`{t['screen']}` (`{paths.get(t['step']) or ''}`), {h.get('how', '')}.")  # fmt: skip
         trav = [t for t in data.get("travels") or []
                 if app_id in (t["from"]["app"], t["to"]["app"])]  # fmt: skip
         if trav:
-            out.append("- Values that appear to travel between them (**a guess** from the shape of "
-                       "what was typed and shown, letters A and digits 9; never the values):")  # fmt: skip
+            out.append("- Values that go from one application to the other (**a guess**: matched "
+                       "by the shape of what was typed and shown, never by value). Check each, "
+                       "then make both demo apps hold the same synthetic records for it:")  # fmt: skip
             for t in trav:
                 f, to = t["from"], t["to"]
-                where = (f"typed into `{f.get('field')}` on `{f['app']}` screen `{f['screen']}`"
-                         if t.get("how") == "typed" else f"shown on `{f['app']}` screen `{f['screen']}`")  # fmt: skip
-                out.append(f"  - shape `{t['shape']}`: {where} (step {f['step']}), then typed into "
-                           f"`{to.get('field')}` on `{to['app']}` screen `{to['screen']}` "
-                           f"(step {to['step']}).")  # fmt: skip
-            out.append("  The demo apps hold synthetic data: a value that travels must exist in "
-                       "both (one data pack across apps: `labctl data load-across`).")  # fmt: skip
+                f_path = paths.get(f["step"]) or f["screen"]
+                if t.get("how") == "typed":
+                    what = (f"what was typed into `{f.get('field')}` on `{f['app']}` "
+                            f"`{f_path}` (step {f['step']})")  # fmt: skip
+                elif f.get("element"):
+                    what = (f"the value `{f['app']}` shows in `{f['element']}` on `{f_path}` "
+                            f"(step {f['step']})")  # fmt: skip
+                else:
+                    what = f"a value `{f['app']}` shows on `{f_path}` (step {f['step']})"
+                out.append(f"  - {what} is typed into `{to.get('field')}` on `{to['app']}` "
+                           f"`{paths.get(to['step']) or to['screen']}` (step {to['step']}).")  # fmt: skip
+            out.append("  So a record one application shows must be accepted by the other: the "
+                       "same synthetic data in both (in the repository, one data pack across apps: "
+                       "`labctl data load-across`; working from the package alone, seed both apps "
+                       "with matching rows).")  # fmt: skip
         out.append("")
     return "\n".join(out) + "\n" if len(out) > 1 else ""
 

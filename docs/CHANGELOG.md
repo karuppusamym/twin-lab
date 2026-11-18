@@ -32,6 +32,27 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   app; WinForms raises no Invoke events (clicks come from the mouse hook only); snapshots are
   taken after a batch of quick actions; Java typing and selection are polled.
 
+## 2026-11-18 — What a builder receives: fixes from the rebuild trial
+- **Interface text is kept, data is masked.** Page snapshots in a brief now keep the application's
+  own labels, headings, buttons, options and messages verbatim, and mask table cells, input
+  values, identifiers, dates, amounts, e-mails and names. `TWINLAB_PAGE_TEXT=strict` masks all
+  text and styles as before. Typed values are never kept in either mode. `data-testid`,
+  `data-field` and `target` are no longer masked.
+- **The brief says more**: a fields table per screen, messages per screen, list columns, what each
+  recorded action did, identifier patterns and how the next one is formed, the sign-in rule,
+  which element's value travels to which field of the sibling application, and the address
+  variable of each sibling (`<APP>_URL`).
+- **An embedded frame from another origin** is in scope as a stand-in served by the app itself;
+  its requests are not the app's routes or tables. Pages are no longer listed as tables.
+- **Database**: identifiers are quoted per engine with a reserved-word list. With no database
+  chosen at onboarding and none evidenced, the brief and task use SQLite and say it is a
+  default, not evidence.
+- **The package** now holds the app's step list (no values), its sequence and draft flow; the task
+  mentions screenshots only when present, and has a section for working from the zip alone.
+- A format rule is written only when a real format was seen.
+- Left open: recorded pictures are not shipped (they hide typed values only, not shown data);
+  seed counts, prices and valid credentials cannot be learned from a recording.
+
 ## 2026-11-18 — One replay across applications and tabs; trial findings; R09, R10, R12
 - **The recorder sends each action the moment it happens** and numbers it on arrival. Before, a
   step ended by a navigation was sent while the page unloaded, and newer Chromium drops that

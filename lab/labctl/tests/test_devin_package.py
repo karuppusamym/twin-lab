@@ -154,7 +154,8 @@ def test_prompt_names_repo_branch_app_and_every_step(tmp_path):
         "python -m pytest -q",
         "python -m labctl validate",
         "docker build -t twinlab/demo:dev apps/demo",
-        "postgres:17",
+        "DATABASE_URL=sqlite:////data/demo.db",  # nothing shows or chose the engine: SQLite
+        "**a default, not evidence**",
         "-e DATABASE_URL=",
         "/api/health",
         "python -m labctl conformance uipath-demo",
@@ -168,6 +169,11 @@ def test_prompt_names_repo_branch_app_and_every_step(tmp_path):
     ]:
         assert needle in text, needle
     assert "conformance requested-flow" not in text  # a flow has nothing to replay
+    # a database chosen at onboarding is the one the task names, and it is no default
+    app_yaml = repo / "apps" / "demo" / "app.yaml"
+    app_yaml.write_text(app_yaml.read_text("utf-8") + "lab:\n  database: postgres\n", "utf-8")
+    text = pkg.prompt(repo, "demo", "acme/twin-lab")
+    assert "postgres:17" in text and "**PostgreSQL**" in text and "a default, not" not in text
 
 
 def test_prompt_without_run_settings_uses_the_lab_conventions(tmp_path):

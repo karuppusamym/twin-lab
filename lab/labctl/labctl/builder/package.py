@@ -122,6 +122,22 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         for path in sorted(pages.glob("*.html")):
             if path.is_file() and not path.is_symlink():
                 found[f"{app}/pages/{path.name}"] = path
+    # The recorded steps in order and the sequence across applications (structure, no value),
+    # and the requested flows for this app (drafts from a recording included).
+    steps = repo_root / app / "steps"
+    if steps.is_dir():
+        for path in sorted([*steps.glob("*.json"), *steps.glob("*.sequence.yaml")]):
+            if path.is_file() and not path.is_symlink():
+                found[f"{app}/steps/{path.name}"] = path
+    for path in (
+        sorted((repo_root / "flows").glob("*.yaml")) if (repo_root / "flows").is_dir() else []
+    ):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(data, dict) and data.get("app") == app_id and not path.is_symlink():
+            found[f"flows/{path.name}"] = path
     shots = repo_root / "evidence" / app_id / "screenshots"
     if shots.is_dir():
         for path in sorted(shots.rglob("*")):
@@ -552,6 +568,44 @@ def _browser_database_text(conf: dict, app: str) -> str:
     )
 
 
+def _package_only_text(app_id: str, app: str, engine: str, has_steps: bool, db_var: str) -> str:
+    """What applies to a builder who has the zip and no repository: where to build, what of the
+    steps below to skip, and how to check the app without labctl."""
+    e = (engine or "").lower()
+    schema_check = (
+        f"`python -c \"import sqlite3; sqlite3.connect(':memory:').executescript(open('{app}/db/"
+        "schema.sql').read())\"` (the schema loads in SQLite as it is)"
+        if e == "sqlite"
+        else f"apply `{app}/db/schema.sql` to a throwaway database of the engine (as step 3.6 says)"
+    )
+    steps_check = (
+        f" Walk `{app}/steps/*.json` in order against the running app (by hand or with a short "
+        "browser script of your own): perform each step's action on its selector, type synthetic "
+        "values of the shape given, and check that the page that follows (`then`), the requests "
+        "and the messages are those the step lists and the brief's *What each recorded action "
+        "did* shows."
+        if has_steps
+        else ""
+    )
+    return f"""## Working from this package alone
+
+If you were given only this package and no repository (no `.git`, no `lab/` folder):
+
+1. Unpack the zip into a new, empty folder and work there: it already has the repository's
+   layout (`AGENTS.md`, `docs/`, `{app}/`). Build under `{app}/` as below; check each file
+   against its sha256 in `MANIFEST.json` first.
+2. Skip what needs the repository: the branch and the pull request (sections 1 and 6), the
+   repository's `python -m pytest -q`, `python -m labctl validate`, `labctl conformance`,
+   `labctl lab ...` and `labctl data load-across`. Hand back the folder (or a zip of `{app}/`)
+   with `BUILD-NOTES.md`, and say there which checks you could not run.
+3. Check the app without labctl: your own tests for it; {schema_check}; `docker build` if Docker
+   is available, else run the app directly with `{db_var}` set; then open every screen in the
+   brief and check that each listed selector resolves, that each route answers on its method
+   and path, and that each message appears with its exact text where the brief says.{steps_check}
+
+"""
+
+
 def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | None = None) -> str:
     """The task text for the coding agent. Pasted unchanged by a person, or passed by a builder."""
     repo_root = Path(repo_root)
@@ -566,11 +620,19 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
     ]  # fmt: skip
     # The database the demo app will run on is the lab's choice; the real system's engine
     # (`stack.db`) only matters when the lab names none.
+    # Next, the dialect the brief wrote the schema in (it says when that is only a default).
+    schema_text = _content(repo_root / "apps" / app_id / "db" / "schema.sql").decode(
+        "utf-8", "replace"
+    )
+    dialect = re.search(r"^-- Dialect: (\w+)( \(a default)?", schema_text, re.M)
     engine = (
         (conf.get("lab") or {}).get("database")
+        or (dialect.group(1) if dialect else None)
         or ((conf.get("stack") or {}).get("db") or {}).get("engine")
-        or "postgres"
+        or "sqlite"
     )
+    engine_default = not (conf.get("lab") or {}).get("database") and (
+        (bool(dialect and dialect.group(2))) or not (dialect or (conf.get("stack") or {}).get("db")))  # fmt: skip
     db_var, port, health = _run_env(conf)
     db_var = db_var or "DATABASE_URL"  # the lab's convention when the evidence names none
     port_text = str(port) if port else "<container port>"
@@ -672,11 +734,21 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
             "is correct); each screen"
         )
     else:
+        default_note = (
+            " This engine is **a default, not evidence**: nothing in the recording shows the real "
+            "application's database and none was chosen for this app at onboarding (`lab.database` "
+            "in `app.yaml`). Keep the data access plain (standard SQL, the driver chosen from "
+            "`DB_ENGINE`) so another engine can be given later."
+            if engine_default
+            else ""
+        )
         database_section = (
-            f"The database engine to target is {_engine_text(engine, db_var)} Only the **tables "
-            f"and data** are needed: create the tables from `{app}/db/schema.sql` and fill them "
-            "with synthetic rows. Do not rebuild the original system's business logic, stored "
-            "procedures or jobs beyond the behaviours the brief lists."
+            f"The database engine to target is {_engine_text(engine, db_var)}{default_note} Only "
+            f"the **tables and data** are needed: create the tables from `{app}/db/schema.sql` and "
+            "fill them with synthetic rows (the brief's *Identifiers and seed data* says how many "
+            "and how they are numbered, where the recording shows it). Do not rebuild the original "
+            "system's business logic, stored procedures or jobs beyond the behaviours the brief "
+            "lists."
         )
         env_step = (
             f"5. One `Dockerfile` in `{app}/`. The app reads its database address from the "
@@ -686,15 +758,22 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
             "`DB_PASSWORD` and `DB_CONNECTION_STRING` (ADO.NET style) for stacks that want the "
             "parts. No\n   secrets in the image. Synthetic data only."
         )
+        same = dialect is not None and {"postgresql": "postgres", "sqlserver": "mssql"}.get(
+            str(engine).lower(), str(engine).lower()) == dialect.group(1)  # fmt: skip
+        dialect_text = (
+            f"`schema.sql` is written for this\n   engine ({dialect.group(1)}; names an engine "
+            "reserves are quoted): apply it unchanged."
+            if same
+            else "`schema.sql` is written in\n   the real system's SQL dialect, which can differ "
+            "from the demo database's engine: when you\n   create the tables yourself, translate "
+            "types and identity columns to that engine; do not run\n   the file unchanged."
+        )
         objects_step = (
             f"6. Database objects: create tables from `{app}/db/schema.sql` when the database has "
             "none (the lab\n   may have created them already: then leave them). A view in the "
             "schema is a **table** in the\n   demo database, with sample rows; read it like a "
             "table. Stored procedures, functions and\n   triggers are not created; the brief "
-            "says which the real app has. `schema.sql` is written in\n   the real system's SQL "
-            "dialect, which can differ from the demo database's engine: when you\n   create the "
-            "tables yourself, translate types and identity columns to that engine; do not run\n"
-            "   the file unchanged."
+            f"says which the real app has. {dialect_text}"
         )
         run_check = (
             "4. Run the container against a real database of the brief's engine, as\n   "
@@ -714,6 +793,33 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
 
         return desktop_brief.task(repo_root, app_id, conf, digest, repo_line, branch, brief_rule,
                                   stack_block)  # fmt: skip
+    packaged = [rel for rel, _ in _collect(repo_root, app_id)]
+    shots = [rel for rel in packaged if rel.startswith("evidence/")]
+    step_files = [rel for rel in packaged if rel.startswith(f"{app}/steps/")]
+    flow_files = [rel for rel in packaged if rel.startswith("flows/")]
+    shots_text = (
+        f" Files under `evidence/{app_id}/screenshots/` in the package show how screens look; "
+        "use them for reference only and do not commit them (`evidence/` is Git-ignored on "
+        "purpose)."
+        if shots
+        else " The package has no pictures of the screens: the snapshots are the reference for "
+        "layout (their styles are the application's own)."
+    )
+    steps_text = (
+        f"\n4. Read {', '.join(f'`{f}`' for f in step_files)}: the recorded steps in order (the "
+        "action, the selector, the screen, the requests each caused and the page that followed; "
+        "typed values only as their shape)"
+        + (
+            f", and {', '.join(f'`{f}`' for f in flow_files)}: the flow as a person would describe "
+            "it"
+            if flow_files
+            else ""
+        )
+        + ". Your app must let these steps happen in this order, with these selectors."
+        if step_files
+        else ""
+    )
+    package_only = _package_only_text(app_id, app, engine, bool(step_files), db_var)
     return f"""# Twin Lab build task: `{app_id}`
 
 You are a coding agent. Build the demo app `{app_id}` for Twin Lab from its build brief and hand
@@ -748,7 +854,9 @@ elements by these, and a changed id breaks them silently.
 
 {database_section}
 
-{cross_section}{new_section}## 1. Repository and branch
+{cross_section}{package_only}{new_section}## 1. Repository and branch
+
+(In the repository. Working from the package alone, see *Working from this package alone*.)
 
 {repo_line}
 2. Work on a branch named `{branch}`, created from the default branch (if you are already on a
@@ -760,7 +868,7 @@ elements by these, and a changed id breaks them silently.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json` and `{app}/pages/*.html` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/pages/*.html` and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
@@ -768,9 +876,7 @@ elements by these, and a changed id breaks them silently.
    import. Otherwise (no source code, the usual case) read `{app}/pages/*.html`: value-free
    snapshots of each recorded screen, with the real element ids, classes, labels and layout;
    `{app}/behaviours.json` and the brief's "Behaviour seen in the recordings": what each screen
-   does; and `{app}/model.yaml`: request and response shapes, codes and timings. Files under
-   `evidence/{app_id}/screenshots/` in the package show how screens look; use them for
-   reference only and do not commit them (`evidence/` is Git-ignored on purpose).
+   does; and `{app}/model.yaml`: request and response shapes, codes and timings.{shots_text}{steps_text}
 
 ## 3. Build
 
