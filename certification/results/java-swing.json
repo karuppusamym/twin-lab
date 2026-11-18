@@ -3,8 +3,8 @@
   "technology": "Java Swing",
   "version": "Java 11",
   "surface": "desktop",
-  "result": "PARTIAL",
-  "reason": "capture failed: 1 of 20 expected action(s) not in the recording: toggle",
+  "result": "CAPTURE VERIFIED",
+  "reason": "rebuild not run: no rebuild replay report is named in the entry",
   "date": "2026-11-18",
   "gates": {
     "detect": {
@@ -22,24 +22,22 @@
       }
     },
     "capture": {
-      "status": "FAIL",
-      "detail": "1 of 20 expected action(s) not in the recording: toggle",
+      "status": "PASS",
+      "detail": "20 expected action(s), all in the recording (32 action(s) recorded)",
       "facts": {
         "expected": 20,
-        "captured": 33,
-        "missing": [
-          "toggle"
-        ],
-        "steps": 33
+        "captured": 32,
+        "missing": [],
+        "steps": 32
       }
     },
     "self-replay": {
       "status": "PASS",
-      "detail": "30 of 33 step(s) verified against a fresh start, 3 covered by the steps around them, 0 failed",
+      "detail": "29 of 32 step(s) verified against a fresh start, 3 covered by the steps around them, 0 failed",
       "facts": {
         "status": "pass",
-        "steps": 33,
-        "replayed": 30,
+        "steps": 32,
+        "replayed": 29,
         "implied": 3,
         "failed": 0,
         "skipped": 0
@@ -52,8 +50,6 @@
     }
   },
   "not_covered": [
-    "capture does not pass; the recording has the Urgent toggle before the status selection, and the flow makes them the other way round, so the expected actions are not found in order",
-    "intermittent on this machine; some recordings also miss the OK click on the first message box, and the replay then fails from that step on",
     "the Java version is not detected, so it is not compared",
     "JavaFX and SWT",
     "a rebuild by a coding agent"

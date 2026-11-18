@@ -285,8 +285,6 @@ entries:
           txtSearch: C-100
       rebuild: {}
     not_covered:
-      - self-replay does not pass yet; after Save the application selects the saved row again, which is recorded as a select on a data row, and verify does not perform a selection that holds data
-      - intermittent; in some runs the recording has the message box opening before the Save click that caused it, and verify then fails at that step
       - .NET Framework 4.x builds
       - data templates, virtualised lists, third-party controls
       - a rebuild by a coding agent
@@ -326,8 +324,6 @@ entries:
           Case or name: C-100
       rebuild: {}
     not_covered:
-      - capture does not pass; the recording has the Urgent toggle before the status selection, and the flow makes them the other way round, so the expected actions are not found in order
-      - intermittent on this machine; some recordings also miss the OK click on the first message box, and the replay then fails from that step on
       - the Java version is not detected, so it is not compared
       - JavaFX and SWT
       - a rebuild by a coding agent

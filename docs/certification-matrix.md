@@ -15,8 +15,8 @@ CAPTURE VERIFIED means detect, capture and self-replay passed and no rebuild was
 | JSF (Mojarra) | 2.3 | web | PASS | PASS | PASS | NOT RUN | **CAPTURE VERIFIED** | 2026-11-18 | PrimeFaces, RichFaces and other component libraries (plain h: components only); MyFaces; Jakarta Faces 3 and later; client-side state saving; the implementation's release (2.3.9) is in no page or header, so it is not compared; the acceptance cases flow.acceptance_for declares are run by the application's own test, not here; a rebuild by a coding agent |
 | ASP.NET Web Forms | - | web | NOT RUN | NOT RUN | NOT RUN | NOT RUN | **NOT RUN** | 2026-11-18 | everything; nothing has run |
 | WinForms | .NET 6 | desktop | PASS | PASS | PASS | NOT RUN | **CAPTURE VERIFIED** | 2026-11-18 | .NET Framework 4.x builds; third-party grids and custom-drawn controls; a rebuild by a coding agent |
-| WPF | .NET 6 | desktop | PASS | PASS | FAIL | NOT RUN | **PARTIAL** | 2026-11-18 | self-replay does not pass yet; after Save the application selects the saved row again, which is recorded as a select on a data row, and verify does not perform a selection that holds data; intermittent; in some runs the recording has the message box opening before the Save click that caused it, and verify then fails at that step; .NET Framework 4.x builds; data templates, virtualised lists, third-party controls; a rebuild by a coding agent |
-| Java Swing | Java 11 | desktop | PASS | FAIL | PASS | NOT RUN | **PARTIAL** | 2026-11-18 | capture does not pass; the recording has the Urgent toggle before the status selection, and the flow makes them the other way round, so the expected actions are not found in order; intermittent on this machine; some recordings also miss the OK click on the first message box, and the replay then fails from that step on; the Java version is not detected, so it is not compared; JavaFX and SWT; a rebuild by a coding agent |
+| WPF | .NET 6 | desktop | PASS | PASS | PASS | NOT RUN | **CAPTURE VERIFIED** | 2026-11-18 | .NET Framework 4.x builds; data templates, virtualised lists, third-party controls; a rebuild by a coding agent |
+| Java Swing | Java 11 | desktop | PASS | PASS | PASS | NOT RUN | **CAPTURE VERIFIED** | 2026-11-18 | the Java version is not detected, so it is not compared; JavaFX and SWT; a rebuild by a coding agent |
 
 ## Details
 
@@ -75,18 +75,18 @@ Result: **CAPTURE VERIFIED**. rebuild not run: no rebuild replay report is named
 
 ### WPF .NET 6 (`wpf`)
 
-Result: **PARTIAL**. self-replay failed: verify pass: 0 failed, 1 not performed, of 37 step(s); first: step 32 (select) the item selected holds data (its name was not recorded); not replayed
+Result: **CAPTURE VERIFIED**. rebuild not run: no rebuild replay report is named in the entry
 
 - detect: PASS. detected toolkit WPF, runtime.name .NET, runtime.version 6.0.3
-- capture: PASS. 20 expected action(s), all in the recording (37 action(s) recorded)
-- self-replay: FAIL. verify pass: 0 failed, 1 not performed, of 37 step(s); first: step 32 (select) the item selected holds data (its name was not recorded); not replayed
+- capture: PASS. 20 expected action(s), all in the recording (36 action(s) recorded)
+- self-replay: PASS. 29 of 36 step(s) verified against a fresh start, 7 covered by the steps around them, 0 failed
 - rebuild: NOT RUN. no rebuild replay report is named in the entry
 
 ### Java Swing Java 11 (`java-swing`)
 
-Result: **PARTIAL**. capture failed: 1 of 20 expected action(s) not in the recording: toggle
+Result: **CAPTURE VERIFIED**. rebuild not run: no rebuild replay report is named in the entry
 
 - detect: PASS. detected toolkit Java Swing / AWT
-- capture: FAIL. 1 of 20 expected action(s) not in the recording: toggle
-- self-replay: PASS. 30 of 33 step(s) verified against a fresh start, 3 covered by the steps around them, 0 failed
+- capture: PASS. 20 expected action(s), all in the recording (32 action(s) recorded)
+- self-replay: PASS. 29 of 32 step(s) verified against a fresh start, 3 covered by the steps around them, 0 failed
 - rebuild: NOT RUN. no rebuild replay report is named in the entry

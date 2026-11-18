@@ -321,3 +321,220 @@ def test_recorder_typing_in_a_password_field_without_value_events() -> None:
     # A toolkit that does raise value events (WinForms): the same one step, said by the event.
     rec._typed({"kind": "value", "desc": box, "password": True, "t": 2.3})
     assert len(rec.pending) == 1 and rec.pending[0]["via"] == "uia-value-event"
+
+
+def test_recorder_click_is_placed_at_the_mouse_press_before_the_window_it_opens() -> None:
+    """The Invoke event of a clicked button arrives late (the window poll may already have seen
+    the message box the click opened): the click step keeps the time of the mouse press."""
+    from labctl.desktop.recorder import order_batch
+
+    save = {"rid": (1, 9), "type": "Button", "aid": "btnSave", "window": 100}
+    rec = _recorder()
+    rec.pending.append({"kind": "click", "desc": save, "t": 10.0, "provisional": True,
+                        "injected": True})  # fmt: skip
+    rec.pending.append({"kind": "window_open", "hwnd": 200, "owner": 100, "t": 10.2})
+    rec._semantic({"kind": "invoke", "desc": save, "t": 10.3})
+    batch = order_batch(rec.pending)
+    assert [a["kind"] for a in batch] == ["click", "window_open"]
+    assert (batch[0]["t"], batch[0]["via"], batch[0]["injected"]) == (10.0, "uia-invoke", True)
+    # The same event raised again is still the same click (compared with the event's time).
+    rec._semantic({"kind": "invoke", "desc": save, "t": 10.35})
+    assert [a["kind"] for a in rec.pending].count("click") == 1
+    # A click by a pattern call has no mouse press: its Invoke event, handled after the poll saw
+    # the window it opened, goes before that window when the click was in the window's owner.
+    win_open = {"kind": "window_open", "hwnd": 200, "owner": 100, "t": 10.2}
+    invoke = {"kind": "click", "desc": save, "t": 10.3, "via": "uia-invoke"}
+    assert [a["kind"] for a in order_batch([win_open, invoke])] == ["click", "window_open"]
+    # Not a click in another window, and not one long after the window opened.
+    other = {"kind": "click", "desc": {**save, "window": 300}, "t": 10.3, "via": "uia-invoke"}
+    late = {"kind": "click", "desc": save, "t": 11.5, "via": "uia-invoke"}
+    for click in (other, late):
+        batch = order_batch([{**win_open}, click])
+        assert [a["kind"] for a in batch] == ["window_open", "click"]
+
+
+GRID, ROW, CELL, SAVE = (1, 2), (1, 2, 5), (1, 2, 5, 0), (1, 9)
+
+
+def _row(rid=ROW) -> dict:
+    return {"rid": rid, "type": "DataItem", "window": 100, "ancestors": [GRID, (1,)],
+            "ancestor_types": ["DataGrid", "Window"]}  # fmt: skip
+
+
+def test_selection_the_application_makes_is_not_a_user_step() -> None:
+    from labctl.desktop.recorder import self_made_selection
+
+    save = {"rid": SAVE, "type": "Button", "ancestors": [(1,)]}
+    cell = {"rid": CELL, "type": "Text", "ancestors": [ROW, GRID, (1,)]}
+    other_cell = {"rid": (1, 2, 6, 0), "type": "Text", "ancestors": [(1, 2, 6), GRID, (1,)]}
+    assert self_made_selection(_row(), save)  # Save pressed, the grid selects its row again
+    assert not self_made_selection(_row(), cell)  # the mouse was pressed in the row
+    assert not self_made_selection(_row(), _row())  # ... or on the row itself
+    assert not self_made_selection(_row(), other_cell)  # an arrow key, focus in the same grid
+    assert not self_made_selection(_row(), {"rid": GRID, "ancestors": [(1,)]})
+    assert not self_made_selection(_row(), None)  # nothing known: a step, as before
+    assert not self_made_selection(_row(), {})
+    assert not self_made_selection(_row(), save, popup=True)  # a drop-down list
+    radio = {"rid": (1, 4, 1), "type": "RadioButton", "ancestors": [(1, 4), (1,)],
+             "ancestor_types": ["Group", "Window"]}  # fmt: skip
+    sibling = {"rid": (1, 4, 0), "type": "RadioButton", "ancestors": [(1, 4), (1,)]}
+    assert not self_made_selection(radio, sibling)  # the next radio button, by an arrow key
+    assert self_made_selection(radio, save)
+
+
+def test_recorder_keeps_a_self_made_selection_as_an_effect_of_its_cause() -> None:
+    save = {"rid": SAVE, "type": "Button", "window": 100, "ancestors": [(1,)]}
+    rec = _recorder()
+    rec.pending.append({"kind": "click", "desc": save, "t": 10.0, "provisional": True})
+    rec._user(save, 10.0, rec.pending[-1])
+    rec._semantic({"kind": "select", "desc": _row(), "t": 10.1})
+    assert [a["kind"] for a in rec.pending] == ["click"]
+    assert [(e["kind"], e["desc"]["rid"]) for e in rec.pending[0]["effects"]] == [("select", ROW)]
+    # The click's own Invoke event replaces the provisional click: the effect stays with it.
+    rec._semantic({"kind": "invoke", "desc": save, "t": 10.15})
+    rec._semantic({"kind": "select", "desc": _row(), "t": 10.2})  # raised twice: kept once
+    assert [(a["kind"], len(a["effects"])) for a in rec.pending] == [("click", 1)]
+    # Its cause was written already: counted for the session's notes, still no step.
+    rec.pending = []
+    rec._semantic({"kind": "select", "desc": _row((1, 2, 6)), "t": 12.0})
+    assert rec.pending == [] and rec.effects_unplaced == 1
+    # The user presses the mouse in a row, or a key while the grid has the focus: a select step.
+    cell = {"rid": CELL, "type": "Text", "window": 100, "ancestors": [ROW, GRID, (1,)]}
+    rec.pending.append({"kind": "click", "desc": cell, "t": 13.0, "provisional": True})
+    rec._user(cell, 13.0, rec.pending[-1])
+    rec._semantic({"kind": "select", "desc": _row(), "t": 13.1})
+    assert [(a["kind"], a.get("via")) for a in rec.pending] == [("select", "uia-selection")]
+    rec.pending = []
+    rec._user(cell, 14.0)  # an arrow key: no step, only that the user pressed a key there
+    rec._semantic({"kind": "select", "desc": _row((1, 2, 6)), "t": 14.1})
+    assert [a["kind"] for a in rec.pending] == ["select"]
+
+
+def _java_window(status: str, urgent: str = "off", menu_open: bool = False) -> dict:
+    kids = [
+        {"type": "ComboBox", "role": "combo box", "name": "Status", "value": status,
+         "rect": [10, 10, 80, 20]},
+        {"type": "CheckBox", "role": "check box", "name": "Urgent", "toggle": urgent,
+         "rect": [10, 40, 80, 20]},
+        {"type": "Button", "role": "push button", "name": "OK", "rect": [10, 70, 80, 20]},
+    ]  # fmt: skip
+    if menu_open:  # a lightweight popup is put in front of the others: every path moves
+        kids.insert(0, {"type": "Menu", "role": "popup menu", "name": None, "rect": [0, 0, 5, 5]})
+    for i, k in enumerate(kids):
+        k.update({"rid": (i,), "fw": "Java", "visible": True})
+    return {"type": "Window", "role": "dialog", "name": "Case", "rid": (), "fw": "Java",
+            "visible": True, "rect": [0, 0, 100, 100], "children": kids}  # fmt: skip
+
+
+def _java_recorder(gone: bool = False):
+    """A JavaRecorder without Windows or a JVM: one window (100), read once."""
+    from types import SimpleNamespace
+
+    from labctl.desktop.java import JavaRecorder
+
+    rec = JavaRecorder.__new__(JavaRecorder)
+    rec.pending, rec.known, rec.structure, rec.last_activity = [], set(), set(), 0.0
+    user32 = SimpleNamespace(IsWindowVisible=lambda h: not gone)
+    rec.win = SimpleNamespace(window_pid=lambda h: 0 if gone else 7, user32=user32)
+    rec._rect = lambda h: None if gone else (500, 300, 600, 400)
+    raw = _java_window("Open")
+    raw["_screen"] = (500, 300)
+    rec.trees = {100: (raw, raw)}
+    return rec
+
+
+def _answer(value):
+    from concurrent.futures import Future
+
+    fut: Future = Future()
+    fut.set_result(value)
+    return fut
+
+
+def test_java_change_seen_when_a_click_arrives_is_placed_before_the_click() -> None:
+    """A combo box item chosen (no mouse, no key) and then a click on the check box: the tree
+    read when the click arrived already shows the item, so the select goes before the click."""
+    from labctl.desktop.java import input_made, place_changes, same_structure
+
+    urgent = {"rid": (1,), "type": "CheckBox", "window": 100, "ancestor_types": []}
+    rec = _java_recorder()
+    rec._before_input(100, _answer(_java_window("Resolved", "on")), urgent, 50.0)
+    assert [(a["kind"], a["desc"]["name"], a["t"] < 50.0) for a in rec.pending] == [
+        ("select", "Status", True)  # and no toggle: the click on the check box is that step
+    ]
+    assert rec.trees[100][0]["children"][0]["value"] == "Resolved"  # not found a second time
+    assert rec._changes(100, rec.trees[100], rec.trees[100], covered=False) == []
+    # The input made the change (a click on an item of the combo box's list): after it.
+    combo = {"rid": (0,), "type": "ComboBox"}
+    item = {"rid": (0, 0, 2), "type": "ListItem", "ancestor_types": ["List", "ComboBox"]}
+    select = {"kind": "select", "desc": combo, "t": 0.0}
+    assert input_made(combo, item) and input_made(combo, combo) and not input_made(combo, urgent)
+    assert not input_made(combo, None)
+    assert place_changes([select], item, 50.0)[0]["t"] > 50.0
+    assert place_changes([select], None, 50.0)[0]["t"] < 50.0  # a key, focus not known
+    # The click had its effect before the tree was read and moved the controls (a menu
+    # opened): controls are known by their path, so that tree is not used at all.
+    rec = _java_recorder()
+    before = rec.trees[100]
+    shifted = _java_window("Resolved", menu_open=True)
+    assert not same_structure(before[0], shifted) and same_structure(before[0], before[0])
+    rec._before_input(100, _answer(shifted), None, 50.0)
+    assert rec.pending == [] and rec.trees[100] is before
+    rec._before_input(100, _answer(None), None, 50.0)  # the window closed while it was read
+    assert rec.pending == [] and rec.trees[100] is before
+
+
+def test_java_click_that_closes_its_window_is_still_located() -> None:
+    """The OK button of a message box: by the time the click is handled the window is gone.
+    The control is found in the window's last tree, by where the window was when the mouse
+    was pressed (read in the hook); a tree read while the window closes is never kept."""
+    from types import SimpleNamespace
+
+    rec = _java_recorder(gone=True)
+    hit = rec._hit(100, 550, 380, (500, 300, 600, 400))
+    assert (hit["name"], hit["type"], hit["window"]) == ("OK", "Button", 100)
+    assert rec._hit(100, 550, 380)["name"] == "OK"  # no rectangle from the hook: where it was
+    assert rec._hit(100, 900, 900, (500, 300, 600, 400)) is None
+    # The window closes while the bridge reads it: no snapshot, the last tree stays.
+    closing = _java_window("Open")
+    for kid in closing["children"]:
+        kid.update({"visible": False, "rect": [0, 0, 0, 0]})
+    rec = _java_recorder()
+    rec.pids, rec.jab = {7}, SimpleNamespace(capture=None)
+    rec.bridge = SimpleNamespace(call=lambda fn, hwnd: closing)
+    rec.win.user32.IsWindowVisible = lambda h: False  # gone when the tree came back
+    assert rec._snapshot(100) is None
+    rec.win.user32.IsWindowVisible = lambda h: True
+    assert rec._snapshot(100)[0]["_screen"] == (500, 300)
+
+
+def test_java_tree_read_while_the_window_changes_is_not_kept(monkeypatch) -> None:
+    """A tree read while a click takes effect (a menu opening) can lack whole branches: the
+    click that is waiting must not be located in it."""
+    import queue
+    from types import SimpleNamespace
+
+    from labctl.desktop import jab
+
+    # Read when idle, and an input arrived meanwhile: the last tree stays.
+    rec = _java_recorder()
+    before, rec.q = rec.trees[100], queue.Queue()
+    rec.windows, rec.win.foreground = {100}, lambda: 100
+    rec._snapshot = lambda h: ({"type": "Window", "rid": (), "_screen": (500, 300)},) * 2
+    rec.q.put({"kind": "click", "x": 550, "y": 380, "t": 1.0})
+    rec._idle_diff()
+    assert rec.trees[100] is before and rec._hit(100, 550, 380)["name"] == "OK"
+    rec.q.get()
+    rec._idle_diff()  # nothing arrived: the new tree is the window's tree
+    assert rec.trees[100] is not before
+    # The bridge: a reading in which a child could not be read is torn and is read again; a
+    # component that never gives a child it announces is accepted at the last try.
+    whole = {"type": "Window", "children": [{"type": "Button"}]}
+    readings = [({"type": "Window"}, True), (whole, False), ({"type": "Pane"}, False)]
+    monkeypatch.setattr(jab, "_capture", lambda b, hwnd: readings.pop(0))
+    monkeypatch.setattr(jab.time, "sleep", lambda s: None)
+    assert jab.capture(SimpleNamespace(), 100) is whole and len(readings) == 1
+    readings[:] = [({"type": "Window", "n": i}, True) for i in range(5)]
+    assert jab.capture(SimpleNamespace(), 100)["n"] == jab.CAPTURE_TRIES - 1
+    readings[:] = [(None, False), (whole, False)]
+    assert jab.capture(SimpleNamespace(), 100) is None  # the window is gone: not read again
