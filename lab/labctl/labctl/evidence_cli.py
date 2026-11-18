@@ -211,11 +211,15 @@ def split(
                 )
                 for o in e.embedded:
                     typer.echo(f"    embedded: {o}")
+            for p in sp.problems(recording):
+                typer.echo(f"recording: {p}", err=True)
             typer.echo(f"wrote {target}; edit it, then run again with --apply")
             return
         for path in sp.apply(recording, prop, root, overwrite=force):
             typer.echo(f"wrote {path}")
         typer.echo(f"sequence across apps: {sp.sequence_path(recording, root)}")
+        for p in sp.problems(recording):
+            typer.echo(f"recording: {p}", err=True)
     except sp.ProposalError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc

@@ -140,7 +140,8 @@ def _time(text: Any) -> datetime | None:
 def _steps(folder: Path, rec: Recording) -> list[Step]:
     out = []
     root = folder.resolve()
-    lines = (folder / "steps.jsonl").read_text(encoding="utf-8").splitlines()
+    # errors="replace": a file cut off inside a character loses its last line, not every step
+    lines = (folder / "steps.jsonl").read_text(encoding="utf-8", errors="replace").splitlines()
     for n, line in enumerate(lines, 1):
         if not line.strip():
             continue

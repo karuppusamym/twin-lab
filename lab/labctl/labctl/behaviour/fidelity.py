@@ -1073,7 +1073,7 @@ def replay(
         bnd_path = None
     size, run_viewport = _viewport(viewport, vspec)
     reports: list[StepReport] = []
-    problems: list[str] = []
+    problems: list[str] = recording_damage(rec)
     stopped = False
     notes: dict = {}
     state = _no_cookies(storage_state, notes)
@@ -1246,7 +1246,9 @@ def replay(
                     report.note = (f"observed at the page it loaded (step {deferred[step.seq]}), "
                                    "the moment the source's snapshot describes")  # fmt: skip
                 elif expected_html is None:
-                    report.note = "ran; no snapshot was recorded after this step to compare"
+                    report.note, lost = uncompared(step)
+                    if lost:
+                        problems.append(lost)
                 else:
                     report.compared = True
                     diffs = compare_dom(expected_html, domlib.page_html(page), step.seq, supplied)
@@ -1446,6 +1448,24 @@ def _result(rec, base_url, reports, problems, expected) -> FidelityReport:
         status = "fail"
     return FidelityReport(recording=rec.id, base_url=base_url, status=status, steps=reports,
                           coverage=cov, problems=problems)  # fmt: skip
+
+
+def recording_damage(rec: Recording) -> list[str]:
+    """The loader's problems that change what a replay replays: lines of steps.jsonl that were
+    dropped and step numbers used twice. (A snapshot that is not there is reported at its step,
+    when the step ran; the HAR is not used by the replay.)"""
+    return [f"recording: {p}" for p in rec.problems if p.startswith("steps.jsonl")]
+
+
+def uncompared(step: RecStep) -> tuple[str, str | None]:
+    """(the step's note, a problem for the report or None) for a step that ran and has no
+    after-snapshot to compare with. A step that names a snapshot the recording does not have
+    (the recorder stopped before writing it) is a problem; a step that names none is not."""
+    if step.dom:
+        why = f"its snapshot {step.dom} is not in the recording"
+        return (f"ran; not compared: {why}",
+                f"step {step.seq} ({step.action}) ran but was not compared: {why}")  # fmt: skip
+    return "ran; no snapshot was recorded after this step to compare", None
 
 
 def _recorded_value(rec: Recording, step) -> str | None:

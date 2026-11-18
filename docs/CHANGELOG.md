@@ -2,6 +2,24 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — A recording cut short by a crash, a timeout or a restart
+- An audit listed recovery after an interrupted recording as never validated. It is now tested
+  (`tests/test_recording_recovery.py`, no browser): a last line of `steps.jsonl` cut off in the
+  middle, a garbage line, a snapshot or picture a step names that was never written, a missing,
+  empty or cut-off `recording.har`, step numbers repeated or out of order, and no steps at all.
+- What could be read is used and the rest is said. `labctl.botlog.recording.load` fills a new
+  `problems` list (the same idea as the brief loader's); `labctl evidence split` and
+  `build-all` print each as `recording: ...`, the split writes them to the sequence file's
+  `problems`, and a replay report lists the dropped lines and each step that ran but could
+  not be compared because its snapshot is not in the recording.
+- Fixed on the way: a file cut inside a character lost every step (now only its last line);
+  step numbers used twice (a recorder restarted and appended) were sorted into each other,
+  now they stay in the order written and the split refuses them with the reason, as every
+  reference between steps is by number; a HAR that is JSON but not a HAR raised a traceback.
+- Left open: a replay whose recording lost a line or a snapshot still reports `pass` when
+  every remaining step passes; the damage is under "Why not pass" and in `compared`, but
+  whether it should lower the status is a decision for a person. The replay loop itself was
+  not run in a browser for these cases.
 ## 2026-11-18 — Verdict gates from the audit: no silent PASS
 - **A misspelled category no longer hides a case.** A required case with an unknown category
   is counted under behaviour and named; every required result decides the verdict whatever
