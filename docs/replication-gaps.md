@@ -1,5 +1,17 @@
 # Replication gaps and fix plan
 
+## Latest audit: 18 November 2026
+
+[Extensive replication audit](extensive-replication-audit-2026-11-18.md) reports fresh tests and
+newly reproduced verdict defects: an invalid required category can coexist with a scoped PASS,
+and duplicate visual IDs can erase a failed comparison. Missing capture manifests and assumed
+required cases also need a distinct assurance policy. Earlier "implemented" labels below do not
+mean these newly identified gaps are closed. See that report for test totals and remaining coverage.
+
+Update, same day: A01 and A02 are fixed, A03 and A04 are enforced as an assurance tier beside the
+verdict (`VERIFIED COMPLETE` or `DECLARED CASES ONLY`); the report's status section lists each.
+
+
 Updated: 17 November 2026. Status: implementation backlog, not a declaration that the fixes below are complete.
 
 ## Target: fully verified replication within an agreed scope

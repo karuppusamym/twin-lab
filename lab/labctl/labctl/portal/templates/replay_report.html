@@ -11,6 +11,7 @@
 <div class="card verdict {{ vc }}" id="verdict">
   <div class="nexthead">Verdict</div>
   <p class="verdict-text"><span class="pill {{ vc }}">{{ v.verdict }}</span></p>
+  {% if r.assurance %}<p class="small" id="assurance"><span class="pill {{ 'ok' if r.assurance == 'VERIFIED COMPLETE' else 'warn' }}">{{ r.assurance }}</span>{% if r.assurance_reasons %} {{ r.assurance_reasons | join("; ") }}.{% else %} An expected action list was declared with nothing missing, and no required case rests on an assumption.{% endif %}</p>{% endif %}
   {% if v.legacy %}<p class="small muted">An older report: it has no scoped verdict, only the replay's own result ({{ r.status }}).</p>{% endif %}
   {% if r.verdict_reasons %}<ul class="small">{% for x in r.verdict_reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
   <p class="small" id="freshness"><span class="pill sentence {{ 'ok' if v.fresh.state == 'current' else 'warn' }}">{% if v.fresh.state == 'current' %}Still current: nothing it compared has changed since.{% elif v.fresh.state == 'stale' %}Out of date: {{ v.fresh.reasons | join("; ") }}. Replay again.{% else %}Freshness unknown: this report predates fingerprints. Replay again.{% endif %}</span></p>

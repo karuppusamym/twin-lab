@@ -92,6 +92,12 @@ def fidelity(
     strict: bool = typer.Option(
         False, "--strict", help="exit 1 unless the status is PASS WITHIN DECLARED SCOPE"
     ),
+    verified: bool = typer.Option(
+        False,
+        "--verified",
+        help="exit 1 unless the PASS is VERIFIED COMPLETE: an expected action list (--expect) "
+        "with nothing missing, and no required case resting on an assumption",
+    ),
     origin_map: list[str] = typer.Option(
         [], "--map", help="source=replica origin, repeat for each application (a recording "
         "across applications); default: replicas.yaml beside the recording, else --base-url"),
@@ -154,6 +160,8 @@ def fidelity(
         typer.echo(f"kept as {fidelity_mod.save(_root(), app_id, report)}")
     typer.echo(report.markdown())
     if report.status != "pass" or (strict and report.verdict != "PASS WITHIN DECLARED SCOPE"):
+        raise typer.Exit(1)
+    if verified and report.assurance != "VERIFIED COMPLETE":
         raise typer.Exit(1)
 
 

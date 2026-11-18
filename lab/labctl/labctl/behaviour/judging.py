@@ -27,6 +27,9 @@ from labctl.behaviour import visual as vis
 SCOPED_PASS, SCOPED_FAIL, SCOPED_BLOCKED = "PASS WITHIN DECLARED SCOPE", "FAIL", "BLOCKED"
 NOT_DECLARED = "NOT_DECLARED"
 CATEGORY_NAMES = ("capture", "replay", "behaviour", "data", "appearance")
+CASE_CATEGORIES = ("behaviour", "data", "appearance")
+# The assurance tier beside a scoped PASS: what the PASS rests on.
+VERIFIED, DECLARED_ONLY = "VERIFIED COMPLETE", "DECLARED CASES ONLY"
 
 
 class Category(BaseModel):
@@ -93,10 +96,11 @@ class Judging:
         cases, states = self._for(when)
         for st in states:  # pictures before any case reloads the page
             out = (self.artifacts or Path(".")) / "visual"
-            self.visual[st.id] = vis.check_state(page, st, self.vspec, self.rec.path,
-                                                 self.pictures, out, self.run_viewport)  # fmt: skip
+            res = vis.check_state(page, st, self.vspec, self.rec.path,
+                                  self.pictures, out, self.run_viewport)  # fmt: skip
+            self.visual[_free_key(self.visual, st.id)] = res
         for case in cases:
-            self.cases[case.id] = self._one(page, case, seq)
+            self.cases[_free_key(self.cases, case.id)] = self._one(page, case, seq)
 
     def _one(self, page, case: acc.Case, seq) -> acc.CaseResult:
         res = acc.CaseResult(id=case.id, check=case.check, category=case.category,
@@ -170,6 +174,16 @@ class Judging:
         return str((Path(self.rec.path) / self.pictures[seq]).resolve())
 
 
+def _free_key(held: dict, key: str) -> str:
+    """A result never replaces another: a second result under the same id is kept beside it."""
+    if key not in held:
+        return key
+    n = 2
+    while f"{key}#{n}" in held:
+        n += 1
+    return f"{key}#{n}"
+
+
 # --- the scoped result --------------------------------------------------------------------------
 
 
@@ -217,8 +231,16 @@ def categories(coverage, status: str, cases: list, visual: list) -> dict[str, Ca
         rep.required_total = coverage.steps
         rep.required_passed = max(0, coverage.replayed - coverage.failed)
     out["replay"] = rep
+    # A case whose category cannot be read is still a case: it is counted under behaviour, so
+    # a required one that failed or is blocked decides the result like any other.
+    unknown = [c for c in cases if c.category not in CASE_CATEGORIES]
     for name in ("behaviour", "data"):
-        out[name] = _from_results([c for c in cases if c.category == name], lambda r: r.id)
+        mine = [c for c in cases if c.category == name]
+        out[name] = _from_results(mine + (unknown if name == "behaviour" else []), lambda r: r.id)
+    if unknown:
+        said = "unknown category: " + ", ".join(f"{c.id} ({c.category!r})" for c in unknown[:8])
+        beh = out["behaviour"]
+        beh.note = f"{beh.note}; {said}" if beh.note else said
     appearance = [c for c in cases if c.category == "appearance"] + list(visual)
     out["appearance"] = _from_results(appearance, lambda r: r.id)
     return out
@@ -236,11 +258,39 @@ def scoped(cats: dict[str, Category], cases: list, visual: list) -> tuple[str, l
         why.append(f"{n} BLOCKED" + (f" ({cats[n].note})" if cats[n].note else ""))
     if not ran:
         why.append("no required acceptance case ran: structure alone is never a scoped PASS")
-    if failed:
+    # Every required result decides, whatever category it was filed under.
+    required = [r for r in [*cases, *visual] if r.required]
+    lone_failed = [r.id for r in required if r.status == acc.FAIL]
+    lone_blocked = [r.id for r in required if r.status == acc.BLOCKED]
+    if lone_failed and not failed:
+        why.append("required case(s) FAILED: " + ", ".join(lone_failed[:8]))
+    if lone_blocked and not blocked:
+        why.append("required case(s) BLOCKED: " + ", ".join(lone_blocked[:8]))
+    if failed or lone_failed:
         return SCOPED_FAIL, why
-    if blocked or not ran:
+    if blocked or lone_blocked or not ran:
         return SCOPED_BLOCKED, why
     return SCOPED_PASS, why
+
+
+def assurance(verdict: str | None, cats: dict[str, Category], cases: list,
+              visual: list) -> tuple[str | None, list[str]]:  # fmt: skip
+    """What a scoped PASS rests on. VERIFIED COMPLETE needs, beside the PASS, an expected action
+    list declared independently of the recording with nothing missing, and no required case
+    that rests on an assumption. Otherwise the PASS covers the declared cases only. No tier
+    without a PASS."""
+    if verdict != SCOPED_PASS:
+        return None, []
+    why: list[str] = []
+    cap = cats.get("capture")
+    if cap is None or cap.status != acc.PASS or cap.required_total < 1:
+        why.append("capture completeness is not verified: no expected action list was declared")
+    assumed = [r.id for r in [*cases, *visual]
+               if r.required and getattr(r, "basis", None) == "assumed"]  # fmt: skip
+    if assumed:
+        why.append("required case(s) rest on an assumption, not on evidence: "
+                   + ", ".join(assumed[:8]))  # fmt: skip
+    return (DECLARED_ONLY if why else VERIFIED), why
 
 
 def requirements(spec: acc.Spec | None, cases: list, visual: list, steps, coverage) -> Requirements:
