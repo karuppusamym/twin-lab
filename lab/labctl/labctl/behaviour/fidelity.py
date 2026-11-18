@@ -771,6 +771,13 @@ class _Run:
                 idx, how = idx - 1, "back"
             elif idx + 1 < len(urls) and urls[idx + 1] == url:
                 idx, how = idx + 1, "forward"
+            elif nav == "back_forward" and urls and (idx > 0) != (idx + 1 < len(urls)):
+                # The entry gone to was answered with another page (after sign-out, Back to a
+                # protected page is sent to sign-in). Only one direction exists, so the step is
+                # made that way and the replica must arrive at the recorded address by itself;
+                # loading that address would hide a replica that still shows the old page.
+                idx, how = (idx - 1, "back") if idx > 0 else (idx + 1, "forward")
+                urls[idx] = url
         elif nav == "replace" and urls:
             urls[idx] = url
         elif nav == "reload":
