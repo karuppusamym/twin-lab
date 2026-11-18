@@ -161,10 +161,15 @@ def _exchanges(har_doc: dict, hosts: set[str]) -> list[Ex]:
                 data = None
         post = req.get("postData") or {}
         form = dict(parse_qsl(str(post.get("text") or ""), keep_blank_values=True))
+        extras = _extras(entry, post, content)
+        if isinstance(extras["body"], dict):
+            # a JSON body's fields are what a form's fields are: what the page sent, by name
+            form = {str(k): "" if v is None else str(v) for k, v in extras["body"].items()
+                    if not isinstance(v, (dict, list, bool))}  # fmt: skip
         out.append(Ex(har._time(entry.get("startedDateTime")), str(req.get("method") or "GET").upper(),
                       url.path or "/", sanitize.route_pattern(url.path or "/"),
                       dict(parse_qsl(url.query, keep_blank_values=True)), form,
-                      int(resp.get("status") or 0), data, **_extras(entry, post, content)))  # fmt: skip
+                      int(resp.get("status") or 0), data, **extras))  # fmt: skip
     return [e for e in out if e.started is not None]
 
 
@@ -345,6 +350,7 @@ class ListDesign:
     searches: list[Search] = field(default_factory=list)
     note: str = ""
     before_writes: int = 0  # most rows an answer listed before the recording changed anything
+    total_before: int = 0  # the highest `total` an answer counted before any change
     # Per identifier number, what the answers first showed of that record (a list row or the
     # record's own GET): read only for code values, booleans and empty fields, never copied as data.
     seen: dict[int, dict] = field(default_factory=dict)
@@ -474,6 +480,7 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
             d = lists.setdefault(e.route, ListDesign(e.route, har._entity(e.route)))
             if not wrote:
                 d.before_writes = max(d.before_writes, len(items))
+                d.total_before = max(d.total_before, _count(e.data, items)[0])
             for item in items:
                 for k, v in item.items():
                     if isinstance(v, (dict, list)):
@@ -530,6 +537,11 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
         d.rows = max(d.highest - d.lowest + 1, *[s.total for s in d.searches], 0)
         if made and d.first_new > d.lowest:  # rows before the first record the recording made
             d.rows = d.first_new - d.lowest
+        elif d.first_new is None and d.total_before > d.rows and d.highest >= d.total_before:
+            # the list counted more records than the pages looked at showed: they exist, below
+            # the lowest identifier seen (a hypothesis: numbered without gaps)
+            d.lowest = d.highest - d.total_before + 1
+            d.rows = d.total_before
     words = set().union(*(p.words for p in loaded)) if loaded else set()
     c = Core(app, loaded, lists, created, words)
     _terms(c)

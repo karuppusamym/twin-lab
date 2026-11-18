@@ -14,7 +14,7 @@ served from 127.0.0.1 and kept in memory.
   dialog (`DELETE /api/tickets/<id>`, 204).
 - Sign-out: `DELETE /api/session`.
 
-Run by hand with `python app.py [port]`. Tests use `serve()`.
+Run by hand with `python desk_app.py [port]`. Tests use `serve()`.
 """
 
 from __future__ import annotations

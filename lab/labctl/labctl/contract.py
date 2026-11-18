@@ -142,6 +142,28 @@ def _insert(text: str, section: str, before: tuple[str, ...]) -> str:
     return f"{text}\n{section}"
 
 
+def _never_pressed(text: str, nav: dict | None) -> str:
+    """The brief's open questions say a button "was never pressed" from the model alone. Drop
+    the line when the navigation map shows a use (an element inside a frame), and make the rest
+    agree with *Actions on each screen*: rendered, no behaviour."""
+    used = set()
+    for screen in (nav or {}).get("screens") or []:
+        for el in screen.get("elements") or []:
+            if isinstance(el.get("used"), list):
+                used.add(el["selector"].split(">>>")[-1].strip())
+    out = []
+    for line in text.split("\n"):
+        m = re.match(r"^- (\S+) on (\S+) was never pressed in any recording", line)
+        if m and m.group(1) in used:
+            continue
+        if m:
+            line = (f"- {m.group(1)} on {m.group(2)} was never pressed in any recording: what it "
+                    "does is unknown. It is rendered and does nothing (*Actions on each screen*: "
+                    "seen, not used); record it to have it built")  # fmt: skip
+        out.append(line)
+    return "\n".join(out)
+
+
 def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None) -> str:
     """After `db/schema.sql` and the seed are written: the carried files, and the brief text."""
     from labctl import apicatalog, navmap, signin
@@ -170,6 +192,7 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     text = _insert(text, signin.brief_section(app_id, found, wrote), end)
     text = _insert(text, navmap.brief_sections(app_id, nav), end)
     text = _insert(text, scope_section(root, app_id, brief, ctxs), ("## Stack to pin",))
+    text = _never_pressed(text, nav)
     if wrote and wrote["rows"]:
         text = text.replace(
             "- Ship no customer data. Load `db/seed.sql` (synthetic) at start-up",

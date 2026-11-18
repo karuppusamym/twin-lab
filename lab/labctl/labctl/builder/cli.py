@@ -43,6 +43,8 @@ def _fail(exc: Exception, code: int = 1) -> None:
 def _package(root: Path, app_id: str, repo: str | None, out: Path | None) -> Path:
     try:
         gh = pkg.normalize_repo(repo) if repo else origin_repo(root)
+        for gap in pkg.completeness(root, app_id):  # said aloud; the package holds them too
+            typer.echo(f"package gap: {gap}", err=True)
         return pkg.build(root, app_id, out or pkg.default_state_dir(root) / "packages", repo=gh)
     except pkg.PackageError as exc:
         _fail(exc)

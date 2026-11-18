@@ -1,4 +1,4 @@
-"""Two scripted sessions on the help-desk fixture (app.py).
+"""Two scripted sessions on the help-desk fixture (desk_app.py).
 
 `run` is a working session: a protected page asked for before signing in, sign-in (an error
 first), the list with paging, search, filter and sort, a new ticket in a modal dialog (two

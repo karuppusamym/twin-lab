@@ -177,6 +177,11 @@ class Kept:
         return next((sel for stem, sel in found if stem in stems),
                     found[0][1] if found else None)  # fmt: skip
 
+    def is_code_word(self, word: str) -> bool:
+        """An upper-case code of some code list (`OPEN`, `NOT_SET`), as a word of a sentence."""
+        return bool(re.fullmatch(r"[A-Z][A-Z]+(_[A-Z]+)*", word)) and (
+            word in self.options or any(word in v for v in self.codes.values()))  # fmt: skip
+
     def code(self, key: str, value) -> bool:
         return isinstance(value, str) and value != "" and (
             value in self.codes.get(_key(key), ()) or value in self.options
@@ -300,8 +305,16 @@ class World:
         elif sanitize.EMAIL.fullmatch(value):
             made = f"{self.words.take()}.{self.words.take()}@example.test".lower()
         else:
-            shape = domlib.shape(value) or "A"
-            made = seedplan._fill(shape[:120], self.words, False)
+            # word by word, so a code of the interface inside a sentence stays where it is
+            # ("... OPEN ... CLOSED"): codes are kept anyway, and they say what the text reports
+            parts = re.split(r"(\s+)", value[:240])
+            if len(parts) > 1 and any(self.kept.is_code_word(w) for w in parts):
+                made = "".join(w if w.isspace() or self.kept.is_code_word(w)
+                               else seedplan._fill(domlib.shape(w) or "A", self.words, False)
+                               for w in parts if w)  # fmt: skip
+            else:
+                shape = domlib.shape(value) or "A"
+                made = seedplan._fill(shape[:120], self.words, False)
         self.alias[value] = made
         return made
 
@@ -370,6 +383,8 @@ class Synth:
             return ""
         if self.is_identifier(value) or self.w.kept.code(key, value):
             return value
+        if k in {_key(x) for x in KEEP_NUMBERS} and value.isdigit() and len(value) <= 6:
+            return value  # a page number or a count sent as text
         if error:  # the application's own message; any value in it masked
             made = sanitize.mask_message(value, self.c.known)
             return self.messages.get(made, made)
@@ -517,12 +532,12 @@ def _leaf_schema(key: str, vals: list, kept: Kept, id_patterns: set, shapes: set
     elif all(sanitize.EMAIL.fullmatch(v) for v in real if v not in shapes) and any(
             v not in shapes for v in real):  # fmt: skip
         out["format"] = "email"
-    out["minLength"], out["maxLength"] = min(map(len, strings)), max(map(len, strings))
+    # lengths seen in the recording: a fact about its data, not a limit of the field
+    out["x-length-seen"] = [min(map(len, strings)), max(map(len, strings))]
     out["x-shapes"] = sorted({domlib.shape(v) or "" for v in real})[:6]
     if any(v in shapes for v in real):
         out["x-source"] = "holds what a person typed (the recording kept its shape only)"
-        out.pop("minLength", None)
-        out.pop("maxLength", None)
+        out.pop("x-length-seen", None)
     return out
 
 
@@ -832,6 +847,14 @@ def _trigger_text(t: dict) -> str:
     return f"{text} on {t.get('screen')}"
 
 
+def _parent_of(route: str) -> str | None:
+    """`/api/tickets/{id}/history` -> `tickets`: the record a nested list belongs to."""
+    segs = [s for s in route.split("/") if s]
+    if len(segs) >= 3 and segs[-2].startswith("{") and not segs[-1].startswith("{"):
+        return re.sub(r"[^a-z0-9_]+", "_", segs[-3].lower()).strip("_") or None
+    return None
+
+
 def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: World) -> dict:
     from labctl import har
 
@@ -854,8 +877,8 @@ def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: Worl
                 if i < len(segs):
                     seen.append(segs[i])
             info = _leaf_schema(name, seen, kept, id_patterns, shapes)
-            info.pop("minLength", None)
-            info.pop("maxLength", None)
+            info.pop("x-length-seen", None)
+            info.pop("x-length-seen", None)
             doc["path_params"][name] = info
     query: dict[str, dict] = {}
     for e in exs:
@@ -871,8 +894,8 @@ def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: Worl
             if numbers:
                 info["x-values-seen"] = numbers[:20]
             info.pop("x-shapes", None)
-            info.pop("minLength", None)
-            info.pop("maxLength", None)
+            info.pop("x-length-seen", None)
+            info.pop("x-length-seen", None)
         if kept.control(k, screens):
             info["control"] = kept.control(k, screens)
     if query:
@@ -890,7 +913,14 @@ def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: Worl
             if kept.control(name, screens):
                 info["control"] = kept.control(name, screens)
         first_ok = next((c for c, e in zip(ep["calls"], exs, strict=True)
-                         if "request" in c and 200 <= e.status < 400), None)  # fmt: skip
+                         if "request" in c and (300 <= e.status < 400 or (
+                             200 <= e.status < 300 and "html" not in e.resp_type))),
+                        None)  # the example is a call that was accepted, when one was  # fmt: skip
+        for name, info in (request["schema"].get("properties") or {}).items():
+            if PASSWORD.search(name):  # the recording kept neither the value nor its length
+                for k in ("x-length-seen", "x-shapes"):
+                    info.pop(k, None)
+                info["x-source"] = "a password a person typed (never kept)"
         any_call = next((c for c in ep["calls"] if "request" in c), None)
         request["example"] = (first_ok or any_call or {}).get("request")
     doc["request"] = request
@@ -911,6 +941,9 @@ def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: Worl
                 "another status or method of this address shows a body, use its keys "
                 "(a hypothesis: say so in BUILD-NOTES.md)"
                 if any("json" in e.resp_type for _, e in group)
+                else "an HTML page: the screen shown again, with its messages (see the brief's "
+                "*What each recorded action did* for the step)"
+                if any("html" in e.resp_type for _, e in group)
                 else "none"
             )
         loc = sorted({sanitize.route_pattern(e.location) for _, e in group if e.location})
@@ -926,6 +959,20 @@ def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: Worl
         doc["shown"] = {k: v[:6] for k, v in sorted(ep["shown"].items())}
     doc["calls_recorded"] = len(ep["calls"])
     doc["calls"] = ep["calls"][:MAX_CALLS]
+    notes = []
+    if any(seedplan._items(e.data) is not None for e in exs if e.method == "GET"):
+        notes.append("Each example lists the records the recorded answer listed, in the recorded "
+                     "order, with synthetic values. An order that followed a masked field (a "
+                     "title, a name) therefore does not hold in the example: order the rows by "
+                     "the rule in api/catalogue.json `lists`, not by the example.")  # fmt: skip
+    parent = _parent_of(route)
+    if parent and table:
+        notes.append(f"A row of `{table}` belongs to one `{parent}` record (the `{{...}}` of the "
+                     f"path). `db/schema.sql` has no column for that link: keep it in a column or "
+                     "table of the app's own and leave `db/schema.sql` unchanged (an assumption "
+                     "to report).")  # fmt: skip
+    if notes:
+        doc["notes"] = notes
     if world.today:
         mine = sorted(
             k
@@ -933,7 +980,7 @@ def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: Worl
             if any(k == key for d in [e.data for e in exs] for _, key, _ in _leaves(d))
         )
         if mine:
-            doc["notes"] = [f"`{k}` held the date of the day the call was made (hypothesis: the "
+            doc["notes"] = doc.get("notes", []) + [f"`{k}` held the date of the day the call was made (hypothesis: the "
                             "server's current date); the examples show a synthetic date"
                             for k in mine]  # fmt: skip
     return doc
@@ -993,8 +1040,15 @@ def list_facts(ctxs: list[Ctx], kept: Kept) -> list[dict]:
                 if rule:
                     rules.append(rule)
             typed = any(v in c.shapes for (c, _), v in zip(calls, vals, strict=True) if v)
+            # An order seen with the one value this parameter ever had is the list's own order,
+            # not shown to be this parameter's doing.
+            orders = [r for r in rules if ": rows ordered by " in r]
+            if orders and len(orders) == len(rules) and len({v for v in vals if v}) < 2:
+                fact["order"] = orders[0].split(": ", 1)[1]
+                rules = []
             info["role"] = ("search text a person typed" if typed else "filter or sort"
-                            if rules else "sent, effect not shown by the answers")  # fmt: skip
+                            if rules else "a choice sent with the request (its effect is not "
+                            "shown by the answers alone)")  # fmt: skip
             if "" in vals:
                 info["empty"] = "sent empty when not used"
             if rules:
@@ -1287,6 +1341,8 @@ def brief_section(app: str, done: dict) -> str:
                 if r.get("location")
                 else "body not recorded"
                 if str(r.get("body", "")).startswith("not rec")
+                else "the page again (HTML)"
+                if str(r.get("body", "")).startswith("an HTML")
                 else "no body"
             )
             answers.append(f"`{status}`: {what}")
@@ -1294,6 +1350,12 @@ def brief_section(app: str, done: dict) -> str:
         out.append(f"| `{row['method']} {row['path']}` | {sent} | {req} | {'<br>'.join(answers)} | "
                    f"{row['auth']} | `{row['file']}` |")  # fmt: skip
     out.append("")
+    nested = [(d["method"], d["path"], n) for d in eps.values() for n in d.get("notes") or []
+              if "belongs to one" in n]  # fmt: skip
+    if nested:
+        out.append("**Records inside a record.**\n")
+        out += [f"- `{m} {path}`: {n}" for m, path, n in nested]
+        out.append("")
     lists = [x for x in index.get("lists") or [] if x.get("parameters")]
     if lists:
         out.append("**Search, filter, sort and paging.** Checked on every recorded answer:\n")
@@ -1303,6 +1365,8 @@ def brief_section(app: str, done: dict) -> str:
             out.append(f"- `{x['endpoint']}` ({x['answers']} answer(s){size}"
                        + (f"; beside the rows it answers {', '.join(f'`{b}`' for b in beside)}"
                           if beside else "") + "):")  # fmt: skip
+            if x.get("order"):
+                out.append(f"  - every answer: {x['order']}.")
             for name, info in x["parameters"].items():
                 line = f"  - `{name}`"
                 if info.get("control"):

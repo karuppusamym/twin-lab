@@ -327,6 +327,22 @@ def _view_title(node, tree) -> str:
     return domlib._text(head)[:80] if head is not None else ""
 
 
+def _record_of(ctx, step: dict) -> str | None:
+    """For a click on one row of a list (`a.ticket-link`, repeated per record): the identifier
+    of the record it acted on, read from the address of the call or page that followed. Only an
+    identifier the application generated is given (it is kept everywhere else too)."""
+    raw = ctx.part.step(step["n"])
+    if not any(loc.get("kind") == "record" for loc in raw.get("locators") or []):
+        return None
+    chain = {step["n"]} | {x["n"] for x in ctx.steps() if x.get("caused_by") == step["n"]}
+    for n in sorted(chain):
+        for e in ctx.part.owner.get(n, []):
+            for seg, pat in zip(e.path.split("/"), e.route.split("/"), strict=False):
+                if pat.startswith("{") and stepfacts.ID_VALUE.match(seg):
+                    return seg
+    return None
+
+
 def _uses(ctx, pages: Pages, screen: str, views: dict[str, dict]) -> dict[str, list[dict]]:
     """Recorded selector -> what happened each time the element was used on the screen."""
     effects = {r["n"]: r for r in ctx.part.facts.effects}
@@ -338,7 +354,8 @@ def _uses(ctx, pages: Pages, screen: str, views: dict[str, dict]) -> dict[str, l
             continue
         if not s.get("selector"):
             continue
-        use: dict = {"step": s["n"], "action": s["action"]}
+        use: dict = {"step": s["n"], "action": s["action"],
+                     "_locators": ctx.part.step(s["n"]).get("locators") or []}  # fmt: skip
         if s.get("global") is not None:
             use["global_step"] = s["global"]
         if s.get("key"):
@@ -347,6 +364,9 @@ def _uses(ctx, pages: Pages, screen: str, views: dict[str, dict]) -> dict[str, l
             use["replay_value"] = ctx.values[s["n"]]
         elif s.get("typed_shape"):
             use["typed_shape"] = s["typed_shape"]
+        rec_id = _record_of(ctx, s)
+        if rec_id:
+            use["record"] = rec_id
         eff = effects.get(s["n"])
         if eff:
             if eff.get("requests"):
@@ -366,6 +386,27 @@ def _uses(ctx, pages: Pages, screen: str, views: dict[str, dict]) -> dict[str, l
     return out
 
 
+def _pick(cands: list[dict], locators: list[dict]) -> dict | None:
+    """Of the elements a recorded selector matches, the one the step's own locators name (its
+    test id, its accessible name or its text); else the first."""
+    from labctl.behaviour import dom as domlib
+
+    for loc in locators:
+        kind = loc.get("kind")
+        for el in cands:
+            node = el["_node"]
+            if kind == "testid" and node.attrs.get(loc.get("attr") or "data-testid") == loc.get(
+                    "value"):  # fmt: skip
+                return el
+            if kind == "id" and node.id == loc.get("value"):
+                return el
+            text = loc.get("name") or loc.get("text")
+            if kind in ("role", "text", "label") and text and (
+                    domlib._text(node) == text or el.get("label") == text):  # fmt: skip
+                return el
+    return cands[0] if cands else None
+
+
 def screen_actions(ctxs: list, pages_by: dict, screen: str, views: dict[str, dict]) -> list[dict]:
     """The elements of a screen with their recorded use, or "seen, not used"."""
     merged: dict[str, dict] = {}
@@ -377,18 +418,20 @@ def screen_actions(ctxs: list, pages_by: dict, screen: str, views: dict[str, dic
             for r in rows:
                 uses.setdefault(sel, []).append({"recording": c.name, **r} if len(ctxs) > 1 else r)
     for sel, rows in uses.items():
-        el = merged.get(sel)
-        if el is None:  # a recorded selector that is not an element's listed one: find it
-            frame, _, _ = sel.rpartition(">>>")
-            prefix = frame.strip() + " >>> " if frame else ""
-            el = next((e for e in merged.values() if e["selector"].startswith(prefix)
-                       and _matches(sel, e["_node"])
-                       and ("recorded_as" not in e or e["recorded_as"] == sel)), None)  # fmt: skip
-            if el is None:
-                el = merged[sel] = {"selector": sel, "label": "", "type": "element"}
-            else:
-                el["recorded_as"] = sel
-        el.setdefault("used", []).extend(rows)
+        for row in rows:
+            locators = row.pop("_locators", [])
+            el = merged.get(sel)
+            if el is None:  # a recorded selector that is not an element's listed one: find it
+                frame, _, _ = sel.rpartition(">>>")
+                prefix = frame.strip() + " >>> " if frame else ""
+                cands = [e for e in merged.values() if "_node" in e
+                         and e["selector"].startswith(prefix) and _matches(sel, e["_node"])]  # fmt: skip
+                el = _pick(cands, locators)
+                if el is None:
+                    el = merged[sel] = {"selector": sel, "label": "", "type": "element"}
+                else:
+                    el["recorded_as"] = sel
+            el.setdefault("used", []).append(row)
     out = []
     for el in merged.values():
         el = {k: v for k, v in el.items() if k != "_node"}
@@ -416,7 +459,7 @@ def _way(kind_of: dict, selector: str | None, action: str) -> str:
     return action
 
 
-def transitions(ctxs: list, kinds: dict[str, dict]) -> list[dict]:
+def transitions(ctxs: list, kinds: dict[str, dict], by_step: dict | None = None) -> list[dict]:
     """Every observed move from one screen to another, merged by (from, element, to)."""
     out: dict[tuple, dict] = {}
     for c in ctxs:
@@ -425,15 +468,19 @@ def transitions(ctxs: list, kinds: dict[str, dict]) -> list[dict]:
             if not r.get("then") or r["then"] == r.get("screen"):
                 continue
             sel = r.get("selector")
-            el = kinds.get(r.get("screen") or "", {}).get(sel or "")
+            el = (by_step or {}).get((c.name, r["n"])) or kinds.get(
+                r.get("screen") or "", {}).get(sel or "")  # fmt: skip
             form = next((s.get("selector") for s in steps if s["action"] == "submit"
                          and s.get("caused_by") == r["n"]), None)  # fmt: skip
-            key = (r.get("screen"), sel, r["action"], r["then"])
+            key = (r.get("screen"), (el or {}).get("selector") or sel, r["action"], r["then"])
             row = out.setdefault(key, {
                 "from": r.get("screen"), "to": r["then"],
                 "by": _way({k: v.get("type", "") for k, v in kinds.get(r.get("screen") or "", {}).items()},
                            sel, r["action"]),
-                "selector": sel, "text": (el or {}).get("label", ""), "steps": []})  # fmt: skip
+                "selector": (el or {}).get("selector") or sel,
+                "text": (el or {}).get("label", ""), "steps": []})  # fmt: skip
+            if el and el.get("recorded_as") and el["recorded_as"] != row["selector"]:
+                row["recorded_as"] = el["recorded_as"]
             if r.get("key"):
                 row["key"] = r["key"]
             if form:
@@ -612,7 +659,7 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
         row["elements"] = acts
         not_followed = []
         for a in acts:
-            if a.get("type") != "link" or a.get("used") != "seen, not used":
+            if a.get("type") != "link" or isinstance(a.get("used"), list):
                 continue
             status, text = answer(a.get("target"))
             if status == "undefined":
@@ -622,7 +669,31 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
         if not_followed:
             row["links_seen_not_visited"] = not_followed
         screens.append(row)
-    moves = transitions(ctxs, kinds)
+    # The same element (selector and text) used on one screen and only seen on another, as in a
+    # menu every screen shares: it is one control, and behaves the same wherever it is.
+    used_on: dict[tuple, str] = {}
+    for row in screens:
+        for el in row["elements"]:
+            if isinstance(el.get("used"), list):
+                used_on.setdefault((el["selector"], el.get("label")), row["path"])
+    for row in screens:
+        for el in row["elements"]:
+            where = used_on.get((el["selector"], el.get("label")))
+            if not isinstance(el.get("used"), list) and where and el.get("type") != "link":
+                el["used"] = (f"seen, not used on this screen; the same element was used on "
+                              f"`{where}`: it behaves the same here")  # fmt: skip
+    for row in screens:  # a link into another application of the recording
+        for el in row["elements"]:
+            app_to = others.get(el.get("target") or "")
+            for use in el["used"] if app_to and isinstance(el.get("used"), list) else []:
+                use.setdefault("goes_to", f"{el['target']} of the application {app_to}"
+                               + (" (in a new tab)" if el.get("opens_in") == "_blank" else ""))  # fmt: skip
+    by_step = {}
+    for row in screens:
+        for el in row["elements"]:
+            for use in el["used"] if isinstance(el.get("used"), list) else []:
+                by_step[(use.get("recording") or (ctxs[0].name if ctxs else ""), use["step"])] = el
+    moves = transitions(ctxs, kinds, by_step)
     for m in moves:
         if m["to"] not in in_scope and m["to"] not in others and m["to"] not in out_scope:
             undefined.append(f"{m['from']}: {m.get('selector')} -> {m['to']} (visited, no screen)")
@@ -799,7 +870,7 @@ def brief_sections(app: str, doc: dict | None) -> str:
 def _use_text(el: dict) -> str:
     uses = el.get("used")
     if not isinstance(uses, list):
-        return "seen, not used"
+        return str(uses or "seen, not used")
     said: dict[str, list[int]] = {}
     for u in uses:
         bits = [u["action"] + (f" (key {u['key']})" if u.get("key") else "")]
@@ -811,6 +882,8 @@ def _use_text(el: dict) -> str:
             bits.append("opened " + ", ".join(f"`{x}`" for x in u["opens"]))
         if u.get("closes"):
             bits.append("closed " + ", ".join(f"`{x}`" for x in u["closes"]))
+        if u.get("record"):
+            bits.append(f"on the row of `{u['record']}`")
         if u.get("goes_to"):
             bits.append(f"went to `{u['goes_to']}`")
         if u.get("messages"):

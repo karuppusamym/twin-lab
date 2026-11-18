@@ -228,6 +228,39 @@ adopted style sheets), addresses inside inline `<style>` blocks and `style` attr
 are `url(#)` in the snapshots), hover and focus states (only as the style sheets define them),
 and one picture per screen (the fullest snapshot), not one per state.
 
+### What a package says about the API, the navigation and the sign-in
+
+A recording's HAR holds every call the pages made. The package carries that contract and none
+of the data:
+
+- `apps/<app>/api/`: one file per endpoint (method, address pattern, parameters, schemas by
+  status, the action that sent it, where the page showed the answer) with every recorded call
+  as a synthetic request and answer. The synthetic records are the rows of `db/seed.json` and
+  the values of `steps/*.values.yaml`, so the seed, the examples and the replay agree. Field
+  names, code lists, identifiers the application generated, paging numbers and the
+  application's own error messages are kept; every other value is replaced, and the written
+  files are checked against the HAR (`labctl.apicatalog.leaks`).
+- `apps/<app>/navigation.json`: every screen, each way in and out, dialogs, in-page tabs,
+  frames and popup windows, links seen and not visited, and every interactive element with
+  what happened when the recording used it, or "seen, not used".
+- The brief's *Sign-in and session*: what was observed, by name only, and the tables
+  `app_users` and `app_sessions` the rebuilt application keeps users and sessions in.
+- The brief's *Scope*: with no automation and no flow written by a person, everything the
+  recording shows, in recorded order.
+
+What a package still cannot say, found by the blind rebuild of the help-desk fixture:
+
+- The body of an answer the page never read (a 401 the page only tested the status of).
+- Text the sanitiser masks although it is the application's own (an empty-list message that
+  holds a word the data also holds), and the wording of generated text (a history line).
+- What a control nobody used does. It is rendered and does nothing, even a Cancel button.
+- A link between tables that no answer shows: rows of a nested list (`/tickets/{id}/history`)
+  have no column for their parent in the inferred schema; the endpoint file says so.
+- Rules beyond what was recorded: validation other than the refusals seen, paging at the
+  edges, what an unknown identifier answers, cookie attributes.
+- Which row a click on a repeated element took is given (`record` in `navigation.json`), but
+  the replay's own `bindings.yaml` still needs that record named by a person.
+
 ## Privacy
 
 A HAR or a database export from a real system holds customer data, cookies and tokens. So:

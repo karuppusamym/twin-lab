@@ -26,7 +26,11 @@ apps/<app>/BRIEF.md + the source files it names
 |---|---|
 | `apps/<app>/BRIEF.md` | Everything under `apps/<app>/` except the files in the next row |
 | The source files the brief lists, and only what they import | `apps/<app>/BUILD-NOTES.md`: what you did, what you could not do, and why |
-| `apps/<app>/db/schema.sql` | |
+| `apps/<app>/db/schema.sql`, `db/seed.sql` | |
+| `apps/<app>/pages/*.html`: one snapshot per recorded screen | |
+| `apps/<app>/navigation.json`: every way from screen to screen, dialogs, tabs, frames, popup windows, and every element of each screen with what it did | |
+| `apps/<app>/api/catalogue.json` and `api/*.json`: every endpoint the pages called, with schemas and synthetic calls | |
+| `apps/<app>/steps/*.json`, `*.values.yaml`: the recorded steps and the values the acceptance replay types | |
 | `apps/<app>/app.yaml` | Only its `run:` section |
 | `apps/<app>/pages/*.html` and `apps/<app>/look/` (when there is no source): value-free snapshots of each screen, the original style sheets, `theme.json`, a picture per screen, the interface's images, `texts.json` | |
 
@@ -56,7 +60,9 @@ person, not edited by you.
    hold are obtained under their licence or replaced by the fallback `look/manifest.json`
    names. Copy what you use out of `look/`; leave the folder as it is.
 4. **Nothing out of scope.** No screen, route, table, menu link or model listed under "Out of
-   scope". A navigation link to an out-of-scope screen is removed, not left dead.
+   scope". A link a recorded page already has to an out-of-scope path stays as the snapshot has
+   it and is answered with a redirect to the first in-scope screen, as the brief's *Navigation
+   map* says for each one.
 5. **Database from `db/schema.sql`.** Table and column names exactly as there, on the engine the
    brief names. The database is a server outside the container (the lab slows it down through a
    proxy), so include its driver and read its address from the environment variable the brief
@@ -80,6 +86,29 @@ person, not edited by you.
    clearly as synthetic. Test credentials stay in the seed file only.
 9. **Fill `app.yaml` `run:`** with the container port for `web` and `api` (the same port if one
    process serves both) and the health path.
+
+## What a build package holds
+
+`labctl builder package` (and `labctl evidence build-all`) writes one zip per application. Its
+`INDEX.md` lists every file with one line on what it is for, and `BUILD_TASK.md` gives the order
+to read them in:
+
+| File | What it is |
+|---|---|
+| `BUILD_TASK.md`, `INDEX.md`, `MANIFEST.json` | The task, the list of files, their checksums and the result of the completeness check |
+| `apps/<app>/BRIEF.md` | The specification |
+| `apps/<app>/pages/` | One snapshot per screen: structure and interface text real, data masked |
+| `apps/<app>/look/` | Style sheets, theme and a picture per screen, when that step has run |
+| `apps/<app>/navigation.json` | The navigation map and the actions of each screen |
+| `apps/<app>/api/` | The API catalogue: one file per endpoint, synthetic examples only |
+| `apps/<app>/db/` | `schema.sql`, and `seed.sql` / `seed.json` with the rows to load at start (the replay's user in `app_users`) |
+| `apps/<app>/steps/` | The recorded steps, the replay values, the order across applications |
+| `apps/<app>/model.yaml`, `behaviours.json`, `app.yaml` | Reference |
+
+The packaging step checks that every screen has an actions list, every endpoint a schema, every
+navigation target a definition, every table seed rows and every typing step a value. What it
+finds is written into the task and the index and printed as a warning; with
+`TWINLAB_PACKAGE_STRICT=1` the package is refused instead.
 
 ## Rules and trust
 

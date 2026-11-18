@@ -122,7 +122,7 @@ def test_task_is_neutral_and_ordered(tmp_path):
     text = task_of(bpkg.build(repo, "demo", tmp_path / "out", repo="acme/twin-lab"))
     assert "devin" not in text.lower()
     order = [
-        "## What to build, and what \"done\" means",
+        '## What to build, and what "done" means',
         "## Read in this order",
         "## Technology and versions",
         "## Rules that are not negotiable",

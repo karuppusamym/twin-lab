@@ -491,6 +491,11 @@ def build_all(
         try:
             result.package = _rel(root, pkg.build(root, app_id, out_dir))
             say(f"package: {result.package}")
+            gaps = pkg.completeness(root, app_id)
+            for gap in gaps:
+                say(f"package gap: {app_id}: {gap}")
+            if gaps:
+                result.needs.append(f"read the {len(gaps)} gap(s) the package lists (INDEX.md)")
         except Exception as exc:  # noqa: BLE001
             result.errors.append(f"package: {exc}")
     if any(a.brief for a in summary.apps):

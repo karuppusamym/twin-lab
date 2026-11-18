@@ -830,7 +830,8 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         )
     else:
         conformance_step = (
-            "6. Conformance: `app.yaml` lists no automations under `built_for`, so there is "
+            "6. Conformance: `app.yaml` lists no registered automation under `built_for` (a "
+            "requested flow has nothing to run), so there is "
             "nothing to run. Say so in BUILD-NOTES.md."
         )
     enhance = (repo_root / "apps" / app_id / "Dockerfile").is_file()

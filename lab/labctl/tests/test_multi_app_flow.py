@@ -432,10 +432,11 @@ def test_build_all_gives_each_app_its_evidence_flow_brief_and_package(recorded, 
     for path in ("/login", "/orders/search", "/orders/new/customer", "/orders/new/items",
                  "/orders/saved"):  # fmt: skip
         assert f"**{path}**" in brief_o, path
-    own_o = brief_o.split("## Part of a flow")[0]  # the cross-app section names where links go
+    # the cross-app section and the navigation map name where links go
+    own_o = brief_o.split("## Part of a flow")[0].split("## Navigation map")[0]
     for path in ("/billing/start", "/billing/lookup", "/billing/account", "/billing/invoice"):
         assert f"**{path}**" in brief_b and path not in own_o, path
-    assert "/orders/" not in brief_b.split("## Part of a flow")[0]
+    assert "/orders/" not in brief_b.split("## Part of a flow")[0].split("## Navigation map")[0]
     for sel in ("input#customerName", "select#product", "input#giftWrap", "textarea#notes",
                 "input#deliveryDate", "button#saveOrder", "a#openBilling"):  # fmt: skip
         assert f"`{sel}`" in brief_o, sel
@@ -862,3 +863,43 @@ def test_the_portal_shows_the_recording_its_split_and_where_each_app_came_from(r
 def fixture_apps_widget(recorded) -> str:
     prop = sp.load(multiapp.proposal_file(recorded.rec))
     return next(o for e in prop.apps for o in e.embedded)
+
+
+def test_the_navigation_map_and_the_api_files_of_both_applications(recorded, built):
+    """A frame showing another origin, a tab opened in the other application, calls sent as
+    forms: the navigation map and the API catalogue say each (labctl.navmap, apicatalog)."""
+    root, s = recorded.root, built.summary
+    t_o, t_b = _zip_texts(root / s.apps[0].package), _zip_texts(root / s.apps[1].package)
+    nav_b = json.loads(t_b["apps/billing/navigation.json"])
+    start = next(x for x in nav_b["screens"] if x["path"] == "/billing/start")
+    frame = next(v for v in start["subviews"] if v["kind"].startswith("iframe"))
+    assert frame["selector"] == "iframe#fxWidget" and frame["shows"] == "/widget/rates"
+    assert frame["origin"] == "another origin" and "stand-in" in frame["build"]
+    assert nav_b["undefined_targets"] == []
+    # a recorded selector several links share is told apart by the step's own locators
+    first = next(m for m in nav_b["transitions"] if m["from"] == "/billing/start")
+    assert first["selector"] == 'a[data-testid="nav-lookup"]' and first["text"] == "Find an order"
+    assert first["recorded_as"] == "a.nav__item"
+    nav_o = json.loads(t_o["apps/orders/navigation.json"])
+    assert nav_o["undefined_targets"] == []
+    saved = next(x for x in nav_o["screens"] if x["path"] == "/orders/saved")
+    out = {e["selector"]: e for e in saved["elements"]}
+    assert out["a#openBilling"]["type"] == "link" and isinstance(out["a#openBilling"]["used"], list)
+    loose = [x for sc in nav_o["screens"] for x in sc.get("links_seen_not_visited", [])]
+    assert any(x["target"] == "/customers" and x["status"] == "out of scope" for x in loose)
+    # form posts are endpoints too: fields, the redirect, the cookie by name
+    login = json.loads(t_o["apps/orders/api/post-login.json"])
+    assert login["request"]["content_type"] == "application/x-www-form-urlencoded"
+    assert list(login["request"]["schema"]["properties"]) == ["username", "password"]
+    assert login["responses"]["303"]["location"] == "/orders/search"
+    assert login["request"]["example"]["password"]  # the accepted call is the example
+    brief_o = t_o["apps/orders/BRIEF.md"]
+    assert "## Sign-in and session" in brief_o and "CREATE TABLE app_users" in t_o[
+        "apps/orders/db/schema.sql"]  # fmt: skip
+    assert "No sign-in was recorded" in t_b["apps/billing/BRIEF.md"]
+    assert "CREATE TABLE app_users" not in t_b["apps/billing/db/schema.sql"]
+    for texts, app in ((t_o, "orders"), (t_b, "billing")):
+        assert "INDEX.md" in texts and f"apps/{app}/api/catalogue.json" in texts
+        whole = "\n".join(texts.values())
+        for value in fixture_flow.TYPED.values():
+            assert value not in whole, value
