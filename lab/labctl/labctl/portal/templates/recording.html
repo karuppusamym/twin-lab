@@ -16,7 +16,7 @@
     <fieldset class="card" style="margin:0;overflow-wrap:anywhere">
       <legend><b>{{ e.kind }}</b>{% if not e.include %} · <span class="pill">left out</span>{% endif %}</legend>
       <label for="id_{{ loop.index0 }}">Name</label>
-      <input id="id_{{ loop.index0 }}" type="text" name="id_{{ loop.index0 }}" value="{{ e.id }}" pattern="[a-z0-9][a-z0-9-]*" required>
+      <input id="id_{{ loop.index0 }}" type="text" name="id_{{ loop.index0 }}" value="{{ e.id }}" pattern="[a-z0-9][a-z0-9\-]*" required>
       <p class="small"><code>{{ e.origin }}</code>{% if e.path_prefix %} under <code>{{ e.path_prefix }}</code>{% endif %}<br>
         {{ e.steps }} step(s), {{ e.screens }} screen(s){% if e.tabs %}, tab(s) {{ e.tabs | join(", ") }}{% endif %}</p>
       <label><input type="checkbox" name="include_{{ loop.index0 }}" value="1" {{ 'checked' if e.include }}> Include</label>
@@ -37,7 +37,7 @@
     <p class="small muted">Two applications on the same site: name the second and the path it starts with.</p>
     <div class="row">
       <div><label for="split_origin">Site</label><select id="split_origin" name="split_origin"><option value="">-</option>{% for o in proposal.apps | map(attribute="origin") | unique %}<option value="{{ o }}">{{ o }}</option>{% endfor %}</select></div>
-      <div><label for="split_id">Name</label><input id="split_id" type="text" name="split_id" pattern="[a-z0-9][a-z0-9-]*" placeholder="finance"></div>
+      <div><label for="split_id">Name</label><input id="split_id" type="text" name="split_id" pattern="[a-z0-9][a-z0-9\-]*" placeholder="finance"></div>
       <div><label for="split_prefix">Path starts with</label><input id="split_prefix" type="text" name="split_prefix" placeholder="/finance"></div>
     </div>
   </details>

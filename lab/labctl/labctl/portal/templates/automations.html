@@ -38,7 +38,7 @@
   <h2>Register an automation</h2>
   <form method="post" action="/automations" enctype="multipart/form-data">
     <div class="row">
-      <div><label for="aid">Id</label><input id="aid" type="text" name="automation_id" placeholder="uipath-loan-review" required pattern="[a-z0-9][a-z0-9-]*"></div>
+      <div><label for="aid">Id</label><input id="aid" type="text" name="automation_id" placeholder="uipath-loan-review" required pattern="[a-z0-9][a-z0-9\-]*"></div>
       <div><label for="aname">Name</label><input id="aname" type="text" name="name" placeholder="Loan review (UiPath)" required></div>
       <div><label for="akind">Type</label>
         <select id="akind" name="kind"><option value="uipath">UiPath</option><option value="agentic">Agent</option><option value="python">Python</option><option value="other">Other</option></select></div>
@@ -46,7 +46,7 @@
         <select id="asurface" name="surface"><option value="combo">Screens and API or database</option><option value="frontend">Screens only</option><option value="backend">API or database only</option></select></div>
     </div>
     <div class="row">
-      <div><label for="aapp">Runs against app (id)</label><input id="aapp" type="text" name="app_id" placeholder="qtt" pattern="[a-z0-9][a-z0-9-]*"></div>
+      <div><label for="aapp">Runs against app (id)</label><input id="aapp" type="text" name="app_id" placeholder="qtt" pattern="[a-z0-9][a-z0-9\-]*"></div>
     </div>
     <p class="small muted">With an app id, the arguments the bot uses as addresses, and its user and password arguments, are mapped to that app's lab automatically. Review them on the next page.</p>
     <label for="aproject">UiPath project (zip of the project folder: project.json and the .xaml files)</label>
