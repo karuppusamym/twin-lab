@@ -13,6 +13,7 @@ application. The rest are small tests of the parts.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import zipfile
@@ -428,8 +429,9 @@ def test_build_all_gives_each_app_its_evidence_flow_brief_and_package(recorded, 
     for path in ("/login", "/orders/search", "/orders/new/customer", "/orders/new/items",
                  "/orders/saved"):  # fmt: skip
         assert f"**{path}**" in brief_o, path
+    own_o = brief_o.split("## Part of a flow")[0]  # the cross-app section names where links go
     for path in ("/billing/start", "/billing/lookup", "/billing/account", "/billing/invoice"):
-        assert f"**{path}**" in brief_b and path not in brief_o, path
+        assert f"**{path}**" in brief_b and path not in own_o, path
     assert "/orders/" not in brief_b.split("## Part of a flow")[0]
     for sel in ("input#customerName", "select#product", "input#giftWrap", "textarea#notes",
                 "input#deliveryDate", "button#saveOrder", "a#openBilling"):  # fmt: skip
@@ -446,13 +448,14 @@ def test_build_all_gives_each_app_its_evidence_flow_brief_and_package(recorded, 
         assert col in schema_o, col
     for col in ("payer", "terms", "amount", "vat", "memo", "total"):
         assert col in schema_b, col
-    assert orders.screens >= 9 and billing.screens == 4
+    assert orders.screens >= 9 and billing.screens == 5  # 4 and the widget's stand-in
     # the cross-app section, in the brief and in the build task
     for app, brief, other in (("orders", brief_o, "billing"), ("billing", brief_b, "orders")):
         part = brief.split("## Part of a flow across applications", 1)[1].split("\n## ", 1)[0]
         assert f"`{other}`" in part and "Hand-overs" in part and "a guess" in part
         assert "orders-saved" in part and "billing-start" in part and "in a new tab" in part
-        assert "`A-9`" in part  # the order number: shown in orders, typed into billing
+        # the order number: shown in orders' #savedNumber, typed into billing (element, not shape)
+        assert "`b#savedNumber` on `/orders/saved`" in part and "shape `" not in part
         texts = _zip_texts(root / s.apps[[a.id for a in s.apps].index(app)].package)
         assert "## Part of a flow across applications" in texts["BUILD_TASK.md"]
         assert f"apps/{app}/BRIEF.md" in texts
@@ -467,6 +470,73 @@ def test_build_all_gives_each_app_its_evidence_flow_brief_and_package(recorded, 
     summary = json.loads(multiapp.summary_file(recorded.rec).read_text("utf-8"))
     assert [a["id"] for a in summary["apps"]] == ["orders", "billing"]
     assert "orders" in built.output and "TO DO" in built.output
+
+
+def test_the_packages_say_what_a_builder_needs(recorded, built):
+    """The trial review's gaps, on the packages of the fixture flow (items 1 to 11)."""
+    import sqlite3
+
+    root, s = recorded.root, built.summary
+    orders, billing = s.apps
+    t_o, t_b = _zip_texts(root / orders.package), _zip_texts(root / billing.package)
+    brief_o, brief_b = t_o["apps/orders/BRIEF.md"], t_b["apps/billing/BRIEF.md"]
+    task_o, task_b = t_o["BUILD_TASK.md"], t_b["BUILD_TASK.md"]
+    # 1. no behaviour rule with an empty or meaningless shape
+    for brief in (brief_o, brief_b):
+        assert "formatted as  " not in brief and "formatted as  or" not in brief
+        assert not re.search(r"is set to '(A |9)", brief)  # a table is rows, not one long shape
+    # 2. the embedded widget: in scope as a stand-in at this app's address, not out of scope
+    out_b = brief_b.split("## Out of scope", 1)[1].split("\n## ", 1)[0]
+    assert "**/widget/rates**" in brief_b and "built as a stand-in" in brief_b
+    assert "`iframe#fxWidget`" in brief_b and "/widget/rates" not in out_b
+    assert "rates_json" not in brief_b
+    # 3. pages are not listed as tables
+    assert "`start`" not in out_b and "`account`" not in out_b
+    out_o = brief_o.split("## Out of scope", 1)[1].split("\n## ", 1)[0]
+    assert "Tables: `customer`" not in out_o and "only guesses from a screen's layout" in out_o
+    # 4. SQLite by default, said to be one; reserved words quoted; the schema loads
+    for task, app in ((task_o, "orders"), (task_b, "billing")):
+        assert "**SQLite**" in task and "**a default, not evidence**" in task, app
+        assert "postgres assumed" not in task
+    schema_b = t_b["apps/billing/db/schema.sql"]
+    assert '"order" TEXT' in schema_b and '"number" TEXT' in schema_b
+    for schema in (schema_b, t_o["apps/orders/db/schema.sql"]):
+        sqlite3.connect(":memory:").executescript(schema)
+    # 5. identifiers: pattern, highest seen, new ones, seed guidance
+    assert "`ORD-` + 4 digits" in brief_o and "highest existing number + 1" in brief_o
+    assert "`b#savedNumber`" in brief_o.split("## Identifiers", 1)[1]
+    assert "`INV-5001`" in brief_b and "start with no seeded rows" in brief_b
+    # 6. the application's own words, verbatim, in the pages and the brief
+    acct = t_b["apps/billing/pages/billing-account.html"]
+    for words in ("New invoice", "Payer", "Payment terms", "Add VAT", "Save invoice", "30 days"):
+        assert words in acct, words
+    assert "The amount is a number" in brief_b and "An order reference looks like" in brief_b
+    saved = t_o["apps/orders/pages/orders-saved.html"]
+    for words in ("<h1>Order saved</h1>", ">Delivery date<", ">Open in billing<", "was saved."):
+        assert words in saved, words
+    assert 'data-testid="nav-lookup"' in t_b["apps/billing/pages/billing-start.html"]
+    # 7. no sentence about pictures the package does not have
+    assert "evidence/billing/screenshots" not in task_b and not any(
+        n.startswith("evidence/") for n in t_b)  # fmt: skip
+    # 8. the other application's address, by variable, and what links to it
+    assert "`BILLING_URL`" in brief_o and "`a#openBilling` on `/orders/saved`" in brief_o
+    assert "`ORDERS_URL`" in brief_b and "When a variable is unset" in brief_b
+    # 9. the step lists and the flow travel with the package; the brief cites them
+    assert "apps/orders/steps/order-to-invoice.json" in t_o
+    assert "apps/orders/steps/order-to-invoice.sequence.yaml" in t_o
+    assert "flows/orders-order-to-invoice.yaml" in t_o and "evidence/_sequences" not in brief_o
+    steps = json.loads(t_o["apps/orders/steps/order-to-invoice.json"])["steps"]
+    assert all({"n", "action", "screen"} <= set(x) for x in steps)
+    assert any(x.get("global") for x in steps) and not any("value" in x for x in steps)
+    assert (
+        "## What each recorded action did" in brief_o and "`POST /orders/new/items 303`" in brief_o
+    )
+    # 10. what applies from the zip alone
+    for task in (task_o, task_b):
+        assert "## Working from this package alone" in task and "without labctl" in task
+    # 11. values travel field to field, with steps
+    part = brief_b.split("## Part of a flow across applications", 1)[1]
+    assert 'is typed into `input[name="orderRef"]`' in part
 
 
 def test_build_all_again_repeats_nothing_and_keeps_filled_bindings(recorded, built):
@@ -504,6 +574,23 @@ def test_no_typed_value_is_in_any_written_artifact(recorded, built):
     leaks = [(name, v) for name, text in texts.items() for v in values
              if any(f in text for f in forms(v))]  # fmt: skip
     assert leaks == []
+    # ... with the interface-text rule in force: the pages keep the application's own words
+    pages = recorded.root / "apps" / "billing" / "pages"
+    assert "save invoice" in texts["apps/billing/pages/billing-account.html"]
+    # and in strict mode every text is masked, still with no typed value
+    from labctl import factory, sanitize
+
+    try:
+        with sanitize.page_text("strict"):
+            factory.generate(recorded.root, "billing", force=True)
+        strict = {p.name: p.read_text("utf-8").lower() for p in pages.glob("*.html")}
+        assert "save invoice" not in strict["billing-account.html"]
+        assert "xxxx xxxxxxx" in strict["billing-account.html"]
+        assert not [
+            (n, v) for n, t in strict.items() for v in values if any(f in t for f in forms(v))
+        ]
+    finally:
+        factory.generate(recorded.root, "billing", force=True)
 
 
 def test_a_second_recording_of_another_flow_enhances_orders(recorded, built, servers, tmp_path):

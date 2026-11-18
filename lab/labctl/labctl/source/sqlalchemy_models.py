@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -224,37 +225,99 @@ TYPES = {
 }  # fmt: skip
 
 
+ALIASES = {"postgresql": "postgres", "sqlserver": "mssql", "sql server": "mssql"}
+
+# Words that cannot be a bare table or column name in at least one engine the lab writes for
+# (SQL:2016 reserved words and the ones PostgreSQL, SQL Server, SQLite, MySQL and Oracle add).
+# A name in this list is always quoted, so one schema reads the same on every engine.
+RESERVED = frozenset(
+    """
+abort absolute action add all allocate alter analyse analyze and any are array as asc assertion
+asymmetric at authorization autoincrement backup begin between bigint binary bit blob boolean both
+breadth browse bulk by call cascade cascaded case cast catalog char character check checkpoint
+close clustered coalesce collate collation column comment commit compute concurrently condition
+conflict date
+connect connection constraint constraints contains containstable continue convert corresponding
+create cross current current_date current_role current_time current_timestamp current_user cursor
+database dbcc deallocate dec decimal declare default deferrable deferred delete deny depth desc
+describe detach diagnostics disconnect disk distinct distributed do domain double drop dump each
+else end end-exec errlvl escape except exception exclusive exec execute exists exit explain
+external fail false fetch file fillfactor filter first float for force foreign found freetext
+freetexttable freeze from full function get glob global go goto grant group having holdlock
+identity identity_insert identitycol if ignore ilike immediate in index indexed initially inner
+inout input insensitive insert instead int integer intersect interval into is isnull isolation
+join key kill language last lateral leading left level like limit lineno load local localtime
+localtimestamp lock long match merge minus mode modify module national natural nchar next no
+nocheck nonclustered not notnull nowait null nullif number numeric of off offset offsets on only
+open opendatasource openquery openrowset openxml option or order outer output over overlaps
+partition percent pivot placing plan pragma precision prepare preserve primary print prior
+privileges proc procedure public raise raiserror range read readtext reconfigure recursive
+references regexp reindex relative release rename replace replication restore restrict return
+returning revert revoke right rollback row rowcount rowguidcol rownum rows rule save savepoint
+schema scroll second section securityaudit select semantickeyphrasetable session session_user
+set setuser shutdown similar size smallint some space sql sqlcode sqlerror sqlstate statistics
+symmetric system_user table tablesample temp temporary textsize then time timestamp to top
+trailing tran transaction translate trigger true truncate try_convert tsequal union unique
+unknown unpivot update updatetext usage use user using vacuum value values varchar variadic
+varying verbose view virtual waitfor when whenever where while window with within without work
+write writetext zone
+""".split()
+)
+BARE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def quote(name: str, engine: str) -> str:
+    """A table or column name as `engine` must write it: bare when it is a plain name (letters,
+    digits, `_`) that no engine reserves, as the source wrote it, else quoted ("order" in
+    PostgreSQL, SQLite and Oracle, [order] in SQL Server, `order` in MySQL), with any quote
+    character inside doubled."""
+    engine = ALIASES.get(engine, engine)
+    if BARE.match(name) and name.lower() not in RESERVED:
+        return name
+    if engine == "mssql":
+        return "[" + name.replace("]", "]]") + "]"
+    if engine == "mysql":
+        return "`" + name.replace("`", "``") + "`"
+    return '"' + name.replace('"', '""') + '"'
+
+
 def ddl(tables: list[Table], header: str, engine: str = "sqlite") -> str:
-    """CREATE TABLE statements for one engine. Names never change; types and identity do."""
+    """CREATE TABLE statements for one engine. Names never change (quoted where the engine needs
+    it); types and identity do."""
+    engine = ALIASES.get(engine, engine)
     if engine not in ENGINES:
         raise ValueError(f"unknown database engine {engine!r}; one of {', '.join(ENGINES)}")
     types = TYPES.get(engine, {})
+
+    def q(name: str) -> str:
+        return quote(name, engine)
+
     lines = [f"-- {line}" if line else "--" for line in header.splitlines()]
     for table in ordered(tables):
         body = []
         for c in table.columns:
             kind = types.get(c.type, c.type)
             identity = IDENTITY[engine] if c.autoincrement else ""
-            body.append(f"  {c.name} {kind}{identity}{'' if c.nullable else ' NOT NULL'}")
-        pk = [c.name for c in table.columns if c.primary_key]
+            body.append(f"  {q(c.name)} {kind}{identity}{'' if c.nullable else ' NOT NULL'}")
+        pk = [q(c.name) for c in table.columns if c.primary_key]
         if pk:
             body.append(f"  PRIMARY KEY ({', '.join(pk)})")
         for c in table.columns:
             if c.unique:
-                body.append(f"  UNIQUE ({c.name})")
+                body.append(f"  UNIQUE ({q(c.name)})")
         for c in table.columns:
             if c.references:
-                body.append(
-                    f"  FOREIGN KEY ({c.name}) REFERENCES {c.references[0]} ({c.references[1]})"
-                )
+                body.append(f"  FOREIGN KEY ({q(c.name)}) REFERENCES {q(c.references[0])} "
+                            f"({q(c.references[1])})")  # fmt: skip
         where = (
             f"{table.file.name}:{table.line}"
             if table.file
             else table.note or "declared only; column types assumed"
         )
         lines.append(f"\n-- {table.model}, {where}")
-        lines.append(f"CREATE TABLE {table.name} (\n" + ",\n".join(body) + "\n);")
+        lines.append(f"CREATE TABLE {q(table.name)} (\n" + ",\n".join(body) + "\n);")
         for c in table.columns:
             if c.index and not c.unique and not c.primary_key:
-                lines.append(f"CREATE INDEX ix_{table.name}_{c.name} ON {table.name} ({c.name});")
+                index = q(f"ix_{table.name}_{c.name}")
+                lines.append(f"CREATE INDEX {index} ON {q(table.name)} ({q(c.name)});")
     return "\n".join(lines) + "\n"

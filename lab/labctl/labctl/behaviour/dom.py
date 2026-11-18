@@ -297,6 +297,7 @@ class ElementState:
     options: list[str] | None = None  # select: option texts in order
     text: str | None = None  # non-form elements: their text content (capped)
     container: bool = False  # holds elements with an id or interactive elements
+    rows: int | None = None  # tables and lists: how many rows (body rows, items) they show
 
     def signature(self) -> str:
         return (
@@ -347,7 +348,19 @@ def _state(node: Node, key: str) -> ElementState:
         st.text = _text(node)[:TEXT_CAP]
     if node.tag not in FORM_TAGS:
         st.container = any(d.id or _is_interactive(d) for d in _walk(node))
+    if node.tag in ("table", "tbody"):
+        st.rows = sum(1 for d in _walk(node) if d.tag == "tr"
+                      and not any(a.tag == "thead" for a in _ancestors(d, node)))  # fmt: skip
+    elif node.tag in ("ul", "ol"):
+        st.rows = sum(1 for d in node.children if d.tag == "li")
     return st
+
+
+def _ancestors(node: Node, stop: Node):
+    cur = node.parent
+    while cur is not None and cur is not stop:
+        yield cur
+        cur = cur.parent
 
 
 def snapshot(html: str) -> Snapshot:

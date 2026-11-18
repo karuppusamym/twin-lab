@@ -17,6 +17,7 @@ are kept as their shape only (`Smith` -> `A`, `C-1001` -> `A-9`).
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path
@@ -90,6 +91,25 @@ def _kept(el: domlib.ElementState) -> str | None:
     return domlib.shape(el.text)
 
 
+def reformatted(typed: str | None, shown: str | None) -> bool:
+    """Whether a field shows what was typed in another format: both shapes known and not empty,
+    different, and the same letters and digits once separators are left out (`9999` shown as
+    `9,999` or `9 9`). An empty field, or one that shows another value (the page kept an older
+    value, or the recorder put a shape in place of a typed value), is not a format."""
+    if not typed or not shown or typed == shown:
+        return False
+
+    def core(s: str) -> list[str]:
+        # each run of letters stays one (`A.A` is two words); digit runs may be regrouped
+        out: list[str] = []
+        for c in re.findall(r"[A9]", s):
+            if not (c == "9" and out and out[-1] == "9"):
+                out.append(c)
+        return out
+
+    return bool(core(typed)) and core(typed) == core(shown)
+
+
 def _requests(rec: Recording, step: RecStep, nxt: RecStep | None):
     if step.ts is None:
         return []
@@ -156,13 +176,18 @@ def observe(rec: Recording) -> list[dict]:
                     and ea.value is not None
                     and domlib.shape(ea.value) != step.typed_shape
                 )
-                if step.action == "type" and (typed_other or shaped_other):
+                typed = step.typed_shape or domlib.shape(step.value)
+                if (
+                    step.action == "type"
+                    and (typed_other or shaped_other)
+                    and reformatted(typed, domlib.shape(ea.value))
+                ):
                     out.append(
                         {
                             **base,
                             "kind": "format",
                             "target": key,
-                            "detail": {"shape": domlib.shape(ea.value)},
+                            "detail": {"shape": domlib.shape(ea.value), "typed": typed},
                         }
                     )
                 continue
@@ -194,6 +219,12 @@ def observe(rec: Recording) -> list[dict]:
                 changed.append(key)
             if ea.container:
                 continue  # a container's text changes with everything in it
+            if ea.rows is not None:  # a table or list: how many rows it shows, not their text
+                if eb.rows != ea.rows or _kept(eb) != _kept(ea):
+                    out.append({**base, "kind": "set_value", "target": key,
+                                "detail": {"rows": ea.rows}})  # fmt: skip
+                    changed.append(key)
+                continue
             if _kept(eb) != _kept(ea) or (eb.tag in FORM and eb.value != ea.value):
                 out.append(
                     {**base, "kind": "set_value", "target": key, "detail": {"value": _kept(ea)}}
@@ -264,10 +295,13 @@ def build(recordings: Iterable[Recording | Path], app: str | None = None) -> Cat
             for o in items:
                 examples.setdefault(o["value"] or "", o["detail"]["options"])
             detail = {"examples": [{"when": w, "options": opts} for w, opts in examples.items()]}
+        elif kind == "set_value" and any("rows" in o["detail"] for o in items):
+            detail = {"rows": sorted({o["detail"].get("rows", 0) for o in items})}
         elif kind == "set_value":
             detail = {"values": sorted({str(o["detail"]["value"]) for o in items})}
         elif kind == "format":
-            detail = {"shapes": sorted({o["detail"]["shape"] for o in items})}
+            detail = {"shapes": sorted({o["detail"]["shape"] for o in items}),
+                      "typed": sorted({o["detail"].get("typed") or "" for o in items} - {""})}  # fmt: skip
         elif kind == "delay":
             ms = sorted(o["detail"]["ms"] for o in items)
             detail = {
@@ -331,10 +365,17 @@ def describe(rule: Rule) -> str:
         text = f"{when}, {target} disappears"
     elif k in ("enable", "disable"):
         text = f"{when}, {target} is {k}d"
+    elif k == "set_value" and "rows" in rule.detail:
+        counts = " or ".join(str(n) for n in rule.detail["rows"])
+        text = f"{when}, {target} is redrawn and shows {counts} row(s)"
     elif k == "set_value":
-        text = f"{when}, {target} is set to {' or '.join(repr(v) for v in rule.detail.get('values', []))}"
+        shown = [f"`{v}`" if v else "nothing (emptied)" for v in rule.detail.get("values", [])]
+        text = f"{when}, {target} is set to text shaped {' or '.join(shown)}"
     elif k == "format":
-        text = f"{when}, the value is formatted as {' or '.join(rule.detail.get('shapes', []))}"
+        typed = " or ".join(rule.detail.get("typed", []))
+        shapes = " or ".join(rule.detail.get("shapes", []))
+        text = (f"{when}, the value is formatted as {shapes} (typed as {typed or 'another shape'}; "
+                "letters A, digits 9)")  # fmt: skip
     elif k == "navigate":
         text = f"{when}, the app opens {target}"
     else:  # delay

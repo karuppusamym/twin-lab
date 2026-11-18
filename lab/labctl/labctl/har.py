@@ -1663,6 +1663,7 @@ def _entity(pattern: str) -> str | None:
             continue
         if sanitize.VERSION_SEGMENT.match(seg):
             continue
+        seg = re.sub(r"\.(json|xml|csv|aspx?|php|jsp|do|action|html?)$", "", seg, flags=re.I)
         name = re.sub(r"[^a-z0-9_]+", "_", seg.lower()).strip("_")
         return name or None
     return None
@@ -1677,6 +1678,35 @@ def _items(data: Any) -> list[dict]:
             return [x for x in data[lists[0]] if isinstance(x, dict)]
         return [data]
     return []
+
+
+def page_knowledge(doms, entries) -> tuple[set[str], set[str]]:
+    """(data words, interface words) of a recording, lower-case, for masking its pages.
+
+    Data words: what its data cells, field values and API answers show. Interface words: what
+    its labels, buttons, headers, options and menus say. A word in both is the interface's."""
+    doms = list(doms)
+    pages = doms + [e.resp_text for e in entries if e.resp_text and e.resp_mime == "text/html"]
+    known: set[str] = set()
+    for e in entries:
+        # API answers keep no text (resp_text is for documents and scripts), so their values come
+        # from the parsed JSON. A name an API returned is data wherever a page shows it, even as
+        # one title-case word in a heading or option.
+        if e.resp_json is not None and e.status < 400:
+            known |= sanitize.names_in(e.resp_json)
+        elif e.resp_text and "json" in (e.resp_mime or ""):
+            try:
+                known |= sanitize.names_in(json.loads(e.resp_text))
+            except ValueError:
+                pass
+    for text in pages:
+        known |= sanitize.page(text).names
+    # The interface's words, read knowing the data: an option or button that names a customer
+    # the data shows is not the interface's vocabulary.
+    vocab: set[str] = set()
+    for text in pages:
+        vocab |= sanitize.page(text, known).vocab
+    return known - vocab, vocab
 
 
 def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None) -> AppModel:
@@ -1700,6 +1730,16 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             f"{ev}: {len(others)} API request(s) to {len({e.host for e in others})} other host(s) "
             "were left out; if the application's API lives there, say so and analyse again"
         )
+    # A host whose documents only ever loaded inside a frame (no step was on one of its pages) is
+    # another application embedded in this one: its page is kept as the frame's content, its
+    # own requests are not this application's routes or tables.
+    step_hosts = {urlsplit(s.url).netloc.lower() for s in rec.steps if s.url.startswith("http")}
+    framed = {e.host for e in entries if e.host not in step_hosts} if step_hosts else set()
+    framed_calls = sorted({f"{e.method} {sanitize.route_pattern(e.path)}" for e in entries
+                           if e.host in framed and e.kind not in ("document", "asset")})  # fmt: skip
+    framed_docs = {sanitize.route_pattern(e.path) for e in entries
+                   if e.host in framed and e.kind == "document"}  # fmt: skip
+    entries = [e for e in entries if e.host not in framed or e.kind in ("document", "asset")]
 
     screens: dict[str, _ScreenAcc] = {}
     served_grids = False  # a served document already holds a data grid: records came from a server
@@ -1718,22 +1758,21 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         for step in rec.steps
         if step.dom is not None
     }
-    known: set[str] = set()
-    for text in dom_text.values():
-        known |= sanitize.page(text).values
+    known, vocab = page_knowledge(dom_text.values(), entries)
+    # What changes between snapshots of the same screen at the same place is data (a record's
+    # name in a heading, say): a first reading of every snapshot, by screen.
+    first: dict[str, list[sanitize.PageInfo]] = {}
+    for step in rec.steps:
+        url = urlsplit(step.url)
+        if step.dom is not None and url.scheme in ("http", "https"):
+            first.setdefault(sanitize.route_pattern(url.path or "/"), []).append(
+                sanitize.page(dom_text[id(step)], known, vocab))  # fmt: skip
     for e in entries:
-        # API answers keep no text (resp_text is for documents and scripts), so their values come
-        # from the parsed JSON. A name an API returned is data wherever a page shows it, even as
-        # one title-case word in a heading or option.
-        if e.resp_json is not None and e.status < 400:
-            known |= sanitize.words(e.resp_json)
-        if e.resp_text and e.resp_mime == "text/html":
-            known |= sanitize.page(e.resp_text).values
-        elif e.resp_text and "json" in (e.resp_mime or ""):
-            try:
-                known |= sanitize.words(json.loads(e.resp_text))
-            except ValueError:
-                pass
+        if e.kind in ("document", "form") and 200 <= e.status < 300 and e.resp_mime == "text/html" \
+                and e.resp_text is not None:  # fmt: skip
+            first.setdefault(sanitize.route_pattern(e.path), []).append(
+                sanitize.page(e.resp_text, known, vocab))  # fmt: skip
+    vary = {pattern: sanitize.varying(pages) for pattern, pages in first.items()}
 
     timeline: list[tuple[datetime, str]] = []
     before: str | None = None
@@ -1750,7 +1789,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             if step.action not in acts:
                 acts.append(step.action)
         if step.dom is not None:
-            acc.pages.append(sanitize.page(dom_text[id(step)], known))
+            acc.pages.append(sanitize.page(dom_text[id(step)], known, vocab, vary.get(acc.pattern)))
             before = acc.pattern
 
     # Screens from the HTML documents; empty single-page-app shells give an address only.
@@ -1760,7 +1799,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             continue
         if e.resp_mime != "text/html" or e.resp_text is None:
             continue
-        info = sanitize.page(e.resp_text, known)
+        info = sanitize.page(e.resp_text, known, vocab, vary.get(sanitize.route_pattern(e.path)))
         served_grids = served_grids or bool(info.grids)
         if e.started:
             timeline.append((e.started, sanitize.route_pattern(e.path)))
@@ -1880,12 +1919,19 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         if browser_candidate
         else _html_tables(screens, {_norm(n) for n in tables}, model.problems, ev)
     )
+    # A form or grid whose fields are mostly the columns of a table the answers already showed is
+    # that table seen through a screen (/billing/account's form is `invoices`), not another one.
+    answered = [{_norm(c) for c in cols} for cols in tables.values()]
+    html_tables = [t for t in html_tables
+                   if not any(len({_norm(c) for c in t.columns} & cols) * 2 >= len(t.columns)
+                              for cols in answered)]  # fmt: skip
     for name, cols in tables.items():
         model.tables.append(
             Table(
                 name=name,
                 basis="inferred",
                 **{"from": [ev]},
+                seen_on=[f"{m} {p}" for (m, p), acc in routes.items() if name in acc.tables],
                 columns=[
                     Column(name=c, type=_sql_type(s), nullable=c != "id", primary_key=c == "id")
                     for c, s in cols.items()
@@ -1905,6 +1951,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
                 name=t.name,
                 basis="assumed",
                 **{"from": [ev]},
+                seen_on=[f"page layout of {s}" for s in sorted(t.screens)],
                 columns=[
                     Column(
                         name=c,
@@ -1918,6 +1965,22 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         )
         for col, values in t.codes.items():
             model.codes.setdefault(f"{t.name}.{col}", sorted(values))
+
+    # Documents of an embedded application: which screen's frame shows them.
+    embedded: dict[str, dict] = {}
+    for pattern in sorted(framed_docs):
+        found = next(((acc.pattern, f["selector"]) for acc in screens.values()
+                      if acc.pattern not in framed_docs for info in acc.pages for f in info.frames
+                      if sanitize.route_pattern(f["src"] or "/") == pattern), None)  # fmt: skip
+        embedded[pattern] = {"in": found[0] if found else None,
+                             "element": found[1] if found else None,
+                             "origin": "another origin", "calls": framed_calls}  # fmt: skip
+    if embedded:
+        model.problems.append(
+            f"{ev}: {', '.join(sorted(embedded))} loaded only inside a frame from another origin "
+            f"(an embedded application); its own requests ({', '.join(framed_calls) or 'none'}) "
+            "are not this application's routes"
+        )
 
     # Screens.
     pages_dir = Path(pages_dir) if pages_dir is not None else None
@@ -1936,9 +1999,10 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
                     elements[sel] = Element(
                         selector=sel, label=el["label"], tag=el["tag"], name=el["name"],
                         type=el["type"], classes=el["classes"], options=el["options"],
-                        basis="observed", **{"from": [ev]},
+                        rules=el.get("rules") or {}, basis="observed", **{"from": [ev]},
                     )  # fmt: skip
                 else:
+                    have.rules = have.rules or el.get("rules") or {}
                     have.label = have.label or el["label"]
                     have.options = have.options + [
                         o for o in el["options"] if o not in have.options
@@ -1955,16 +2019,25 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             el.actions = el.actions + [a for a in actions if a not in el.actions]
         files = []
         if acc.pages and pages_dir is not None:
-            best = max(enumerate(acc.pages), key=lambda p: (len(p[1].ids), p[0]))[1]
+            # the fullest snapshot: most ids, then most classes (a list with its rows), then latest
+            best = max(enumerate(acc.pages),
+                       key=lambda p: (len(p[1].ids), len(p[1].classes), p[0]))[1]  # fmt: skip
             pages_dir.mkdir(parents=True, exist_ok=True)
             safe_name = re.sub(r"[^A-Za-z0-9.-]+", "-", name).strip("-.")[:80] or "page"
             out = (
                 pages_dir / f"{safe_name}.html"
             )  # no ; : or other characters a file system mangles
+            said = (
+                "Structure, ids, classes, styles and the application's own interface text (labels, "
+                "headings, buttons, options, links, messages) are real; data (field values, table "
+                "and description cells, names, numbers, dates, e-mail addresses) is masked"
+                if best.mode == "interface"
+                else "Structure, ids, classes and styles are real; every text and value is masked "
+                "(strict page-text mode)"
+            )
             out.write_text(
-                f"<!-- {acc.pattern}: value-free snapshot from {ev}. Structure, ids, classes and the "
-                "application's own labels are real; every other text and value is masked "
-                "(letters x/X, digits 9). -->\n" + best.html,
+                f"<!-- {acc.pattern}: value-free snapshot from {ev}. {said} (letters x/X, digits 9). "
+                "-->\n" + best.html,
                 encoding="utf-8",
                 newline="\n",  # generated files are LF on every OS (they go into Git and images)
             )
@@ -1974,6 +2047,28 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             files = [where]
         if not acc.pages:
             no_content.append(acc.pattern)
+        messages: list[dict] = []
+        frames: list[dict] = []
+        grids: list[dict] = []
+        for info in acc.pages:
+            for m in info.messages:
+                item = {"selector": m["selector"], "text": m["text"]}
+                if item not in messages and len(messages) < 40:
+                    messages.append(item)
+            for f in info.frames:
+                if f not in frames:
+                    frames.append(f)
+            for g in info.grids:
+                if g.get("framed"):
+                    continue
+                sel = f"table#{g['id']}" if g.get("id") else "table"
+                have = next((x for x in grids if x["selector"] == sel), None)
+                if have is None:
+                    grids.append({"selector": sel, "headers": g["headers"], "types": g["types"],
+                                  "rows": g["rows"], "row_class": g.get("row_class") or None,
+                                  "cell_classes": g.get("cell_classes") or []})  # fmt: skip
+                else:
+                    have["rows"] = max(have["rows"], g["rows"])
         model.screens.append(
             Screen(
                 name=name,
@@ -1986,6 +2081,10 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
                 elements=list(elements.values()),
                 calls=[Call(method=m, path=p) for m, p in acc.calls],
                 snapshots=len(acc.pages),
+                messages=messages,
+                frames=frames,
+                embedded=embedded.get(acc.pattern),
+                grids=grids,
             )
         )
     if no_content:
@@ -2465,7 +2564,9 @@ def _html_tables(screens: dict[str, _ScreenAcc], skip: set[str], problems: list[
             heads = info.headings or ([info.title] if info.title else [])
             used: dict[str, int] = {}
             for grid in info.grids:
-                entity = (_entity_from_id(grid["id"]) or _entity_from_path(acc.pattern)
+                if grid.get("framed"):
+                    continue  # the grid of an embedded document: not this application's data
+                entity =(_entity_from_id(grid["id"]) or _entity_from_path(acc.pattern)
                           or _entity_from_heading(heads))  # fmt: skip
                 if not entity:
                     problems.append(

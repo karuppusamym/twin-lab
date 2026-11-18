@@ -239,9 +239,12 @@ def test_a_server_backed_brief_is_unchanged(tmp_path):
     brief = brief_mod.scope("showcase", "x", model)
     text = brief_mod.render(brief, ROOT)
     assert not brief.browser_only and "### Tables" in text and "Browser storage" not in text
-    assert "server outside the container" in text
+    # nothing shows the engine and none was chosen: SQLite, said to be a default (item 4)
+    assert "SQLite (a default, not evidence" in text and "`DATABASE_URL`" in text
     assert "data" not in brief_mod.app_yaml(brief, ROOT)["stack"]  # not written for a server app
-    assert brief_mod.app_yaml(brief, ROOT)["stack"]["db"]["engine"] == "postgres"
+    assert brief_mod.app_yaml(brief, ROOT)["stack"]["db"]["engine"] == "sqlite"
+    named = brief_mod.render(brief_mod.scope("showcase", "x", model, "postgres"), ROOT)
+    assert "server outside the container" in named and "a default" not in named
 
 
 def test_unknown_stays_unknown_in_the_brief(tmp_path):

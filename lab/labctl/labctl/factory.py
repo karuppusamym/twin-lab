@@ -162,6 +162,8 @@ def generate(
     model = build_model(root, app_id, source)
     if db_engine is None and model.stack.desktop and not model.stack.db:
         db_engine = "sqlite"  # a desktop demo app keeps its data in a local file
+    if db_engine is None:
+        db_engine = chosen_engine(root, app_file)
     result = brief_mod.scope(app_id, system or app_id, model, db_engine, data)
     schema_file.parent.mkdir(parents=True, exist_ok=True)
     _write(
@@ -185,9 +187,21 @@ def generate(
             f"{bullet_list}\n\n"
         )
         text = text.replace(marker, section + marker, 1) if marker in text else f"{text}\n{section}"
+    # The recorded steps in order (apps/<app>/steps/), what each action did, and identifiers.
+    from labctl import stepfacts
+
+    _, found = stepfacts.write_steps(root, app_id)
+    extra = stepfacts.effects_section(found, app_id) + stepfacts.identifiers_section(
+        found, list(result.tables))  # fmt: skip
+    if extra:
+        marker = "## Behaviour seen in the recordings"
+        if marker not in text:
+            marker = "## Running in the lab"
+        text = text.replace(marker, extra + marker, 1) if marker in text else f"{text}\n{extra}"
     # A recording that went through several applications: where this one sits in that flow.
     from labctl import multiapp
 
+    multiapp.sequence_copy(root, app_id)
     cross = multiapp.cross_app_section(root, app_id)
     if cross:
         marker = "## Running in the lab"
@@ -205,6 +219,25 @@ def generate(
     if behaviours_file.exists():
         files.append(behaviours_file)
     return Result(result, files, kept)
+
+
+def chosen_engine(root: Path, app_file: Path) -> str | None:
+    """The engine of the database chosen for the app at onboarding (`lab.database` in its
+    app.yaml), or None when none was chosen (or it names a server this machine does not know)."""
+    from labctl import dbservers
+
+    try:
+        conf = yaml.safe_load(app_file.read_text(encoding="utf-8")) if app_file.is_file() else {}
+    except (OSError, yaml.YAMLError):
+        return None
+    named = ((conf or {}).get("lab") or {}).get("database") if isinstance(conf, dict) else None
+    if not named:
+        return None
+    try:
+        engine = dbservers.engine_for(root, str(named))
+    except Exception:  # noqa: BLE001 - an unknown server: the brief says nothing was chosen
+        return None
+    return {"postgresql": "postgres"}.get(engine, engine)
 
 
 WORKFLOW = """# Pipeline for the {app} demo app (written by labctl brief). The steps are in app.yml.
@@ -247,7 +280,7 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
     return catalog_mod.brief_lines(found)
 
 
-GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "behaviours.json", "pages")
+GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "behaviours.json", "pages", "steps")
 
 
 def backup(root: Path, app_id: str) -> Path | None:
