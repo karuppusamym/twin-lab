@@ -228,6 +228,21 @@ def create_app(root: Path) -> FastAPI:
         model, _ = repo.load(path, "app") if path.exists() else (None, [])
         return model
 
+    NA_TEXT = (
+        "Not applicable: this app keeps its data in the browser, so it has no database to load, "
+        "reset, baseline or save as a pack."
+    )
+
+    def browser_only(app_id: str) -> bool:
+        model = app_model(app_id)
+        return bool(model and model.browser_only)
+
+    def not_applicable(app_id: str):
+        """A refusal for a data control on an app whose data is in the browser (R07)."""
+        if browser_only(app_id):
+            return back(f"/apps/{app_id}#data", NA_TEXT, "error")
+        return None
+
     def schema_tables(app_id: str):
         from labctl.data import ddl
 
@@ -816,6 +831,13 @@ def create_app(root: Path) -> FastAPI:
         except dbservers.DbServerError:
             pass
         db_current = dbservers.choice(model.lab.database if model and model.lab else None)
+        is_browser = bool(model and model.browser_only)
+        # Conditions that only slow or break the database link do nothing here (R07).
+        db_only = {
+            c.id
+            for c in conditions()
+            if (t := condition_for(c, app_id)) and t["db"] and not t["http"] and not t["faults"]
+        }
         return page(
             request,
             "app.html",
@@ -826,6 +848,9 @@ def create_app(root: Path) -> FastAPI:
             guided=not first_done,
             readiness=[(a.id, fresh[a.id]) for a in users],
             lab_unreachable=bool(status and status.running and not lab_read),
+            browser_only=is_browser,
+            data_info=(model.stack.data if model and model.stack else None),
+            db_only_conditions=sorted(db_only) if is_browser else [],
             db_choices=db_choices,
             db_current=db_current,
             db_label=dict(db_choices).get(db_current, f"{db_current} (not configured)"),
@@ -1258,6 +1283,8 @@ def create_app(root: Path) -> FastAPI:
         from labctl.data import workbook
 
         app_id = slug(app_id, "app id")
+        if (na := not_applicable(app_id)) is not None:
+            return na
         rows = None
         if current:
             try:
@@ -1276,6 +1303,8 @@ def create_app(root: Path) -> FastAPI:
         from labctl.data import workbook
 
         app_id = slug(app_id, "app id")
+        if (na := not_applicable(app_id)) is not None:
+            return na
         agent = lab_mod.agent(root, app_id)
         try:
             existing = agent.data()
@@ -1303,6 +1332,8 @@ def create_app(root: Path) -> FastAPI:
         from labctl.data import synthetic
 
         app_id = slug(app_id, "app id")
+        if (na := not_applicable(app_id)) is not None:
+            return na
         wanted = {}
         for part in re.split(r"[,\n]", counts):
             if part.strip():
@@ -1333,6 +1364,8 @@ def create_app(root: Path) -> FastAPI:
     @portal.post("/apps/{app_id}/data/{action}")
     def data_action(app_id: str, action: str):
         app_id = slug(app_id, "app id")
+        if (na := not_applicable(app_id)) is not None:
+            return na
         agent = lab_mod.agent(root, app_id)
         try:
             if action == "reset":
@@ -1348,6 +1381,8 @@ def create_app(root: Path) -> FastAPI:
     @portal.post("/apps/{app_id}/packs/save")
     def pack_save(app_id: str, name: str = Form(...)):
         app_id = slug(app_id, "app id")
+        if (na := not_applicable(app_id)) is not None:
+            return na
         try:
             info = packs_mod.save_from_lab(root, app_id, name.strip().lower())
         except (packs_mod.PackError, lab_mod.LabError) as exc:
@@ -1359,6 +1394,8 @@ def create_app(root: Path) -> FastAPI:
     @portal.post("/apps/{app_id}/packs/{name}/{action}")
     def pack_action(app_id: str, name: str, action: str):
         app_id = slug(app_id, "app id")
+        if (na := not_applicable(app_id)) is not None:
+            return na
         try:
             if action == "use":
                 reply = packs_mod.load_into_lab(root, app_id, name)
@@ -1418,6 +1455,8 @@ def create_app(root: Path) -> FastAPI:
         app_id: str, baseline_id: str, action: str, pinned: str = Form(""), reason: str = Form("")
     ):
         app_id = slug(app_id, "app id")
+        if (na := not_applicable(app_id)) is not None:
+            return na
         agent = lab_mod.agent(root, app_id)
         try:
             if action == "restore":
@@ -1458,6 +1497,13 @@ def create_app(root: Path) -> FastAPI:
                     f"{condition_id} has nothing for {app_id}",
                     "error",
                 )
+            if browser_only(app_id) and body["db"] and not body["http"] and not body["faults"]:
+                return back(
+                    f"/apps/{app_id}#conditions",
+                    f"Not applicable: {condition_id} only slows the database, and this app keeps "
+                    "its data in the browser",
+                    "error",
+                )
             agent.set_condition(body)
         except lab_mod.LabError as exc:
             return back(f"/apps/{app_id}#conditions", str(exc), "error")
@@ -1470,6 +1516,8 @@ def create_app(root: Path) -> FastAPI:
         app_id: str, automation: str = Form(""), label: str = Form(""), reset: str = Form("")
     ):
         app_id = slug(app_id, "app id")
+        if browser_only(app_id):
+            reset = ""  # nothing in a lab database to reset
         agent = lab_mod.agent(root, app_id)
         try:
             if reset:
@@ -1517,7 +1565,7 @@ def create_app(root: Path) -> FastAPI:
         return page(
             request, "session.html", app_id=app_id, s=session, others=others,
             verdict=verdict.to_dict(), verdict_automation=auto, unexpected=unexpected,
-            tables_used=tables_used, outcome=outcome_info,
+            tables_used=tables_used, outcome=outcome_info, browser_only=browser_only(app_id),
         )  # fmt: skip
 
     @portal.post("/apps/{app_id}/sessions/{session_id}/accept")

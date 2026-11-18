@@ -254,10 +254,30 @@ class DbStack(Contract):
     version: str | None = None
 
 
+class DataStack(Contract):
+    """Where the application's business data lives, and what shows it (R07).
+
+    `browser`: the page changes state with no state-changing request to its own origin, so the data
+    is in browser storage. `server`: state-changing requests (or responses carrying the records)
+    were seen. `unknown`: neither can be shown; nothing is invented. Storage KEYS and the shape of
+    stored records may be kept; stored values are data and never are.
+    """
+
+    kind: Literal["browser", "server", "unknown"]
+    storage: list[str] = []  # kinds observed holding data: localStorage, sessionStorage, ...
+    referenced: list[str] = []  # kinds a script mentions (not proof that data is written)
+    keys: list[str] = []  # storage key names seen in the recorded storage
+    script_keys: list[str] = []  # key names written as literals in the page's scripts (not seen)
+    shape: dict = {}  # key -> shape of the stored record, values masked
+    evidence: list[str] = []
+    overridden: bool = False  # a person named the kind (`labctl brief --data`)
+
+
 class Stack(Contract):
     frontend: FrontendStack | None = None
     backend: BackendStack | None = None
     db: DbStack | None = None
+    data: DataStack | None = None  # absent: a database-backed app, as before R07
 
 
 class WebRun(Contract):
@@ -324,6 +344,11 @@ class App(Contract):
     rules: list[Rule] = []
     links: list[Link] = []
     lab: Lab | None = None
+
+    @property
+    def browser_only(self) -> bool:
+        """The app keeps its business data in the browser: no database, no data controls."""
+        return self.stack.data is not None and self.stack.data.kind == "browser"
 
 
 # --- data pack ---------------------------------------------------------------------------------

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tasks (replica)</title>
+<style>
+  body { font: 15px Georgia, serif; margin: 1em 3em; background: #fafafa; }
+  .todo-list { list-style: none; padding: 0; margin: 0; }
+  .todo-list li { display: flex; padding: 6px 2px; border-bottom: 1px solid #ddd; }
+  .todo-list li .edit { display: none; }
+  .todo-list li.editing .edit { display: block; }
+  .todo-list li.editing .view { display: none; }
+  .todo-list li.completed label { color: #999; text-decoration: line-through; }
+  .todo-list li .destroy { display: none; width: 24px; height: 20px; }
+  .todo-list li:hover .destroy { display: inline-block; }
+  .filters { list-style: none; display: flex; gap: 2em; padding: 0; }
+  .filters a.selected { border-bottom: 2px solid #c33; }
+</style>
+</head>
+<body>
+<!-- The replica: same behaviour, different layout (an extra wrapper, another banner). -->
+<div class="page">
+  <div class="banner">Replica of the task list</div>
+  <section class="todoapp">
+    <header class="header">
+      <h1>tasks</h1>
+      <input class="new-todo" placeholder="What needs to be done?">
+    </header>
+    <section class="main">
+      <input id="toggle-all" class="toggle-all" type="checkbox">
+      <label for="toggle-all">Mark all as complete</label>
+      <div class="list-wrap">
+        <ul class="todo-list"></ul>
+      </div>
+    </section>
+    <footer class="footer">
+      <span class="todo-count"></span>
+      <ul class="filters">
+        <li><a href="#/">All</a></li>
+        <li><a href="#/active">Active</a></li>
+        <li><a href="#/completed">Completed</a></li>
+      </ul>
+      <button class="clear-completed">Clear completed</button>
+    </footer>
+  </section>
+</div>
+<script src="todo.js"></script>
+</body>
+</html>

@@ -160,6 +160,9 @@ class Stack(Contract):
     server: dict | None = None
     libraries: list[dict] = []
     detected: list[dict] = []
+    # Where the business data lives (R07): kind browser | server | unknown, storage kinds seen,
+    # storage keys, record shapes (masked) and the evidence for it. See models.DataStack.
+    data: dict | None = None
     from_: list[str] = Field(default_factory=list, alias="from")
 
 

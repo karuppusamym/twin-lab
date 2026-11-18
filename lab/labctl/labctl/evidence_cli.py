@@ -116,14 +116,21 @@ def record(
         None, "--out", help="Recording folder (default evidence/<app>/<timestamp>/)."
     ),
     no_screenshots: bool = typer.Option(False, "--no-screenshots", help="Skip the PNG per step."),
+    storage_state: Path | None = typer.Option(
+        None,
+        "--storage-state",
+        help="Browser data to start from (Playwright storage state: a declared baseline).",
+    ),
 ) -> None:
-    """Open a browser; click through the flow, then close the window to finish the recording."""
+    """Open a browser; click through the flow, then close the window to finish the recording.
+    Then `labctl behaviour bindings <folder>` lists the steps a replay needs synthetic values for."""
     from labctl import recorder
 
     out = out or _default_out(app_id)
     typer.echo(f"recording into {out}; close the browser window to finish")
-    recorder.record(url, out, screenshots=not no_screenshots)
+    recorder.record(url, out, screenshots=not no_screenshots, storage_state=storage_state)
     typer.echo(f"done: analyse it with `labctl evidence analyse {app_id} {out}`")
+    typer.echo(f"replay values: `labctl behaviour bindings {out}` writes the bindings to fill")
 
 
 def _default_out(app_id: str) -> Path:

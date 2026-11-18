@@ -6,6 +6,16 @@ steps.jsonl lines: `{"seq", "ts", "url", "action": "goto|click|type|select|submi
 The harness bot also writes `value` for typed and selected values that are not Private; other
 writers may omit it, in which case the value is read from the after-snapshot.
 
+The recorder also writes (all optional, so older recordings load unchanged):
+
+- actions `keypress` (with `key` and `modifiers`: only non-text keys and chords, never typed
+  characters), `dblclick`, `check` and `uncheck`;
+- `locators`: ranked candidates for the target, each with the number of elements it matched when
+  recorded (see labctl.locate.resolve);
+- `blank`: a typed value that was empty or only spaces (the value itself, as it is not data);
+- `nav` on a `goto` (`navigate`, `reload`, `back_forward`, `push`, `replace`, `pop`) and
+  `caused_by` (the seq of the click or key press that caused a submit or navigation).
+
 Only request shapes are taken from the HAR (method, URL path, status, timing). Headers, cookies
 and bodies are never read.
 """
@@ -37,6 +47,13 @@ class RecStep:
     typed_shape: str | None = None  # the recorder's shape of what was typed (never the value)
     dom_before: str | None = None  # the page as the action met it (the recorder writes it)
     before_scope: str | None = None  # "frame": dom_before is only the frame's document
+    frame: str | None = None  # the frame the action happened in (`iframe#x >>> iframe#y`)
+    key: str | None = None  # keypress: `Enter`, `Escape`, `a` (with modifiers: a chord)
+    modifiers: list[str] = field(default_factory=list)  # keypress: Control, Alt, Meta, Shift
+    locators: list[dict] = field(default_factory=list)  # ranked target candidates (locate.py)
+    blank: str | None = None  # type: the value was empty or spaces only (kept, it is no data)
+    nav: str | None = None  # goto: how the page was reached
+    caused_by: int | None = None  # submit/goto: the step whose action caused it
 
     @property
     def path(self) -> str | None:
@@ -188,6 +205,7 @@ def load(path: Path) -> Recording:
                         before_scope=d.get("before_scope")
                         if isinstance(d.get("before_scope"), str)
                         else None,
+                        **_extra(d),
                     )
                 )
             except (ValueError, TypeError, AttributeError):
@@ -197,6 +215,32 @@ def load(path: Path) -> Recording:
     if har.exists():
         rec.entries = read_har(har)
     return rec
+
+
+def _extra(d: dict) -> dict:
+    """The optional fields newer recorders write; anything malformed is left out."""
+    out: dict = {}
+    for name in ("frame", "key", "nav", "blank"):
+        if isinstance(d.get(name), str):
+            out[name] = d[name]
+    mods = d.get("modifiers")
+    if isinstance(mods, list):
+        out["modifiers"] = [m for m in mods if isinstance(m, str)]
+    locs = d.get("locators")
+    if isinstance(locs, list):
+        out["locators"] = [_mask_locator(c) for c in locs if isinstance(c, dict) and c.get("kind")]
+    if isinstance(d.get("caused_by"), int):
+        out["caused_by"] = d["caused_by"]
+    return out
+
+
+def _mask_locator(cand: dict) -> dict:
+    """Record numbers in a candidate's ids and selectors are masked like page ids."""
+    out = dict(cand)
+    for name in ("css", "rows", "control", "value"):
+        if isinstance(out.get(name), str):
+            out[name] = _mask_ids(out[name])
+    return out
 
 
 def _mask_ids(selector):

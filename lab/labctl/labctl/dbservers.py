@@ -174,6 +174,16 @@ def choice(app_database: str | None) -> str:
     return (app_database or "postgres").strip() or "postgres"
 
 
+def app_choice(app) -> str:
+    """The database choice for a whole app (`labctl.models.App`). An app that keeps its data in
+    the browser (R07) and names no database runs with no database container: the SQLite file path
+    is the one lab setup that has none, and the file stays empty (its schema has no table)."""
+    named = app.lab.database if app.lab else None
+    if named is None and app.browser_only:
+        return "sqlite"
+    return choice(named)
+
+
 def engine_for(root: Path, app_database: str | None) -> str:
     name = choice(app_database)
     if name in BUILT_IN:

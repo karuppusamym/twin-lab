@@ -2,6 +2,24 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-17 — Replication gaps R01–R04 and R07 (`docs/replication-gaps.md`)
+- **Recorder:** key presses that are not text (Enter, Escape, Tab, chords) and double-clicks are
+  steps of their own; checkboxes are `check`/`uncheck`; typing is flushed before a submit, key
+  press or navigation. Each step keeps ranked locators (test id, id, role and name, label, link
+  text, structure) with their match count. Typed values are held in memory only and are removed
+  from snapshots, the HAR and screenshots.
+- **Fidelity replay:** a target must match exactly one element, or the step is BLOCKED with
+  what each candidate matched; per-record controls bind to the record, not its position;
+  values come from `bindings.yaml`, one per step (`labctl behaviour bindings <recording>` writes
+  the template); a missing value blocks. The report counts expected, replayed, failed, skipped
+  and unresolved actions and is `pass` only when every step ran. Readiness treats BLOCKED as
+  blocking. Older recordings still load and replay.
+- **Where the data lives.** A recording says `browser`, `server` or `unknown`. A browser-only
+  app's brief has a "Browser storage" section and no invented tables or database; its build
+  task says so; the lab marks data controls and database conditions "not applicable".
+- Left open: R05, R06, R08–R12; elements inside shadow roots get no ranked locators; the
+  recorder does not yet capture storage contents.
+
 ## 2026-11-17 — Product review: business outcome, readiness freshness, guided pages
 From `docs/product-review-2026-11-17.md`.
 - **Setup per application** with a test-data step; progress reads the lab's baseline and

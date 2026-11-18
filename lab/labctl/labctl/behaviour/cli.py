@@ -53,7 +53,17 @@ def fidelity(
     value: list[str] = typer.Option(
         [],
         "--value",
-        help="selector=value for unrecorded typed values; 6:selector=value for step 6 only",
+        help="selector=value for unrecorded typed values; 6:selector=value for step 6 only "
+        "(turned into bindings for the steps they match)",
+    ),
+    bindings: Path | None = typer.Option(
+        None, "--bindings", help="bindings file (default: bindings.yaml beside the recording)"
+    ),
+    expect: Path | None = typer.Option(
+        None, "--expect", help="YAML/JSON list of the semantic actions the flow must have"
+    ),
+    storage_state: Path | None = typer.Option(
+        None, "--storage-state", help="browser data to start from (the replica's baseline)"
     ),
     headed: bool = typer.Option(False, "--headed"),
     json_out: Path | None = typer.Option(None, "--json", help="write the report as JSON"),
@@ -62,7 +72,8 @@ def fidelity(
         None, "--app", help="keep the report for this app (portal, and the readiness gate)"
     ),
 ) -> None:
-    """Replay a recording against a running app and compare each step's DOM. Exit 1 on fail."""
+    """Replay a recording against a running app and compare each step's DOM. Exit 1 unless the
+    replay passed (a failed or BLOCKED replay exits 1)."""
     if recording.is_file():
         if actual is None:
             raise typer.BadParameter("comparing DOM files needs two files")
@@ -72,7 +83,14 @@ def fidelity(
         typer.echo("pass" if not diffs else f"fail: {len(diffs)} difference(s)")
         raise typer.Exit(1 if diffs else 0)
     values = dict(v.split("=", 1) for v in value if "=" in v)
-    report = fidelity_mod.replay(recording, base_url, values, headless=not headed)
+    expected = None
+    if expect is not None:
+        import yaml
+
+        expected = [str(a) for a in yaml.safe_load(expect.read_text(encoding="utf-8")) or []]
+    report = fidelity_mod.replay(recording, base_url, values, headless=not headed,
+                                 bindings=bindings, expected=expected,
+                                 storage_state=storage_state)  # fmt: skip
     if json_out:
         json_out.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
     if md_out:
@@ -82,8 +100,32 @@ def fidelity(
 
         typer.echo(f"kept as {fidelity_mod.save(_root(), app_id, report)}")
     typer.echo(report.markdown())
-    if report.status == "fail":
+    if report.status != "pass":
         raise typer.Exit(1)
+
+
+@app.command("bindings")
+def bindings_cmd(
+    recording: Path = typer.Argument(..., exists=True, file_okay=False, help="recording folder"),
+    out: Path | None = typer.Option(
+        None, "--out", help="bindings file to write (default: bindings.yaml beside the recording)"
+    ),
+) -> None:
+    """Write the bindings template: each step that needs a synthetic value (with the shape of
+    what was recorded) or the title of the record it acts on. Values already filled are kept."""
+    from labctl.behaviour import bindings as bindings_mod
+    from labctl.botlog.recording import load as load_recording
+
+    rec = load_recording(recording)
+    path = bindings_mod.write_template(rec, out)
+    needs = bindings_mod.needs(rec)
+    filled = bindings_mod.load(path)
+    for n in needs:
+        have = (filled.values if n.kind == "value" else filled.records).get(n.seq) is not None
+        shape = f" shape {n.shape!r}" if n.shape else ""
+        typer.echo(f"step {n.seq:>4} {n.action:<8} {n.field or '':<32} {n.kind}{shape}"
+                   f"{'' if have else '  (to fill)'}")  # fmt: skip
+    typer.echo(f"wrote {path}: {len(needs)} binding(s) needed")
 
 
 @app.command()

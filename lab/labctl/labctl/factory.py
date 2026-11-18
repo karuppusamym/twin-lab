@@ -133,6 +133,7 @@ def generate(
     source: Path | None = None,
     db_engine: str | None = None,
     force: bool = False,
+    data: str | None = None,
 ) -> Result:
     if not automations(root, app_id) and not flows(root, app_id):
         raise FactoryError(
@@ -148,7 +149,7 @@ def generate(
     # screen no longer recorded) must not stay and travel to Devin. The backup keeps the old set.
     shutil.rmtree(out / "pages", ignore_errors=True)
     model = build_model(root, app_id, source)
-    result = brief_mod.scope(app_id, system or app_id, model, db_engine)
+    result = brief_mod.scope(app_id, system or app_id, model, db_engine, data)
     schema_file.parent.mkdir(parents=True, exist_ok=True)
     _write(
         model_file,
