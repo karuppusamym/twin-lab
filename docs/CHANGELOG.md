@@ -97,6 +97,43 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
 - `tools/audit_replication_gates.py` is the audit's probe; it exits 0 now. Tests:
   `test_audit_gates.py`.
 
+## 2026-11-18 — The build package carries the look of the application
+- A rebuilt application did not look like the original: a builder got value-free page snapshots
+  and nothing else. Style sheets delivered as files were not carried, no font was named, no
+  picture was shipped (the recorder's screenshots show real data), and some texts of the
+  interface came out as `Xxxx`.
+- `labctl/lookfeel.py` writes `apps/<app>/look/` with the brief, and the package carries it:
+  the application's style sheets as delivered (`css/`), design tokens (`theme.json`: colours,
+  fonts per role, control sizes, spacing, layout), one picture per screen (`screens/`), the
+  interface's images (`assets/`), every text marked literal or placeholder (`texts.json`) and a
+  manifest. The brief has a section *Look and feel*; the build task names the files and adds
+  the comparison with the pictures to its checks.
+- Pictures are rendered, never recorded: the value-free snapshot is drawn again in a headless
+  browser at the recorded window size with the carried style sheets. The tokens are the computed
+  styles of that rendering, so older recordings work and the recorder is unchanged.
+- Privacy rules. Style sheets are code and kept as written; addresses become paths inside
+  `look/` or are removed; e-mail addresses, record numbers and recorded names in strings and
+  comments are masked. Fonts are named with their source and a generic fallback, and copied
+  only with `TWINLAB_LOOK_FONTS=bundle`. Images are carried only when they are static files of
+  the application's own origin that the interface uses; avatars and attachments never. A check
+  compares every carried text and the text of every picture with what the recording shows as
+  data: one hit and no look is written; `labctl build package` refuses a look that fails it, or a
+  picture Twin Lab did not render. `TWINLAB_PAGE_TEXT=strict` carries no look;
+  `TWINLAB_LOOK=off` switches it off.
+- Interface text that was masked by mistake in interface mode, measured on recordings of the
+  Angular reference application and the multi-application fixture, each fixed with a test: an
+  option or radio label the data also shows (`Open`, `Low`) is kept when it repeats the code
+  its own markup gives it (`value="open"`, `for="priority-low"`); the application's name in an
+  element with an id is kept when the page's own title shows it; `Signed in as Xxx` keeps
+  `as`; a tooltip, `aria-label` or placeholder on a control is read as a label; an icon font's
+  glyph in a style sheet string stays. No rule was loosened for anything else: a sentence in
+  an element with an id that the interface says nowhere else stays masked.
+- Left open: committed applications under `apps/` are not regenerated here (their pages were
+  written before interface mode and still show `Xxxx`); styles added by script without a
+  `<style>` element, addresses inside inline styles, and hover or focus states are not
+  carried; one picture per screen, not per state; the check reads the text a picture is drawn
+  from, it does not read the pixels.
+
 ## 2026-11-18 — WPF recorded and verified on a live application
 - WPF was covered by fixtures only. `reference/desktop/CaseDeskWpf/` is CaseDesk in WPF
   (.NET 6, no NuGet package): the same screens, behaviour and control names as the WinForms

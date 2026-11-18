@@ -21,6 +21,13 @@ Page text, two modes (`TWINLAB_PAGE_TEXT`, or `with page_text("strict"):`):
   (an element with an id or a value-like class that is not a label, heading, button, link or
   message) keeps only words the interface itself uses elsewhere. Format examples are kept
   (`name@example.test`, `ORD-0000`: reserved example domains, all-zero numbers).
+  Four cases keep text the rules above would mask, because the page says it already or it is a
+  label: a choice whose text repeats the code its own markup gives it (`<option value="open">
+  Open`, a radio label `for="priority-low"`: `code_words`); in an element that holds a value,
+  the words the page's own masked `<title>` shows (the application's name) and, beside
+  interface words, the words that join them (`Signed in as Xxx`); a tooltip, `aria-label` or
+  placeholder on a control, read as a label (a single word the data also shows stays, a name
+  does not); a style sheet string without a word (an icon font's glyph).
 - **strict**: every text, every text attribute and the style sheets are masked; only structure,
   ids, classes and names remain.
 

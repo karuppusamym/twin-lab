@@ -174,6 +174,60 @@ replica: `labctl behaviour fidelity <recording> --map https://real.example=http:
 (repeat per application), or keep a `replicas.yaml` beside the recording. What is deliberately
 left out of the comparison goes in a reviewed `scope.yaml`.
 
+## The look of the application
+
+A builder must also make the demo application look like the original. `labctl brief` (and
+`evidence build-all`) therefore writes `apps/<app>/look/` beside the page snapshots, from the
+same recordings, and the build package carries it (`labctl/lookfeel.py`):
+
+| In `apps/<app>/look/` | What it is |
+|---|---|
+| `css/*.css` | The style sheets the application delivered (from the HAR), as written. `css/inline/<screen>.css` holds the `<style>` blocks of each screen. |
+| `theme.json` | Design tokens: the colours in use (page, text, links, buttons, borders, messages), the font per role (body, headings, labels, inputs, buttons, table header and cell) with size and weight, padding, border and corner radius of the controls, spacing, the window size and the regions of each screen. |
+| `screens/<screen>.png` | One picture per screen, to compare a built screen with. |
+| `assets/*` | The images of the interface: logo, icons, sprites. |
+| `fonts/*` | Web font files, only with `TWINLAB_LOOK_FONTS=bundle`. |
+| `texts.json` | Per screen, every text: `literal` (copy it exactly), `data` (a placeholder) or `mixed`. |
+| `manifest.json` | Every carried file, every font and image with the reason it is or is not carried, and the result of the privacy check. |
+
+The brief gets a section *Look and feel* that tells the builder how to use these, and lists per
+screen the literal texts and the placeholders. The build task names the files.
+
+How it stays free of data:
+
+- **Pictures are rendered, never recorded.** The recorder's own screenshots show real data and
+  never leave the evidence. A picture in the package is the value-free page snapshot drawn again
+  in a headless browser at the recorded window size, with only the carried style sheets and
+  images. It shows the real styling and the real interface texts, and `Xxxx 9999` where data was.
+  The tokens in `theme.json` are the computed styles of that same rendering, so recordings made
+  before this existed work too, and the recorder captures nothing new.
+- **Style sheets are code.** Selectors, colours and sizes are kept as written. Addresses are not:
+  `url(...)` and `@import` point into `look/` or are removed (never a host, never a query), and
+  source-map comments are dropped. In strings and comments, e-mail addresses, numbers of three
+  or more digits and names the recording shows as data are masked. Font names are left alone.
+- **Fonts are licensed.** Each font family is named with where it came from (a system font, or
+  a web font file seen in the HAR with its path, format and size) and the closest generic
+  fallback. The files are copied only when the owner sets `TWINLAB_LOOK_FONTS=bundle`.
+- **Images.** Only a static file of the application's own origin that the interface uses (a
+  style sheet, or an `<img>` or icon outside data cells), with no record number in its path, no
+  query but a version (`?v=3`), not under a folder for user content (`uploads`, `avatars`,
+  `attachments`, ...) and no larger than the analysis reads. Everything else is listed with the
+  reason and not carried.
+- **A check before anything is kept, and again when packaging.** Every carried text and the
+  text each picture shows are compared with what the recording shows as data: the Title-case
+  words of data cells, field values and API answers that the interface does not use itself, and
+  every part with the shape of data (e-mail address, date, amount, three or more digits). One
+  hit and no look is written; the brief says so. `labctl build package` refuses a `look/` that fails
+  the same check, and a picture that is not one Twin Lab rendered (its sha256 is in
+  `look/manifest.json`).
+- `TWINLAB_PAGE_TEXT=strict` carries no look at all: every text is masked and no style sheet
+  leaves. `TWINLAB_LOOK=off` switches the look off on its own.
+
+Not carried: styles a page adds through script without a `<style>` element (constructed or
+adopted style sheets), addresses inside inline `<style>` blocks and `style` attributes (they
+are `url(#)` in the snapshots), hover and focus states (only as the style sheets define them),
+and one picture per screen (the fullest snapshot), not one per state.
+
 ## Privacy
 
 A HAR or a database export from a real system holds customer data, cookies and tokens. So:
