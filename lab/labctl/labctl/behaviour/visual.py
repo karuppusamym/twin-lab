@@ -103,6 +103,7 @@ def load(path: Path | None) -> Spec | None:
     spec = Spec(path=Path(path), viewport=str(data.get("viewport") or "desktop"),
                 clock=str(data["clock"]) if data.get("clock") else None,
                 fonts=[str(f) for f in data.get("fonts") or []])  # fmt: skip
+    seen: set[str] = set()
     for n, e in enumerate(data.get("states") or [], 1):
         if not isinstance(e, dict):
             spec.states.append(State(id=f"state-{n}", after="end", problem="not a mapping"))
@@ -124,6 +125,11 @@ def load(path: Path | None) -> Spec | None:
             st.problem = f"viewport {st.viewport or spec.viewport!r}: desktop or mobile"
         if st.after == "end" and not st.approved:
             st.problem = st.problem or "a state at the end needs an approved image"
+        if st.id in seen:
+            # both states stay in the result; the second cannot stand in for the first
+            st.problem = st.problem or f"the id {st.id!r} is used twice"
+            st.id = f"{st.id}#{n}"
+        seen.add(st.id)
         spec.states.append(st)
     return spec
 

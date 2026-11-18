@@ -148,6 +148,9 @@ class FidelityReport(BaseModel):
     # Added for R05/R06/R08/R11; all default, so older reports still load.
     verdict: str | None = None  # PASS WITHIN DECLARED SCOPE | FAIL | BLOCKED (None: older report)
     verdict_reasons: list[str] = []
+    # beside a scoped PASS: VERIFIED COMPLETE | DECLARED CASES ONLY (None: no PASS, older report)
+    assurance: str | None = None
+    assurance_reasons: list[str] = []
     categories: dict[str, Category] = {}  # capture, replay, behaviour, data, appearance
     cases: list[CaseResult] = []
     visual: list[VisualResult] = []
@@ -171,6 +174,10 @@ class FidelityReport(BaseModel):
         lines = [f"# Fidelity: {self.recording}", "", f"**Result: {self.status}**", ""]
         if self.verdict:
             lines += [f"**Status: {self.verdict}**", ""]
+            if self.assurance:
+                lines += [f"**Assurance: {self.assurance}**", ""]
+                lines += [f"- {r}" for r in self.assurance_reasons]
+                lines += [""] if self.assurance_reasons else []
             lines += [f"- {r}" for r in self.verdict_reasons] + (
                 [""] if self.verdict_reasons else []
             )
@@ -1372,6 +1379,15 @@ def _scope(report: FidelityReport, judging, spec, rec: Recording, step_shots) ->
         rep.note = (f"{x.steps} step(s) differ only by {x.differences} difference(s) excluded "
                     f"under {x.declaration}: not counted as passed")  # fmt: skip
     report.verdict, report.verdict_reasons = judge_mod.scoped(report.categories, cases, visual)
+    if report.verdict == judge_mod.SCOPED_PASS and report.status != "pass":
+        # one report never says both: the replay's own status is part of the result
+        report.verdict = (
+            judge_mod.SCOPED_FAIL if report.status == "fail" else judge_mod.SCOPED_BLOCKED
+        )
+        report.verdict_reasons.append(f"the replay's status is {report.status}")
+    report.assurance, report.assurance_reasons = judge_mod.assurance(
+        report.verdict, report.categories, cases, visual
+    )
     if x is not None and (x.differences or x.requests):
         report.verdict_reasons.append(
             f"{x.differences} difference(s) and {x.requests} request(s) excluded under "

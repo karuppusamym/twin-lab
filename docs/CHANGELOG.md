@@ -2,6 +2,21 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — Verdict gates from the audit: no silent PASS
+- **A misspelled category no longer hides a case.** A required case with an unknown category
+  is counted under behaviour and named; every required result decides the verdict whatever
+  category it carries.
+- **One id used twice in `visual.yaml`**: both states are kept, the second is BLOCKED. A result
+  is never stored over another, so a later pass cannot erase a failure.
+- **Status and verdict agree.** A replay whose status is not pass cannot report
+  PASS WITHIN DECLARED SCOPE.
+- **Assurance tier beside a PASS.** `VERIFIED COMPLETE` needs an expected action list
+  (`--expect`) with nothing missing and no required case with `basis: assumed`; otherwise the
+  report says `DECLARED CASES ONLY` and why. `labctl behaviour fidelity --verified` exits 1
+  unless the tier is `VERIFIED COMPLETE`. The portal report shows the tier under the verdict.
+- `tools/audit_replication_gates.py` is the audit's probe; it exits 0 now. Tests:
+  `test_audit_gates.py`.
+
 ## 2026-11-18 — A page load right after a submit is that submit's result
 - Re-running the public-site trial recording showed one of its findings still failing on that
   recording: source against source, the two submit steps were compared with the form snapshot
