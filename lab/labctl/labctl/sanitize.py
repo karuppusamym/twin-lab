@@ -822,6 +822,13 @@ class _Page(HTMLParser):
             self.select = el or {"options": []}
         if tag == "option":
             self.option = []
+            # The code the option posts: kept only when it reads like a code (letters first, at
+            # most two digits); anything else could be data and is masked.
+            value = a.get("value")
+            if value is not None and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,30}", value) or (
+                    value and sum(c.isdigit() for c in value) > 2):  # fmt: skip
+                value = mask(value)
+            self.option_value = value
         if tag in KEEP_TEXT and tag not in ("label", "option"):
             self.open_text.append({"tag": tag, "el": el, "text": []})
 
@@ -964,6 +971,9 @@ class _Page(HTMLParser):
             text = " ".join("".join(self.option).split())
             if self.select is not None and text:
                 self.select["options"].append(text)
+                self.select.setdefault("option_values", []).append(
+                    getattr(self, "option_value", None)
+                )
             self.option = None
         elif tag == "select":
             self.select = None

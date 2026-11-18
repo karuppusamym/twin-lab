@@ -78,6 +78,7 @@ class Element(Item):
     type: str | None = None
     classes: list[str] = []
     options: list[str] = []  # option texts of a select
+    option_values: list[str] = []  # the codes they post, in the same order ([] when not seen)
     # Desktop recordings: the control's UI Automation properties, ancestor path, fallback
     # locators and their UiPath / pywinauto / WinAppDriver forms (labctl.desktop.locator).
     uia: dict | None = None

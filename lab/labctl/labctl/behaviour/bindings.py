@@ -54,12 +54,16 @@ class Bindings:
     outside: dict[str, str] = field(default_factory=dict)  # "<app>#<step>" -> value from outside
     indexes: dict[int, int] = field(default_factory=dict)  # select: seq -> option index
     files: dict[int, str] = field(default_factory=dict)  # upload: seq -> synthetic file path
+    # Steps whose value a generator wrote (labctl.seedplan, with the seed), not a person: written
+    # as `generated: <the value>`, so a value a person changes afterwards is theirs and is kept.
+    generated: set[int] = field(default_factory=set)
 
     def merged(self, other: Bindings) -> Bindings:
         """These bindings, with `other` filling the steps these do not bind."""
+        gen = {s for s in other.generated if s not in self.values} | set(self.generated)
         return Bindings({**other.values, **self.values}, {**other.records, **self.records},
                         {**other.outside, **self.outside}, {**other.indexes, **self.indexes},
-                        {**other.files, **self.files})  # fmt: skip
+                        {**other.files, **self.files}, gen)  # fmt: skip
 
     def from_outside(self, ref) -> str | None:
         """The value of another application's step (`{app, step}`), supplied from outside."""
@@ -144,6 +148,8 @@ def template(rec: Recording, existing: Bindings | None = None) -> str:
         if n.kind == "value":
             entry["shape"] = n.shape
             entry["value"] = existing.values.get(n.seq)
+            if n.seq in existing.generated and entry["value"] is not None:
+                entry["generated"] = entry["value"]
             step = by_seq.get(n.seq)
             if step is not None and step.action == "select":
                 if existing.indexes.get(n.seq) is not None:
@@ -198,6 +204,8 @@ def load(path: Path | None) -> Bindings:
             continue
         if entry.get("value") is not None:
             out.values[seq] = str(entry["value"])
+            if entry.get("generated") is not None and str(entry["generated"]) == out.values[seq]:
+                out.generated.add(seq)
         if entry.get("record") is not None:
             out.records[seq] = str(entry["record"])
         if isinstance(entry.get("index"), int) and not isinstance(entry["index"], bool):

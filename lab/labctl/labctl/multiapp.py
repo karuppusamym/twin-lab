@@ -172,10 +172,36 @@ def _digest(rec: Path, prop: sp.Proposal) -> str:
         app.pop("steps", None)
         app.pop("screens", None)
     h.update(json.dumps(data, sort_keys=True).encode())
-    for name in ("steps.jsonl", sp.BINDINGS):
-        if (rec / name).is_file():
-            h.update((rec / name).read_bytes())
+    if (rec / "steps.jsonl").is_file():
+        h.update((rec / "steps.jsonl").read_bytes())
+    given = _given(rec / sp.BINDINGS)
+    if given:  # only what a person wrote: values generated with the seed do not ask for a split
+        h.update(json.dumps(given, sort_keys=True, default=str).encode())
     return "sha256:" + h.hexdigest()[:16]
+
+
+def _given(path: Path) -> dict:
+    """The bindings a person wrote: every entry but the values a generator wrote (`generated:`
+    equal to `value`)."""
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except (OSError, yaml.YAMLError):
+        return {"unreadable": True}
+    if not isinstance(data, dict):
+        return {}
+    steps = {}
+    for key, entry in (data.get("steps") or {}).items():
+        if isinstance(entry, dict) and entry.get("generated") is not None and str(
+                entry.get("generated")) == str(entry.get("value")):  # fmt: skip
+            entry = {k: v for k, v in entry.items() if k not in ("value", "generated")}
+        if isinstance(entry, dict) and all(entry.get(k) is None for k in ("value", "record",
+                                                                          "index", "file")):  # fmt: skip
+            continue
+        steps[str(key)] = entry
+    out = {"steps": steps} if steps else {}
+    if data.get("outside"):
+        out["outside"] = data["outside"]
+    return out
 
 
 def _split(root: Path, rec: Path, prop: sp.Proposal, say: Callable[[str], None]) -> list[Path]:
@@ -204,6 +230,8 @@ def _split(root: Path, rec: Path, prop: sp.Proposal, say: Callable[[str], None])
         for seq, value in old.values.items():  # only where the step is still the same field
             if seq in by_seq and fields.get(seq) == by_seq[seq].selector:
                 have.values.setdefault(seq, value)
+                if seq in old.generated and have.values[seq] == value:
+                    have.generated.add(seq)
         for seq, title in old.records.items():
             if seq in by_seq and fields.get(seq) == by_seq[seq].selector:
                 have.records.setdefault(seq, title)
@@ -436,10 +464,6 @@ def build_all(
                 result.needs.append(f"review the draft flow {result.flow}")
         except Exception as exc:  # noqa: BLE001 - reported per app, the others go on
             result.errors.append(f"draft flow: {exc}")
-        missing = open_bindings(part)
-        if missing:
-            result.needs.append(f"fill {missing} value(s) in {_rel(root, part / 'bindings.yaml')} "
-                                "(synthetic) to replay the recording")  # fmt: skip
         try:
             done = factory.generate(root, app_id, None, None, db_engine, force=True)
             b = done.brief
@@ -461,16 +485,56 @@ def build_all(
         except Exception as exc:  # noqa: BLE001
             result.errors.append(f"brief: {exc}")
             continue
+        _replay_inputs(root, app_id, part, result, say)
         try:
             result.package = _rel(root, pkg.build(root, app_id, out_dir))
             say(f"package: {result.package}")
         except Exception as exc:  # noqa: BLE001
             result.errors.append(f"package: {exc}")
+    if any(a.brief for a in summary.apps):
+        from labctl import seedplan
+
+        given = seedplan.apply_whole(root, rec)
+        if given:
+            say(f"replay values: {given} step(s) of the whole recording ({_rel(root, rec)})")
+        draft = seedplan.acceptance_whole(root, rec)
+        if draft and not (rec / "acceptance.yaml").exists():
+            _write_acceptance(rec / "acceptance.yaml", draft)
     target = summary_file(rec)
     target.write_text(json.dumps(summary.to_dict(), indent=2), encoding="utf-8")
     say("\n" + summary.text())
     say(f"\nsummary: {_rel(root, target)}")
     return summary
+
+
+def _replay_inputs(root: Path, app_id: str, part: Path, result: AppResult, say) -> None:
+    """The generated values into the part's bindings (a person's values are kept), and a draft
+    acceptance file when there is none: what the replay types and checks, on the seed."""
+    from labctl import seedplan
+
+    try:
+        given = seedplan.apply_bindings(root, app_id)
+        if given:
+            say(f"replay values: {app_id}: {given} step(s) given the generated values "
+                f"(apps/{app_id}/steps/{part.name}{seedplan.VALUES})")  # fmt: skip
+        draft = seedplan.acceptance(root, app_id, part.name)
+        if draft and not (part / "acceptance.yaml").exists():
+            _write_acceptance(part / "acceptance.yaml", draft)
+    except Exception as exc:  # noqa: BLE001 - reported per app
+        result.errors.append(f"replay values: {exc}")
+    missing = open_bindings(part)
+    if missing:
+        result.needs.append(f"fill {missing} value(s) in {_rel(root, part / 'bindings.yaml')} "
+                            "(synthetic) to replay the recording")  # fmt: skip
+
+
+def _write_acceptance(path: Path, draft: dict) -> None:
+    head = ("# DRAFT acceptance cases, written by labctl evidence build-all with the seed and the\n"
+            "# replay values. Required only for what the build package states; values the\n"
+            "# application computes by a rule nobody stated are excluded, with the reason.\n")  # fmt: skip
+    path.write_text(
+        head + yaml.safe_dump(draft, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
 
 
 # --- the cross-app section of a brief -----------------------------------------------------------------

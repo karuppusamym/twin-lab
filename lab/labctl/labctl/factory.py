@@ -191,13 +191,27 @@ def generate(
     from labctl import stepfacts
 
     _, found = stepfacts.write_steps(root, app_id)
-    extra = stepfacts.effects_section(found, app_id) + stepfacts.identifiers_section(
-        found, list(result.tables))  # fmt: skip
+    # Seed rows and replay values, made together (labctl.seedplan): db/seed.sql and
+    # steps/<recording>.values.yaml, and what the brief says about them.
+    seeded = _seed(root, app_id, result, model)
+    extra = (stepfacts.effects_section(found, app_id)
+             + stepfacts.identifiers_section(found, list(result.tables), seeded=bool(seeded))
+             + seeded)  # fmt: skip
     if extra:
         marker = "## Behaviour seen in the recordings"
         if marker not in text:
             marker = "## Running in the lab"
         text = text.replace(marker, extra + marker, 1) if marker in text else f"{text}\n{extra}"
+    links = stepfacts.links_section(root, app_id, result, found)
+    if links and "### Tables\n" in text:
+        text = text.replace("### Tables\n", links + "### Tables\n", 1)
+    if seeded:
+        text = text.replace(
+            "- Ship no customer data. A synthetic seed may be kept for local runs; the lab loads "
+            "data packs over it.",
+            "- Ship no customer data. Load `db/seed.sql` (synthetic) at start-up when the tables "
+            "are empty: the acceptance replay depends on exactly those rows. The lab may load "
+            "data packs over it.", 1)  # fmt: skip
     # A recording that went through several applications: where this one sits in that flow.
     from labctl import multiapp
 
@@ -219,6 +233,28 @@ def generate(
     if behaviours_file.exists():
         files.append(behaviours_file)
     return Result(result, files, kept)
+
+
+def _seed(root: Path, app_id: str, result, model) -> str:
+    """Write the seed and the replay values of an app with a server database; the brief's
+    section on them ("" when there is nothing to seed: no recording, browser or desktop data)."""
+    from labctl import seedplan
+
+    out = root / "apps" / app_id
+    if result.browser_only or model.stack.desktop or not result.tables:
+        for name in (seedplan.SEED_SQL, seedplan.SEED_JSON):
+            (out / "db" / name).unlink(missing_ok=True)
+        for old in (out / "steps").glob(f"*{seedplan.VALUES}") if (out / "steps").is_dir() else []:
+            old.unlink()
+        return ""
+    try:
+        tables = brief_mod.sam_tables(model, list(result.tables))
+        done = seedplan.write_app(root, app_id, tables, result.db_engine)
+    except Exception as exc:  # noqa: BLE001 - the brief says so; the rest of it still helps
+        return ("## Seed data and replay values\n\nNot generated (an error in labctl: "
+                f"{type(exc).__name__}: {exc}). Seed the tables by hand from *Identifiers and seed "
+                "data* and say so in BUILD-NOTES.md.\n\n")  # fmt: skip
+    return seedplan.brief_section(app_id, done)
 
 
 def chosen_engine(root: Path, app_file: Path) -> str | None:
@@ -280,7 +316,8 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
     return catalog_mod.brief_lines(found)
 
 
-GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "behaviours.json", "pages", "steps")
+GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
+             "behaviours.json", "pages", "steps")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:

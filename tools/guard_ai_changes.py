@@ -7,7 +7,8 @@ Rules (AGENTS.md states them; this makes CI enforce them):
    label, added by the application owner after their review.
 2. Inputs stay as generated, on AI-built pull requests (branch `devin/...` or `build/...`, or label `ai-built`).
    The builder may not edit what the factory generated from the evidence: `BRIEF.md`,
-   `model.yaml`, `db/schema.sql`, `behaviours.json`, `pages/`, or anything in `app.yaml` outside
+   `model.yaml`, `db/schema.sql`, `db/seed.sql` (and `db/seed.json`: the seed the acceptance
+   replay depends on), `behaviours.json`, `pages/`, or anything in `app.yaml` outside
    its `run:` section.
 3. Independent oracle, on AI-built pull requests. The checks that judge the app (`automations/`,
    `flows/`, `lab/`, `conditions/`) may not change in the same pull request as an app. Otherwise
@@ -29,7 +30,8 @@ import sys
 import yaml
 
 APPROVED = {"owner_approved", "reference_verified"}
-GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "behaviours.json")
+GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
+             "behaviours.json")  # fmt: skip
 ORACLES = ("automations/", "flows/", "lab/", "conditions/")
 APP_FILE = re.compile(r"^apps/([^/]+)/(.+)$")
 

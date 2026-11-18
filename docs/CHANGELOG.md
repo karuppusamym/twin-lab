@@ -2,6 +2,45 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — Seed data and replay values in the build packages (the blind rebuild's data gap)
+- **One planner for the seed and the replay values** (`labctl/seedplan.py`, run by `labctl brief`
+  and `labctl evidence build-all`). From an app's recordings it writes `apps/<app>/db/seed.sql`
+  (the schema's dialect, every name quoted; the same rows in `db/seed.json`): rows numbered from
+  the lowest to the highest identifier the lists showed, columns in the observed shapes and code
+  lists, no rows for a table whose first record was written during the recording, and the rows a
+  recorded search found carrying the synthetic word the replay will search for. Beside it
+  `apps/<app>/steps/<recording>.values.yaml`: per typing or choosing step the synthetic value
+  the acceptance replay types and the recorded outcome; the searches (rule, mode, rows, pages,
+  the seeded rows that match); a refused and an accepted input per validation message with a
+  hypothesis only where attributes, an empty refusal or the message's example support it; the
+  display format of each shown field (two decimals, date pattern, closed word lists, "as typed",
+  option code vs label); computed values marked "rule unknown"; values shared with sibling apps.
+  A search counted 12 rows over 3 pages finds 12 over 3 pages on the seed; a "no results"
+  search finds none; a new record's number is the highest seeded + 1 in every package that
+  uses it. Words are checked against every word of the evidence; no typed value is ever read.
+- `build-all` writes the values into each part's `bindings.yaml` and the whole recording's
+  (marked `generated:`; a value a person writes is kept, and generated values do not trigger a
+  re-split), and a draft `acceptance.yaml` where none exists: required only for what the package
+  states, computed values excluded with the reason.
+- The brief gains *Seed data and replay values*, *Paths the pages link to that the route list
+  does not name* (e.g. `GET /orders/new/customer`, `GET /logout` as recorded), *Links that leave
+  the scope* (keep the `href`, answer with a 303 to the first in-scope screen; BUILD_TASK and
+  AGENTS.md now say the same), *Checkbox fields and their columns* (posted `vat=1`, BOOLEAN
+  column), the `<tl-frame>` capture explained (brief and snapshot header), unambiguous identifier
+  wording ("lowest seen, highest seen; 12 different values, not every number in between"),
+  repeated requests shown as `×2`, option codes as the page posts them (model code lists use
+  them too), and per step the ranked locator the replay finds a non-id selector by (`target`).
+- Run: `labctl evidence build-all <recording> --proposal <file>`; tests:
+  `tests/test_seedplan.py`, `tests/test_multi_app_flow.py` (seed reproduces the recorded counts,
+  values shared across packages, formats and validations, a replay of the source code holding
+  only the seed with the generated values passes). Trial: `rebuild-trial/_work/build.py`, proofs
+  `proof.py good|seeded|unseeded|...`, commands for the next blind run in `rebuild-trial/JUDGE-RUN.md`.
+- Left open: the matching rule of a search is a hypothesis from one recording (contains vs whole
+  word, case); row order in lists is not stated; computed values (prices, VAT) stay unknown and
+  unjudged; a table listed only without identifiers is seeded with as many rows as were listed
+  before the first change; the acceptance *template* (`labctl behaviour acceptance`) still writes
+  TODO cases a person completes; no CLI of its own (`labctl brief` and `build-all` run it).
+
 ## 2026-11-18 — Desktop applications, phase 1: record, model, brief, package, verify
 - **`labctl desktop`** (`lab/labctl/labctl/desktop/`, [09-desktop.md](09-desktop.md)) records a
   person using a Windows application: UI Automation events, low-level mouse and keyboard hooks

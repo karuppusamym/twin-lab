@@ -104,6 +104,8 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         f"{app}/BRIEF.md",
         f"{app}/model.yaml",
         f"{app}/db/schema.sql",
+        f"{app}/db/seed.sql",
+        f"{app}/db/seed.json",
         f"{app}/app.yaml",
         f"{app}/behaviours.json",
         "AGENTS.md",
@@ -126,7 +128,8 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
     # and the requested flows for this app (drafts from a recording included).
     steps = repo_root / app / "steps"
     if steps.is_dir():
-        for path in sorted([*steps.glob("*.json"), *steps.glob("*.sequence.yaml")]):
+        for path in sorted([*steps.glob("*.json"), *steps.glob("*.sequence.yaml"),
+                            *steps.glob("*.values.yaml")]):  # fmt: skip
             if path.is_file() and not path.is_symlink():
                 found[f"{app}/steps/{path.name}"] = path
     for path in (
@@ -579,11 +582,12 @@ def _package_only_text(app_id: str, app: str, engine: str, has_steps: bool, db_v
         else f"apply `{app}/db/schema.sql` to a throwaway database of the engine (as step 3.6 says)"
     )
     steps_check = (
-        f" Walk `{app}/steps/*.json` in order against the running app (by hand or with a short "
-        "browser script of your own): perform each step's action on its selector, type synthetic "
-        "values of the shape given, and check that the page that follows (`then`), the requests "
-        "and the messages are those the step lists and the brief's *What each recorded action "
-        "did* shows."
+        f" Walk `{app}/steps/*.json` in order against the running app on the seed (by hand or "
+        "with a short browser script of your own): perform each step's action on its selector "
+        "(or its `target`), type the value `steps/<recording>.values.yaml` gives the step (where "
+        "there is none, a synthetic value of the shape given), and check that the page that "
+        "follows (`then`), the requests, the messages and the rows are those the step lists, the "
+        "values file records and the brief's *What each recorded action did* shows."
         if has_steps
         else ""
     )
@@ -742,13 +746,22 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
             if engine_default
             else ""
         )
+        seed_file = repo_root / app / "db" / "seed.sql"
+        fill = (
+            f"load **exactly** the rows of `{app}/db/seed.sql` (generated with the replay values "
+            f"in `{app}/steps/*.values.yaml`; the same rows as JSON in `{app}/db/seed.json`) "
+            "once, when the tables are empty, and no other rows: the acceptance replay types those "
+            "values and expects the outcomes the recording showed on exactly these rows (the "
+            "brief's *Seed data and replay values*)"
+            if seed_file.is_file()
+            else "fill them with synthetic rows (the brief's *Identifiers and seed data* says how "
+            "many and how they are numbered, where the recording shows it)"
+        )
         database_section = (
             f"The database engine to target is {_engine_text(engine, db_var)}{default_note} Only "
             f"the **tables and data** are needed: create the tables from `{app}/db/schema.sql` and "
-            "fill them with synthetic rows (the brief's *Identifiers and seed data* says how many "
-            "and how they are numbered, where the recording shows it). Do not rebuild the original "
-            "system's business logic, stored procedures or jobs beyond the behaviours the brief "
-            "lists."
+            f"{fill}. Do not rebuild the original system's business logic, stored procedures or "
+            "jobs beyond the behaviours the brief lists."
         )
         env_step = (
             f"5. One `Dockerfile` in `{app}/`. The app reads its database address from the "
@@ -795,7 +808,10 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
                                   stack_block)  # fmt: skip
     packaged = [rel for rel, _ in _collect(repo_root, app_id)]
     shots = [rel for rel in packaged if rel.startswith("evidence/")]
-    step_files = [rel for rel in packaged if rel.startswith(f"{app}/steps/")]
+    step_files = [rel for rel in packaged if rel.startswith(f"{app}/steps/")
+                  and not rel.endswith(".values.yaml")]  # fmt: skip
+    value_files = [rel for rel in packaged if rel.startswith(f"{app}/steps/")
+                   and rel.endswith(".values.yaml")]  # fmt: skip
     flow_files = [rel for rel in packaged if rel.startswith("flows/")]
     shots_text = (
         f" Files under `evidence/{app_id}/screenshots/` in the package show how screens look; "
@@ -809,6 +825,13 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         f"\n4. Read {', '.join(f'`{f}`' for f in step_files)}: the recorded steps in order (the "
         "action, the selector, the screen, the requests each caused and the page that followed; "
         "typed values only as their shape)"
+        + (
+            f", and {', '.join(f'`{f}`' for f in value_files)}: the synthetic value the "
+            "acceptance replay types at each of those steps and what the recording showed then "
+            "(the outcome your app must give on `db/seed.sql`)"
+            if value_files
+            else ""
+        )
         + (
             f", and {', '.join(f'`{f}`' for f in flow_files)}: the flow as a person would describe "
             "it"
@@ -868,7 +891,7 @@ elements by these, and a changed id breaks them silently.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/pages/*.html` and `{app}/steps/*` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/pages/*.html` and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
@@ -880,14 +903,16 @@ elements by these, and a changed id breaks them silently.
 
 ## 3. Build
 
-1. Build only what the brief puts in scope. Nothing under "Out of scope" is built, linked or
-   stubbed. Where an in-scope screen has an element that leads out of scope (a menu link, or the
-   page the real app opens after sign-in), keep the element with its id and classes, because
-   automations look for it, but send it to the first in-scope screen instead, and list each one
-   in `BUILD-NOTES.md`.
+1. Build only what the brief puts in scope. Nothing under "Out of scope" is built or stubbed.
+   Where an in-scope screen has an element that leads out of scope (a menu link, or the page the
+   real app opens after sign-in), keep the element exactly as the snapshot has it (id, classes
+   and `href`), because automations look for it, and make the app answer that path with a
+   redirect (303) to the first in-scope screen (the brief's *Links that leave the scope* lists
+   each one and where to). That redirect is all that is built for it; list each in
+   `BUILD-NOTES.md`.
 2. Files go under `{app}/`: the Dockerfile, the application code and `BUILD-NOTES.md`.
    Write only under `{app}/`. Do not change any file outside it.
-3. Never edit `{app}/BRIEF.md` or `{app}/db/schema.sql`, and never edit a check (a test, an
+3. Never edit `{app}/BRIEF.md` or `{app}/db/schema.sql` (nor `{app}/db/seed.sql`), and never edit a check (a test, an
    automation, a flow or a condition) to make it pass. In `{app}/app.yaml`, change only the
    `run:` section. Every rule keeps `verification: hypothesis`.
 4. Same framework and versions as "Stack to pin", same element ids and classes as the brief's
