@@ -1,0 +1,89 @@
+{
+  "id": "jsf-mojarra",
+  "technology": "JSF (Mojarra)",
+  "version": "2.3",
+  "surface": "web",
+  "result": "CAPTURE VERIFIED",
+  "reason": "rebuild not run: no rebuild replay report is named in the entry",
+  "date": "2026-11-18",
+  "gates": {
+    "detect": {
+      "status": "PASS",
+      "detail": "detected version 2.3, framework JSF, rendering server, server.technology Java, server.framework JSF, server.framework_version 2.3, server.implementation Mojarra",
+      "facts": {
+        "declared": {
+          "framework": "JSF",
+          "version": "2.3",
+          "rendering": "server",
+          "server": {
+            "technology": "Java",
+            "framework": "JSF",
+            "framework_version": "2.3",
+            "implementation": "Mojarra"
+          }
+        },
+        "detected": {
+          "version": "2.3",
+          "framework": "JSF",
+          "rendering": "server",
+          "server": {
+            "technology": "Java",
+            "marker": "specversion in JSF's own script (jsf.js)",
+            "confidence": "certain",
+            "framework": "JSF",
+            "framework_marker": "specversion in JSF's own script (jsf.js)",
+            "framework_confidence": "certain",
+            "framework_version": "2.3",
+            "version": "2.3",
+            "web_server": {
+              "name": "Jetty",
+              "marker": "Server header: Jetty",
+              "confidence": "certain",
+              "version": "9.4.57"
+            },
+            "implementation": "Mojarra",
+            "implementation_marker": "mojarra.* functions in JSF's own script (jsf.js)"
+          }
+        },
+        "marker": "javax.faces.ViewState"
+      }
+    },
+    "capture": {
+      "status": "PASS",
+      "detail": "24 expected action(s), all in the recording (48 action(s) recorded)",
+      "facts": {
+        "expected": 24,
+        "captured": 48,
+        "missing": [],
+        "steps": 49
+      }
+    },
+    "self-replay": {
+      "status": "PASS",
+      "detail": "48 of 48 step(s) replayed against a fresh instance, 25 compared, 0 failed",
+      "facts": {
+        "status": "pass",
+        "steps": 48,
+        "replayed": 48,
+        "compared": 25,
+        "failed": 0,
+        "skipped": 0,
+        "unresolved": 0,
+        "missing_value": 0,
+        "differences": 0
+      }
+    },
+    "rebuild": {
+      "status": "NOT RUN",
+      "detail": "no rebuild replay report is named in the entry",
+      "facts": {}
+    }
+  },
+  "not_covered": [
+    "PrimeFaces, RichFaces and other component libraries (plain h: components only)",
+    "MyFaces; Jakarta Faces 3 and later; client-side state saving",
+    "the implementation's release (2.3.9) is in no page or header, so it is not compared",
+    "the acceptance cases flow.acceptance_for declares are run by the application's own test, not here",
+    "a rebuild by a coding agent"
+  ]
+}

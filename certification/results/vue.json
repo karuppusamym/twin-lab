@@ -4,27 +4,27 @@
   "version": null,
   "surface": "web",
   "result": "NOT RUN",
-  "reason": "framework package not on this machine; needs a download the user has not approved",
+  "reason": "no reference application has been built for it yet",
   "date": "2026-11-18",
   "gates": {
     "detect": {
       "status": "NOT RUN",
-      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "detail": "no reference application has been built for it yet",
       "facts": {}
     },
     "capture": {
       "status": "NOT RUN",
-      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "detail": "no reference application has been built for it yet",
       "facts": {}
     },
     "self-replay": {
       "status": "NOT RUN",
-      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "detail": "no reference application has been built for it yet",
       "facts": {}
     },
     "rebuild": {
       "status": "NOT RUN",
-      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "detail": "no reference application has been built for it yet",
       "facts": {}
     }
   },

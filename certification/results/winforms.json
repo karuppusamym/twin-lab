@@ -3,24 +3,55 @@
   "technology": "WinForms",
   "version": ".NET 6",
   "surface": "desktop",
-  "result": "NOT RUN",
-  "reason": "set TWINLAB_DESKTOP_GUI=1",
+  "result": "CAPTURE VERIFIED",
+  "reason": "rebuild not run: no rebuild replay report is named in the entry",
   "date": "2026-11-18",
   "gates": {
     "detect": {
-      "status": "NOT RUN",
-      "detail": "set TWINLAB_DESKTOP_GUI=1",
-      "facts": {}
+      "status": "PASS",
+      "detail": "detected toolkit WinForms, runtime.name .NET, runtime.version 6.0.3",
+      "facts": {
+        "declared": {
+          "toolkit": "WinForms",
+          "runtime": {
+            "name": ".NET",
+            "version": "6"
+          }
+        },
+        "detected": {
+          "version": null,
+          "toolkit": "WinForms",
+          "runtime": {
+            "name": ".NET",
+            "version": "6.0.3",
+            "marker": "shared runtime folder of loaded modules: Microsoft.NETCore.App 6.0.3, Microsoft.WindowsDesktop.App 6.0.3",
+            "confidence": "certain"
+          }
+        },
+        "marker": "FrameworkId WinForm"
+      }
     },
     "capture": {
-      "status": "NOT RUN",
-      "detail": "set TWINLAB_DESKTOP_GUI=1",
-      "facts": {}
+      "status": "PASS",
+      "detail": "20 expected action(s), all in the recording (36 action(s) recorded)",
+      "facts": {
+        "expected": 20,
+        "captured": 36,
+        "missing": [],
+        "steps": 36
+      }
     },
     "self-replay": {
-      "status": "NOT RUN",
-      "detail": "set TWINLAB_DESKTOP_GUI=1",
-      "facts": {}
+      "status": "PASS",
+      "detail": "29 of 36 step(s) verified against a fresh start, 7 covered by the steps around them, 0 failed",
+      "facts": {
+        "status": "pass",
+        "steps": 36,
+        "replayed": 29,
+        "implied": 7,
+        "failed": 0,
+        "skipped": 0
+      }
     },
     "rebuild": {
       "status": "NOT RUN",

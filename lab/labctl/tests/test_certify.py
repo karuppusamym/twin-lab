@@ -1,8 +1,10 @@
 """The certification matrix (`labctl certify`, docs/10-certification.md): the matrix file is
 parsed and refused when wrong, a result never counts a gate that did not run as passed, the table
 is rendered from the kept results, and the server-rendered fixture goes through the real recorder
-and a real replay once. The React entry runs only where its vendor files were built (not in CI).
-Desktop entries are never started here: without TWINLAB_DESKTOP_GUI=1 they are NOT RUN.
+and a real replay once, and so does the Angular entry on its committed build. The React entry
+runs only where its vendor files were built (not in CI), the JSF entry only where there is a JDK
+and its jars were fetched. Desktop entries are never started here: without TWINLAB_DESKTOP_GUI=1
+they are NOT RUN, and their gate is checked on reports made by hand.
 """
 
 from __future__ import annotations
@@ -19,7 +21,8 @@ from labctl.certify import CAPTURE_VERIFIED, CERTIFIED, FAIL, NOT_RUN, PARTIAL, 
 
 ROOT = Path(__file__).resolve().parents[3]
 MATRIX = ROOT / "certification" / "matrix.yaml"
-DOWNLOAD = "framework package not on this machine; needs a download the user has not approved"
+NO_APP = "no reference application has been built for it yet"
+DECLARED_ONLY = ("vue", "aspnet-webforms")
 
 
 def entry(**over) -> dict:
@@ -33,13 +36,24 @@ def entry(**over) -> dict:
 def test_the_repository_matrix_loads_and_declares_every_technology():
     mx = certify.load_matrix(MATRIX)
     ids = [e.id for e in mx.entries]
-    assert ids == ["html-forms", "react-16", "angular", "vue", "jsf-primefaces", "aspnet-webforms",
+    assert ids == ["html-forms", "react-16", "angular", "vue", "jsf-mojarra", "aspnet-webforms",
                    "winforms", "wpf", "java-swing"]  # fmt: skip
     for e in mx.entries:
         assert e.gates["detect"], e.id  # each says what must be detected
-    for name in ("angular", "vue", "jsf-primefaces", "aspnet-webforms"):
+        if e.id not in DECLARED_ONLY:
+            assert e.app is not None and e.not_run is None, e.id
+    for name in DECLARED_ONLY:
         e = mx.entry(name)
-        assert e.app is None and e.flow is None and e.not_run == DOWNLOAD
+        assert e.app is None and e.flow is None and e.not_run == NO_APP
+    assert "not approved" not in MATRIX.read_text("utf-8")  # nothing waits for an approval
+    for name, kind in (("angular", "caseboard_angular"), ("jsf-mojarra", "caseboard_jsf")):
+        e = mx.entry(name)  # started by the application's own module, under its own names
+        assert (e.app.kind, e.app.namespace, e.flow.base_url) == ("module", kind, True)
+        assert (ROOT / e.app.file).is_file() and (ROOT / e.flow.file).is_file()
+        assert (ROOT / e.gates["capture"]["expected_file"]).is_file()
+    assert mx.entry("jsf-mojarra").gates["detect"]["server"] == {
+        "technology": "Java", "framework": "JSF", "framework_version": "2.3",
+        "implementation": "Mojarra"}  # fmt: skip
     assert mx.entry("react-16").gates["detect"] == {
         "framework": "react", "version": "16.7.0", "rendering": "client"}  # fmt: skip
     assert {mx.entry(i).surface for i in ("winforms", "wpf", "java-swing")} == {"desktop"}
@@ -65,6 +79,8 @@ def test_a_duplicate_id_is_refused():
         ({"app": {"kind": "python", "file": "a.py"}}, "needs `file` and `origins`"),
         ({"app": {"kind": "winforms", "folder": "f"}}, "does not fit surface 'web'"),
         ({"app": {"kind": "static", "folder": "f"}}, "needs a flow"),
+        ({"app": {"kind": "module"}}, "a module app needs `file`"),
+        ({"app": {"kind": "module", "file": "a.py", "unavailable": "b.py"}}, "file.py:function"),
         ({"colour": "blue"}, "colour"),
     ],
 )
@@ -152,6 +168,9 @@ def test_detect_compares_technology_and_version():
     seen["runtime"]["version"] = "60.1"
     assert certify.detect_gate(net, seen).status == FAIL
     assert certify.detect_gate(net, {"toolkit": "WinForms"}).status == FAIL
+    assert certify.detect_gate(net, {"toolkit": "WinForms", "runtime": {
+        "name": ".NET", "version": "6.0.3", "marker": "m"}}).detail == (
+        "detected toolkit WinForms, runtime.name .NET, runtime.version 6.0.3")  # fmt: skip
     jsf = {"framework": "JSF", "server": {"technology": "Java"}}
     assert certify.detect_gate(jsf, {"framework": "JSF", "server": {"technology": "PHP"}}).detail == (
         "server.technology: declared Java, detected PHP")  # fmt: skip
@@ -176,6 +195,18 @@ def test_capture_needs_every_expected_action():
     assert certify.expected_actions({"expected_from": "EXPECTED"}, Flow) == ["type", "click"]
 
 
+def test_expected_actions_from_a_file_beside_the_application(tmp_path):
+    (tmp_path / "expected-actions.yaml").write_text(
+        "version: 1\nactions:\n  - type   # a name\n  - keypress:Escape\n", "utf-8"
+    )
+    got = certify.expected_actions({"expected_file": "expected-actions.yaml"}, None, tmp_path)
+    assert got == ["type", "keypress:Escape"]
+    # the two reference applications' own lists, as the entries name them
+    mx = certify.load_matrix(MATRIX)
+    for name, count in (("angular", 34), ("jsf-mojarra", 24)):
+        assert len(certify.expected_actions(mx.entry(name).gates["capture"], None, ROOT)) == count
+
+
 def test_self_replay_passes_only_on_a_replay_that_ran_and_passed():
     from labctl.behaviour.fidelity import Coverage, Difference, FidelityReport, StepReport
 
@@ -192,6 +223,34 @@ def test_self_replay_passes_only_on_a_replay_that_ran_and_passed():
     assert bad.status == FAIL and "1 failed" in bad.detail and "step 7 (click)" in bad.detail
     blocked = certify.replay_gate(report("blocked", steps=9, replayed=3, missing_value=1), ["#q"])
     assert blocked.status == FAIL and blocked.facts["no_value_for"] == ["#q"]
+
+
+def test_desktop_self_replay_never_counts_a_step_that_was_not_performed():
+    """Desktop verify marks two kinds of step `skipped`: one the steps around it cover, and one
+    it could not perform. Only the first is no obstacle to a pass."""
+    from labctl.behaviour.fidelity import Difference, FidelityReport, StepReport
+
+    def report(*rows, status="pass"):
+        return FidelityReport(recording="r", status=status, steps=list(rows))
+
+    done = StepReport(seq=1, action="click", status="pass")
+    implied = StepReport(seq=2, action="menu_open", status="skipped", note=certify.DESKTOP_IMPLIED)
+    ok = certify.desktop_replay_gate(report(done, implied))
+    assert ok.status == PASS and "1 of 2 step(s) verified" in ok.detail
+    assert ok.facts == {"status": "pass", "steps": 2, "replayed": 1, "implied": 1, "failed": 0,
+                        "skipped": 0}  # fmt: skip
+    left = StepReport(seq=3, action="select", status="skipped", note="the item holds data")
+    not_all = certify.desktop_replay_gate(report(done, implied, left))  # verify itself says pass
+    assert not_all.status == FAIL and not_all.facts["skipped"] == 1
+    assert "1 not performed" in not_all.detail
+    assert "step 3 (select) the item holds data" in not_all.detail
+    bad = StepReport(seq=4, action="click", status="fail", differences=[
+        Difference(step=4, element="btnOpen", check="missing", expected=1, actual=0)])  # fmt: skip
+    failed = certify.desktop_replay_gate(report(done, bad, status="fail"))
+    assert (
+        failed.status == FAIL and "1 failed" in failed.detail and "step 4 (click)" in failed.detail
+    )
+    assert certify.desktop_replay_gate(report(implied)).status == FAIL  # nothing was performed
 
 
 def test_rebuild_reads_a_kept_report_and_is_never_run(tmp_path):
@@ -216,10 +275,135 @@ def test_rebuild_reads_a_kept_report_and_is_never_run(tmp_path):
 
 def test_declared_entries_are_not_run_with_the_reason(tmp_path):
     mx = certify.load_matrix(MATRIX)
-    for name in ("angular", "vue", "jsf-primefaces", "aspnet-webforms"):
+    for name in DECLARED_ONLY:
         got = certify.run_entry(mx.entry(name), ROOT, tmp_path)
-        assert got.result == NOT_RUN and got.reason == DOWNLOAD
+        assert got.result == NOT_RUN and got.reason == NO_APP
         assert {g.status for g in got.gates.values()} == {NOT_RUN}
+
+
+STARTER = """
+class Running:
+    base = "http://127.0.0.1:1/"
+
+    def stop(self):
+        pass
+
+
+def serve():
+    return Running()
+
+
+def unavailable():
+    return {why!r}
+"""
+
+
+def module_entry(root: Path, why: str | None) -> certify.Entry:
+    """An entry whose application is started by its own module (as Caseboard is), in a folder
+    made here, under names of its own."""
+    app = root / "app"
+    app.mkdir(parents=True, exist_ok=True)
+    (app / "run.py").write_text(STARTER.format(why=why), "utf-8")
+    (app / "flow.py").write_text("def flow(page, base_url):\n    pass\n", "utf-8")
+    spec = entry(app={"kind": "module", "file": "app/run.py", "start": "/login",
+                      "namespace": f"certify_test_{root.name}",
+                      "unavailable": "app/run.py:unavailable"},
+                 flow={"file": "app/flow.py", "run": "flow", "base_url": True})  # fmt: skip
+    return certify.parse_matrix({"entries": [spec]}).entries[0]
+
+
+def test_an_application_started_by_its_own_module(tmp_path):
+    """What the JSF entry needs: where the application says it cannot start (no JDK, no jars),
+    the entry is NOT RUN with that reason; where it can, it is started by its own function and
+    recorded from its own address."""
+    import sys
+
+    no = module_entry(tmp_path / "no", "no JDK: `java` and `javac` are not on PATH")
+    assert certify.missing_requirements(no.app, tmp_path / "no") == (
+        "no JDK: `java` and `javac` are not on PATH")  # fmt: skip
+    got = certify.run_entry(no, tmp_path / "no", tmp_path)
+    assert got.result == NOT_RUN and got.reason == "no JDK: `java` and `javac` are not on PATH"
+    assert {g.status for g in got.gates.values()} == {NOT_RUN}
+    yes = module_entry(tmp_path / "yes", None)
+    assert certify.missing_requirements(yes.app, tmp_path / "yes") is None
+    run = certify.start_app(yes.app, tmp_path / "yes")
+    assert run.origins == {"app": "http://127.0.0.1:1"} and run.start == "http://127.0.0.1:1/login"
+    run.stop()
+    assert "certify_test_yes_run" in sys.modules  # loaded under the application's own names
+    (tmp_path / "yes" / "app" / "run.py").unlink()
+    assert certify.missing_requirements(yes.app, tmp_path / "yes") == "app/run.py is not there"
+    # the real entry: its own build.py says why (or None, where a JDK and the jars are)
+    jsf = certify.load_matrix(MATRIX).entry("jsf-mojarra")
+    why = certify.missing_requirements(jsf.app, ROOT)
+    assert why is None or "JDK" in why or "jar(s) missing" in why
+    if why:
+        assert certify.run_entry(jsf, ROOT, tmp_path).reason == why
+
+
+def test_bindings_given_by_a_function_of_the_flow_file(tmp_path):
+    """What the JSF flow gives (`bindings_for`): a value for every type and select step, by the
+    step's number, an emptied field included."""
+    from labctl.behaviour import bindings
+
+    steps = [{"seq": 1, "action": "goto"}, {"seq": 2, "action": "type"},
+             {"seq": 3, "action": "click"}, {"seq": 4, "action": "select"},
+             {"seq": 5, "action": "type"}]  # fmt: skip
+    (tmp_path / "steps.jsonl").write_text("\n".join(json.dumps(s) for s in steps), "utf-8")
+    asked = []
+
+    def make(valued):
+        asked.append(valued)
+        return {
+            "version": 1,
+            "steps": {n: {"value": v} for n, v in zip(valued, "abc", strict=True)},
+        }
+
+    with pytest.raises(ValueError, match="zip"):
+        certify.bindings_from_flow(tmp_path, lambda valued: dict(zip(valued, "ab", strict=True)))
+    certify.bindings_from_flow(tmp_path, make)
+    assert asked == [[2, 4, 5]]
+    assert bindings.load(tmp_path / bindings.FILE).values == {2: "a", 4: "b", 5: "c"}
+
+
+def test_a_step_on_a_record_gets_its_title(tmp_path, monkeypatch):
+    """What the Angular flow needs: a click on a row that was there before the recording
+    started is bound to the row's title (`record:`), beside the typed values."""
+    from labctl.behaviour import bindings
+    from labctl.botlog import recording
+
+    template = {"version": 1, "steps": {
+        2: {"action": "type", "field": "input#search", "shape": "aaaaa", "value": None},
+        3: {"action": "click", "field": "a", "record_shape": "AA-9999 Aaaaa", "record": None},
+        6: {"action": "click", "field": "a", "record_shape": "AA-9999 Aaaaa", "record": None},
+    }}  # fmt: skip
+    path = tmp_path / bindings.FILE
+    monkeypatch.setattr(recording, "load", lambda rec_dir: None)
+
+    def write(rec):
+        path.write_text(yaml.safe_dump(template), "utf-8")
+        return path
+
+    monkeypatch.setattr(bindings, "write_template", write)
+    unbound = certify.fill_bindings(tmp_path, {"input#search": ["valve"]}, ["CB-1007 Valve"])
+    got = bindings.load(path)
+    assert got.values == {2: "valve"} and got.records == {3: "CB-1007 Valve"}
+    assert unbound == ["a (a record)"]  # the second such step has no title: the replay blocks
+
+
+def test_the_angular_entry_gives_the_values_its_flow_types():
+    """The entry's synthetic values are the flow's own (`INPUTS`, `RECORDS`), in the same order."""
+    e = certify.load_matrix(MATRIX).entry("angular")
+    flow = certify._module(ROOT / e.flow.file, e.app.namespace)
+    assert flow.__name__ == "caseboard_angular_flow" and e.app.start == flow.START
+    values: dict[str, list[str]] = {}
+    for _action, selector, value in flow.INPUTS:
+        values.setdefault(selector, []).append(value)
+    assert e.gates["self-replay"]["values"] == values
+    assert e.gates["self-replay"]["records"] == [title for _action, title in flow.RECORDS]
+    jsf = certify.load_matrix(MATRIX).entry("jsf-mojarra")
+    jsf_flow = certify._module(ROOT / jsf.flow.file, jsf.app.namespace)
+    assert jsf.app.start == jsf_flow.START
+    assert callable(getattr(jsf_flow, jsf.gates["self-replay"]["bindings_from"]))
 
 
 def test_desktop_entries_run_only_when_asked_for(tmp_path, monkeypatch):
@@ -289,12 +473,13 @@ def test_the_command_writes_results_and_the_table(tmp_path):
 
     from labctl.cli import app
 
-    args = ["certify", "--only", "angular", "--only", "vue", "--out", str(tmp_path / "res"),
+    args = ["certify", "--only", "aspnet-webforms", "--only", "vue", "--out", str(tmp_path / "res"),
             "--doc", str(tmp_path / "matrix.md"), "--matrix", str(MATRIX)]  # fmt: skip
     r = CliRunner().invoke(app, args)
     assert r.exit_code == 0, r.output
-    assert "angular: NOT RUN" in r.output
-    assert sorted(p.name for p in (tmp_path / "res").iterdir()) == ["angular.json", "vue.json"]
+    assert f"aspnet-webforms: NOT RUN ({NO_APP})" in r.output
+    assert sorted(p.name for p in (tmp_path / "res").iterdir()) == [
+        "aspnet-webforms.json", "vue.json"]  # fmt: skip
     kept = json.loads((tmp_path / "res" / "vue.json").read_text("utf-8"))
     assert kept["result"] == NOT_RUN and kept["gates"]["detect"]["status"] == NOT_RUN
     table = (tmp_path / "matrix.md").read_text("utf-8")
@@ -396,3 +581,24 @@ def test_the_react_entry_where_its_vendor_files_are_built(tmp_path):
     assert got.gates["detect"].facts["detected"]["version"] == "16.7.0"
     assert got.gates["capture"].facts["expected"] == 20
     assert got.gates["self-replay"].facts["failed"] == 0
+
+
+def test_the_angular_entry_end_to_end(tmp_path):
+    """The `angular` entry as the matrix declares it, on the committed build: started by the
+    application's own serve.py (a route's address answers with the shell), recorded, detected,
+    and replayed against a fresh instance with the entry's values and the record's title."""
+    pytest.importorskip("playwright.sync_api")
+    entry_ = certify.load_matrix(MATRIX).entry("angular")
+    assert certify.missing_requirements(entry_.app, ROOT) is None  # site/ is in Git
+    got = certify.run_entry(entry_, ROOT, tmp_path)
+    assert got.result == CAPTURE_VERIFIED, got.model_dump_json(indent=1)
+    assert got.gates["detect"].facts["detected"] == {
+        "version": "21.2.26", "framework": "angular", "rendering": "client"}  # fmt: skip
+    assert got.gates["capture"].facts["expected"] == 34
+    replayed = got.gates["self-replay"].facts
+    assert replayed["failed"] == 0 and replayed["replayed"] == replayed["steps"] >= 34
+    bound = yaml.safe_load((tmp_path / "angular" / "bindings.yaml").read_text("utf-8"))["steps"]
+    assert [b["record"] for b in bound.values() if "record" in b] == entry_.gates["self-replay"][
+        "records"]  # fmt: skip
+    text = got.model_dump_json()
+    assert "not-the-password" not in text and "Position sensor" not in text
