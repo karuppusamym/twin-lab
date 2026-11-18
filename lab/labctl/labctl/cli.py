@@ -21,6 +21,7 @@ from labctl.bindings import BindingError
 from labctl.botlog import cli as botlog_cli
 from labctl.builder import cli as builder_cli
 from labctl.data import cli as data_cli
+from labctl.desktop import cli as desktop_cli
 from labctl.devin import cli as devin_cli
 from labctl.models import KINDS, Automation
 from labctl.realdata import cli as realdata_cli
@@ -287,6 +288,7 @@ app.add_typer(
     builder_cli.app, name="build", help="Build apps with a coding agent: Claude, Devin, by hand."
 )
 app.add_typer(ocp_cli.app, name="ocp")
+app.add_typer(desktop_cli.app, name="desktop")
 
 
 def _automation(automation_id: str) -> Automation:

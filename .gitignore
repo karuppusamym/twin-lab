@@ -24,5 +24,10 @@ twinlab.local.yaml
 !lab/labctl/tests/fixtures/showcase-rec/
 !lab/labctl/tests/fixtures/showcase-rec/**
 
+# .NET build output (reference desktop apps and desktop demo apps)
+bin/
+obj/
+apps/*/publish/
+
 # Claude Code worktrees
 .claude/worktrees/

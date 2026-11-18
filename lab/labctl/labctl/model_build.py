@@ -50,8 +50,23 @@ def digest(paths: list[Path], root: Path) -> str:
     return "sha256:" + h.hexdigest()[:16]
 
 
+# Fields added for desktop recordings; left out of the digest while empty, so the digest of a
+# web model is what it was before they existed.
+_DESKTOP_FIELDS = {"uia", "surface", "desktop"}
+
+
+def _drop_empty_desktop(node):
+    if isinstance(node, dict):
+        return {k: _drop_empty_desktop(v) for k, v in node.items()
+                if not (k in _DESKTOP_FIELDS and v is None)}  # fmt: skip
+    if isinstance(node, list):
+        return [_drop_empty_desktop(v) for v in node]
+    return node
+
+
 def model_digest(model: AppModel) -> str:
-    data = json.dumps(model.model_dump(mode="json", by_alias=True), sort_keys=True)
+    data = json.dumps(_drop_empty_desktop(model.model_dump(mode="json", by_alias=True)),
+                      sort_keys=True)  # fmt: skip
     return "sha256:" + hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
@@ -69,6 +84,15 @@ def check_selector(selector: str, ids: set[str], classes: set[str]) -> tuple[str
     """Whether the ids and classes a CSS selector names appear on a screen."""
     if selector.startswith("uipath:"):
         return "unchecked", "not CSS; the conformance check decides"
+    if selector.startswith("uia:"):  # a desktop locator: ids are the window's AutomationIds
+        from labctl.desktop import locator
+
+        aid = locator.parse(selector).get("AutomationId")
+        if not aid:
+            return "unchecked", "no AutomationId; `labctl desktop verify` decides"
+        return (
+            ("found", "") if aid in ids else ("missing", f"AutomationId {aid} not in this window")
+        )
     if "[" in selector:
         return "unchecked", "attribute selector; the conformance check decides"
     want_ids = re.findall(r"#([\w-]+)", selector)
@@ -339,6 +363,13 @@ def _documents(model: AppModel, path: Path) -> None:
 from_har = from_recording  # the name docs/dev/integration.md uses
 
 
+def from_desktop(app: str, path: Path) -> AppModel:
+    """What a desktop recording shows (`labctl.desktop.recorder`): windows, controls, menus."""
+    from labctl.desktop import model as desktop_model
+
+    return desktop_model.analyse(app, Path(path))
+
+
 def from_openapi(app: str, path: Path) -> AppModel:
     """Declared routes with request and response shapes: OpenAPI 3.x or a Postman v2.1 collection."""
     from labctl import openapi
@@ -403,6 +434,8 @@ def _merge_screen(have: Screen, new: Screen) -> None:
             setattr(have, attr, getattr(strong, attr) or getattr(weak, attr))
     if new.snapshots is not None:
         have.snapshots = (have.snapshots or 0) + new.snapshots
+    have.surface = have.surface or new.surface
+    have.desktop = have.desktop or new.desktop
     have.calls = have.calls + [
         c for c in new.calls if (c.method, c.path) not in {(x.method, x.path) for x in have.calls}
     ]
@@ -420,7 +453,7 @@ def _merge_screen(have: Screen, new: Screen) -> None:
         if same:
             if same.selector != el.selector and any(f.startswith("automation:") for f in el.from_):
                 same.selector = el.selector  # the automation's selector is what must resolve
-            for attr in ("label", "tag", "name", "type"):
+            for attr in ("label", "tag", "name", "type", "uia"):
                 setattr(same, attr, getattr(same, attr) or getattr(el, attr))
             for attr in ("classes", "options"):
                 setattr(same, attr, _union(getattr(same, attr), getattr(el, attr)))
@@ -442,6 +475,8 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
     else:  # a recording's detected server technology and libraries add to a stack read from source
         if part.stack.server and not model.stack.server:
             model.stack.server = part.stack.server
+        if part.stack.desktop and not model.stack.desktop:
+            model.stack.desktop = part.stack.desktop
         for kind in ("libraries", "detected"):
             have = getattr(model.stack, kind)
             have += [x for x in getattr(part.stack, kind) if x not in have]

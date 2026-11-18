@@ -36,6 +36,9 @@ ocr = ["pytesseract>=0.3", "pillow>=10"]
 mssql = ["pyodbc>=5.0"]       # also needs "ODBC Driver 18 for SQL Server" installed
 oracle = ["oracledb>=2.0"]
 mysql = ["pymysql>=1.1"]
+# Record and verify Windows desktop applications through UI Automation (labctl desktop);
+# Windows only. Reading recordings, models and briefs needs nothing extra.
+desktop = ["comtypes>=1.4; sys_platform == 'win32'"]
 
 [project.scripts]
 labctl = "labctl.cli:app"

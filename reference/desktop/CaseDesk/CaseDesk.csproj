@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- CaseDesk: a stand-in "real" Windows desktop application for Twin Lab's desktop recorder.
+       Synthetic data only, held in memory. No NuGet packages, so it builds offline. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>CaseDesk</AssemblyName>
+    <RootNamespace>CaseDesk</RootNamespace>
+    <Product>CaseDesk</Product>
+    <Company>Twin Lab reference</Company>
+    <AssemblyTitle>CaseDesk case management (reference)</AssemblyTitle>
+    <Version>1.2.0</Version>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+</Project>
