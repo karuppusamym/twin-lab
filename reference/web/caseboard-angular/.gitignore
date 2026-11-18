@@ -1,0 +1,3 @@
+# Angular CLI cache and compiler output (node_modules/ and dist/ are ignored repository-wide)
+.angular/
+out-tsc/

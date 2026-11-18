@@ -66,6 +66,7 @@ class RecStep:
     after: str | None = None  # "navigation": observed at the page load it caused, not here
     caused_by_outside: dict | None = None  # {app, step}: the cause went to another application
     option_index: int | None = None  # select: the position of the option chosen
+    left: bool = False  # type: the field had lost the focus when the snapshot was taken
     dialog: dict | None = None  # dialog: {kind: confirm|alert|prompt, choice: accept|dismiss}
     files: list[dict] = field(default_factory=list)  # upload: name shape, type, size class
     download: dict | None = None  # download: {name_shape, ext}
@@ -327,6 +328,8 @@ def _extra(d: dict) -> dict:
         out["files"] = [dict(f) for f in d["files"] if isinstance(f, dict)]
     if isinstance(d.get("option_index"), int) and not isinstance(d.get("option_index"), bool):
         out["option_index"] = d["option_index"]
+    if d.get("left") is True:
+        out["left"] = True
     reason = setup_reason(d)
     if reason:
         out["setup"] = reason

@@ -60,6 +60,28 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   every remaining step passes; the damage is under "Why not pass" and in `compared`, but
   whether it should lower the status is a decision for a person. The replay loop itself was
   not run in a browser for these cases.
+## 2026-11-18 — Angular proven on a real application: the first reference for the certification matrix
+- `reference/web/caseboard-angular/`: Caseboard, a small real Angular 21.2 application with
+  synthetic data (sign-in, a route guard, a routed list with search and paging, a lazy-loaded
+  edit form on reactive forms with required-field messages, a select, a check box, radio
+  buttons and a date, a modal dialog). Its production build is committed as `site/` and served
+  by `serve.py` (Python only), so no npm is needed to run it or to test with it.
+- Three gates, run by `python reference/web/caseboard-angular/certify_local.py` and by
+  `tests/test_reference_angular.py`: DETECT (angular, 21.2.26, `ng-version`), CAPTURE (the 34
+  actions of the hand-written `expected-actions.yaml` are all in a recording of `flow.py`),
+  SELF-REPLAY (34 steps replayed against a fresh instance, 26 compared, none failed).
+- Fixed on the way, each found by the replay failing (`tests/test_recorder_spa_forms.py`, a
+  page without a framework): an address the application gives itself while it starts (Angular's
+  router, a guard's redirect) was written as a step before the load of its own page, and the
+  replay waited for it on a page not opened yet; the step before typing was snapshotted when
+  the typing ended, with the next field already marked as edited; and a field left after typing
+  (Angular marks it visited, a required field shows its message) was compared with a replay
+  that never left it: a `type` step now says `left`, and the replay leaves the field too.
+- Left open: one Angular version, zoneless, no server-side rendering, no Angular Material, no
+  HTTP call; the replay opens the address the guard led to, not the one typed; a script that
+  clicks in one instant is snapshotted before Angular renders what leaving a field changes (the
+  flow clicks like a person). The harness (`labctl certify`) is not part of this change.
+
 ## 2026-11-18 — Verdict gates from the audit: no silent PASS
 - **A misspelled category no longer hides a case.** A required case with an unknown category
   is counted under behaviour and named; every required result decides the verdict whatever

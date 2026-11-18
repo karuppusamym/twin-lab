@@ -15,7 +15,9 @@ A recording is a folder holding:
   "dom_before", "screenshot"}`, plus `frame` for an action inside a frame (its selector is then
   `iframe#x >>> button#y`, see labctl.locate), `locators` (ranked target candidates with the
   number of elements each matched), `key`/`modifiers` on a keypress, `nav` on a goto, `blank` on
-  a type step whose value was empty or spaces, and `caused_by` on a submit or navigation that a
+  a type step whose value was empty or spaces, `left` on a type step whose field no longer
+  had the focus when its after-snapshot was taken (the replay leaves the field too, so what a
+  page does on blur is there), and `caused_by` on a submit or navigation that a
   click or key press caused (see labctl.botlog.recording);
 - every step also says where it happened: `tab` (t1, t2, ... in the order the tabs opened),
   `opener` (the tab that opened it, for a popup or a link with target=_blank) and `origin` (of
@@ -437,13 +439,22 @@ LISTENER_JS = r"""
   // page shows then is not what the action led to; the next page's load is the next step), and
   // nothing is sent while the document is being torn down: no step depends on such a call.
   let eidSeq = 0;
+  let loadStep = false;  // this document's load step was written (or it has none: a blank page)
   function flush(leaving) {
     clearTimeout(timer); timer = null;
     if (!TOP || !pending.length) return Promise.resolve();
     const eids = pending.map((p) => p.eid); pending = []; first = 0;
+    // A field typed into that no longer has the focus as the snapshot is taken: what the page
+    // does when a field is left (a message for a required field, a framework marking the field
+    // as visited) is in the snapshot, so the replay must leave the field too.
+    const left = eids.filter((e) => {
+      const el = fields.get(e);
+      fields.delete(e);
+      try { return !!el && !(el.isConnected && el.matches(":focus")); } catch (err) { return false; }
+    });
     if (leaving) return Promise.resolve();
     try {
-      return window.__tlStep({eids, doc: FRAME_ID, url: location.href, ts: new Date().toISOString(),
+      return window.__tlStep({eids, left, doc: FRAME_ID, url: location.href, ts: new Date().toISOString(),
                               html: snapshot(), storage: storageInfo(), sw: !!window.__tlSW});
     } catch (e) { return Promise.resolve(); }
   }
@@ -654,6 +665,10 @@ LISTENER_JS = r"""
   function onInput(e) {
     const el = realTarget(e);
     if (!typable(el)) return;
+    // Typing is written as a step when it ends, but it changes the page from its first character
+    // (a list filtering as you type, a framework marking the field as edited): the step before
+    // it is snapshotted now, in the capture phase, before the page's own handlers see the input.
+    if (!dirty.has(el) && TOP && pending.length) flush();
     const d = dirty.get(el) || {typed: ""};
     if (el.type === "password") d.typed = null;
     else if (e.inputType && e.inputType.startsWith("delete")) d.typed = null;
@@ -661,6 +676,7 @@ LISTENER_JS = r"""
     dirty.set(el, d);
   }
   const written = new WeakMap();  // field -> the value its last type step had (in memory only)
+  const fields = new Map();  // a type step not snapshotted yet (event id) -> its field
   const valueOf = (el) => el.isContentEditable ? el.innerText : String(el.value == null ? "" : el.value);
   function emitType(el) {
     const d = dirty.get(el);
@@ -675,7 +691,10 @@ LISTENER_JS = r"""
       secret(tid, value);
       if (d.typed) extra.typed_shape = shapeOf(d.typed);
     }
-    note("type", el, extra);
+    releaseHeld();
+    const ev = make("type", el, extra);
+    emit(ev);
+    if (TOP && ev.eid) fields.set(ev.eid, el);
   }
   function emitAllTyped() { for (const el of Array.from(dirty.keys())) emitType(el); }
   function onChange(e) {
@@ -817,6 +836,11 @@ LISTENER_JS = r"""
       const orig = history[name];
       history[name] = function (...args) {
         if (!live()) return orig.apply(this, args);
+        // The address an application gives itself while it starts (a client-side router's first
+        // navigation, a route guard's redirect: Angular makes both before the load event) is
+        // part of that load, whose step has the address the page ended at. Written as a step
+        // of its own it would come before the load of its own document.
+        if (!loadStep && !eidSeq) return orig.apply(this, args);
         emitAllTyped();
         releaseHeld();
         // The old address still shows the old page: capture it before the address changes.
@@ -831,6 +855,7 @@ LISTENER_JS = r"""
   new MutationObserver(quietAgain).observe(document, {subtree: true, childList: true,
                                                       attributes: true, characterData: true});
   function loaded() {
+    loadStep = true;
     // A blank page (a new tab before its first address) is no page of the application: the
     // recorder writes that setup step itself, so it never depends on this script running there.
     if (location.protocol === "about:") return;
@@ -1598,7 +1623,12 @@ class _Steps:
             storage = None if self.last_storage.get(key) == seen else storage
             self.last_storage[key] = seen
         steps = [self.open.pop(e) for e in eids]
+        left = (
+            {str(e) for e in data.get("left") or []} if isinstance(data.get("left"), list) else ()
+        )
         for step, _ in steps:
+            if step.get("action") == "type" and step.get("_eid") in left:
+                step["left"] = True  # the field had lost the focus when the snapshot was taken
             if url:  # the page's address after the batch
                 step["url"] = url
                 if _origin(url):
