@@ -285,6 +285,18 @@ def create_app(root: Path) -> FastAPI:
 
     # --- overview --------------------------------------------------------------------------------
 
+    def run_progress(app_id, status):
+        """Use recorded facts, never configuration, as evidence that a run happened."""
+        if not status or not status.running:
+            return {}, []
+        try:
+            agent = lab_mod.agent(root, app_id)
+            info, sessions = agent.info(), agent.sessions()
+            listed = sessions if isinstance(sessions, list) else sessions.get("sessions", [])
+            return info, listed or []
+        except lab_mod.LabError:
+            return {}, []
+
     @portal.get("/", response_class=HTMLResponse)
     def overview(request: Request):
         apps = []
@@ -304,6 +316,7 @@ def create_app(root: Path) -> FastAPI:
             )
             ready = [a.id for a in users if verdicts.get(a.id, {}).get("verdict") == "READY"]
             declared = [a.id for a in users if a.expects is not None]
+            info, recorded = run_progress(app_id, lab)
             steps = guide.app_steps(
                 app_id,
                 has_evidence=bool(ev.kinds() or users or factory.flows(root, app_id)),
@@ -312,8 +325,9 @@ def create_app(root: Path) -> FastAPI:
                 running=bool(lab and lab.running),
                 automations=[a.id for a in users],
                 ready=ready,
-                has_baseline=bool(lab and lab.running),
-                sessions=len(declared),
+                has_baseline=bool(info.get("baseline")),
+                sessions=len(recorded),
+                recorded_automations=guide.completed_automations(recorded),
                 declared=declared,
             )
             apps.append({
@@ -331,34 +345,52 @@ def create_app(root: Path) -> FastAPI:
 
     @portal.get("/start", response_class=HTMLResponse)
     def start(request: Request):
-        autos = [m for _, m, _ in all_automations() if m is not None]
         app_ids = sorted({p.parent.name for p in (root / "apps").glob("*/app.yaml")}
                          | set(factory.needed_apps(root)))  # fmt: skip
         verdicts = latest_verdicts()
-        running = False
-        for app_id in app_ids:
-            model = app_model(app_id)
-            if model and model.lab and (root / "apps" / app_id / "Dockerfile").exists():
-                running = running or lab_mod.status(root, app_id).running
-        first = next((a for a in app_ids if (root / "apps" / a / "Dockerfile").exists()), None)
+        selected = request.query_params.get("app")
+        if selected and selected not in app_ids:
+            raise HTTPException(404, "Choose an application from the list")
+        first = selected or next(
+            (a for a in app_ids if (root / "apps" / a / "Dockerfile").exists()),
+            app_ids[0] if app_ids else None,
+        )
+        folder = root / "apps" / first if first else None
+        model = app_model(first) if first else None
+        built = bool(folder and (folder / "Dockerfile").exists())
+        status = lab_mod.status(root, first) if built and model and model.lab else None
+        info, recorded = run_progress(first, status)
+        users = factory.automations(root, first) if first else []
+        completed = guide.completed_automations(recorded)
         steps = guide.onboarding(
-            named=bool(_me(request)), automations=len(autos),
-            flows=len(list(repo.files_of(root, "flow"))),
-            evidence=any(factory.discover(root, a).kinds() for a in app_ids),
-            briefs=any((root / "apps" / a / "BRIEF.md").exists() for a in app_ids),
-            built=first is not None, running=running,
-            ready=any(v.get("verdict") == "READY" for v in verdicts.values()),
-            declared=any(a.expects is not None for a in autos),
-            first_app=first or (app_ids[0] if app_ids else None),
-        )  # fmt: skip
+            named=bool(_me(request)),
+            automations=len(users),
+            flows=len(factory.flows(root, first)) if first else 0,
+            evidence=bool(
+                first
+                and (factory.discover(root, first).kinds() or users or factory.flows(root, first))
+            ),
+            briefs=bool(folder and (folder / "BRIEF.md").exists()),
+            built=built,
+            running=bool(status and status.running),
+            ready=bool(users)
+            and all(verdicts.get(a.id, {}).get("verdict") == "READY" for a in users),
+            declared=bool(users)
+            and all(a.expects is not None and a.id in completed for a in users),
+            first_app=first,
+            has_baseline=bool(info.get("baseline")),
+        )
         return page(request, "start.html", steps=steps, next=guide.next_step(steps),
-                    glossary=guide.GLOSSARY)  # fmt: skip
+                    glossary=guide.GLOSSARY, app_ids=app_ids, selected_app=first)  # fmt: skip
 
     @portal.post("/me")
     def set_me(request: Request, name: str = Form("")):
         from urllib.parse import quote, urlsplit
 
-        target = urlsplit(request.headers.get("referer") or "/").path or "/"
+        referrer = urlsplit(request.headers.get("referer") or "/")
+        target = referrer.path or "/"
+        if referrer.query:
+            target += "?" + referrer.query
         clean = " ".join(name.split())[:60]
         if clean and not re.fullmatch(r"[\w .'-]+", clean):
             return back(target, "Use letters, digits, spaces, dots, dashes or apostrophes", "error")
@@ -671,6 +703,7 @@ def create_app(root: Path) -> FastAPI:
             running=bool(status and status.running), automations=[a.id for a in users],
             ready=[a.id for a in users if verdicts.get(a.id, {}).get("verdict") == "READY"],
             has_baseline=bool((lab_info or {}).get("baseline")), sessions=len(listed or []),
+            recorded_automations=guide.completed_automations(listed or []),
             declared=[a.id for a in users if a.expects is not None],
         )  # fmt: skip
         lease = (lab_info or {}).get("lease")

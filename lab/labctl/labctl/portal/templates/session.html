@@ -17,11 +17,13 @@
 
 {% if verdict %}
 <div class="card" id="verdict">
-  <h2>Verdict:
+  <h2>Database change check:
     <span class="pill {{ 'ok' if verdict.status == 'PASS' else 'err' if verdict.status == 'FAIL' else 'warn' }}">{{ verdict.status | replace('_', ' ') }}</span></h2>
-  {% if verdict.status == 'PASS' %}<p>Every row change is one <code>{{ verdict_automation }}</code> is expected to make.</p>
+  {% if verdict.status == 'PASS' %}<p>All {{ verdict.checked }} recorded row changes are allowed for <code>{{ verdict_automation }}</code>.</p>
   {% elif verdict.status == 'FAIL' %}<p>{{ verdict.reasons | join("; ") }}. Unexpected changes are marked below.</p>
   {% else %}<p class="muted">{{ verdict.reasons | join("; ") }}.</p>{% endif %}
+  <p class="small muted">This check covers allowed tables, operations, update columns and configured row limits. It does not verify that required work happened, that saved values are correct, or that the bot completed successfully. Confirm the business outcome separately.</p>
+  {% if verdict.status == 'PASS' and verdict.checked == 0 %}<p class="flash">No database changes were recorded. This may be expected for a read-only bot; for an update task, check that the bot actually completed its work.</p>{% endif %}
   {% if verdict_automation and verdict.status != 'PASS' %}
   <form method="post" action="/apps/{{ app_id }}/sessions/{{ s.session_id }}/accept" class="row"
         data-confirm="Write these changes into automations/{{ verdict_automation }}/automation.yaml as expected? Only do this after checking them.">

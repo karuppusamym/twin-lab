@@ -38,6 +38,11 @@ def next_step(steps: list[Step]) -> Step | None:
     return next((s for s in steps if s.state == "next"), None)
 
 
+def completed_automations(sessions: list[dict]) -> list[str]:
+    """An active or anonymous session does not complete a bot's first run."""
+    return sorted({s["automation"] for s in sessions if s.get("ended") and s.get("automation")})
+
+
 def app_steps(
     app_id: str,
     *,
@@ -50,11 +55,13 @@ def app_steps(
     has_baseline: bool,
     sessions: int,
     declared: list[str],
+    recorded_automations: list[str] | None = None,
 ) -> list[Step]:
     """Progress of one app, in the order the app page is laid out."""
     base = f"/apps/{app_id}"
     not_ready = [a for a in automations if a not in ready]
     undeclared = [a for a in automations if a not in declared]
+    unrecorded = [a for a in automations if a not in (recorded_automations or [])]
     steps = [
         Step("evidence", "Evidence", has_evidence,
              "Add what you know about the real app: a recording of the flow is best, the "
@@ -75,8 +82,9 @@ def app_steps(
         Step("conditions", "Conditions", False,
              "Optional: make the app slow or flaky to see how bots cope.", f"{base}#conditions",
              optional=True),
-        Step("sessions", "Sessions", sessions > 0 and not undeclared,
+        Step("sessions", "Sessions", sessions > 0 and not undeclared and not unrecorded,
              ("Record a run of each bot and accept its changes, so later runs get PASS or FAIL."
+              + (f" Still to record: {', '.join(unrecorded)}." if unrecorded else "")
               + (f" Still to accept: {', '.join(undeclared)}." if sessions and undeclared else "")),
              f"{base}#sessions", optional=not automations),
     ]  # fmt: skip
@@ -95,6 +103,7 @@ def onboarding(
     ready: bool,
     declared: bool,
     first_app: str | None,
+    has_baseline: bool = False,
 ) -> list[Step]:
     """The whole path for someone new, ticked off from what exists."""
     app = f"/apps/{first_app}" if first_app else "/"
@@ -118,10 +127,15 @@ def onboarding(
              "Start the app with its database and lab agent. You get an address bots can use.",
              f"{app}#lab"),
         Step("ready", "Check readiness", ready,
-             "Readiness tells you, per bot, READY or exactly what is missing.", "/mapping"),
+             "Readiness tells you, per bot, READY or exactly what is missing.", "/mapping",
+             optional=automations == 0),
+        Step("data", "Prepare test data", has_baseline,
+             "Load a synthetic data pack or your test workbook before recording a run.",
+             f"{app}#data"),
         Step("verdict", "Record and judge a run", declared,
              "Record a session while the bot runs, read what changed, and accept it. Every "
-             "later run is then PASS or FAIL.", f"{app}#sessions"),
+             "later run checks for unexpected database changes. Confirm the business outcome separately.",
+             f"{app}#sessions", optional=automations == 0),
     ]  # fmt: skip
     return mark(steps)
 

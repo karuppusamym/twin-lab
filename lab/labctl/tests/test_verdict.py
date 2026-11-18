@@ -123,3 +123,28 @@ def test_older_sessions_take_columns_from_the_detail():
 def test_expected_change_contract(bad):
     with pytest.raises(ValueError):
         ExpectedChange.model_validate(bad)
+
+
+def test_missing_columns_cannot_pass_a_restricted_update_rule():
+    result = verdict.judge([ch("qc_reviews", "update")], EXPECTS)
+    assert result.status == "FAIL"
+    assert "were not recorded" in result.unexpected[0]["why"]
+    assert (
+        verdict.judge(
+            [ch("qc_reviews", "update")],
+            [ExpectedChange(table="qc_reviews", ops=["update"])],
+        ).status
+        == "PASS"
+    )
+
+
+def test_separate_update_rules_explain_disallowed_combination():
+    result = verdict.judge(
+        [ch("t", "update", columns=["a", "b"])],
+        [
+            ExpectedChange(table="t", ops=["update"], columns=["a"]),
+            ExpectedChange(table="t", ops=["update"], columns=["b"]),
+        ],
+    )
+    assert result.status == "FAIL"
+    assert "no single update rule" in result.unexpected[0]["why"]

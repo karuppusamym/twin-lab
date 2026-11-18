@@ -60,11 +60,15 @@ def _why_not(change: dict[str, Any], rules: list[ExpectedChange]) -> str | None:
     if change.get("op") != "update":
         return None
     changed = {c.lower() for c in change.get("columns") or []}
+    if not changed and all(r.columns for r in same_op):
+        return f"changed columns of {change.get('table')} were not recorded; cannot check allowed columns"
     for rule in same_op:
         allowed_cols = {c.lower() for c in rule.columns}
         if not allowed_cols or changed <= allowed_cols:
             return None
     extra = sorted(changed - {c.lower() for r in same_op for c in r.columns})
+    if not extra:
+        return f"no single update rule allows columns {', '.join(sorted(changed))} of {change.get('table')}"
     return f"columns {', '.join(extra)} of {change.get('table')} are not expected to change"
 
 
