@@ -1,0 +1,67 @@
+[
+  {
+    "source": "https://the-internet.herokuapp.com/checkboxes",
+    "file": "site/checkboxes.html",
+    "sha256": "ebe661951dab855863aeab6fb6f9917fe58d6d01d1ccb61e255712506afae347"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/css/app.css",
+    "file": "site/css/app.css",
+    "sha256": "86cc46b54a3c51d1665050e2acbc7a9aea7480e8035d0a29a9436e3ac0ff8f8d"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/css/font-awesome.css",
+    "file": "site/css/font-awesome.css",
+    "sha256": "c374efba54279628793f04e10ebf5d0c1b4dbc36b3f4132d9235f01d64ca5c8e"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/css/sauce.css",
+    "file": "site/css/sauce.css",
+    "sha256": "51a0c19ec8a4f8a19ff97ac96b12f5ce0da1178d3af8e9fd874736fab8a88097"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/js/vendor/jquery-3.7.1.min.js",
+    "file": "site/js/vendor/jquery-3.7.1.min.js",
+    "sha256": "fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/js/vendor/jquery-ui-1.11.4/jquery-ui.js",
+    "file": "site/js/vendor/jquery-ui-1.11.4/jquery-ui.js",
+    "sha256": "0c8e8d7408611519ceda4e759ae9987834a17addc8f0028241ffed7fb0113612"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/js/foundation/foundation.js",
+    "file": "site/js/foundation/foundation.js",
+    "sha256": "db45b4e6aef3b1689e3ecb5bf90cfa5c9a27a032a7a9d1d2de96ad197f59684a"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/js/foundation/foundation.alerts.js",
+    "file": "site/js/foundation/foundation.alerts.js",
+    "sha256": "ebb1ea7181095ab808a5f1080c58c8b1ec13a84fcb965ab6a84bc5bd1441fa32"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/img/forkme_right_sauce.svg",
+    "file": "site/img/forkme_right_sauce.svg",
+    "sha256": "994f5efc5e3c606b6e408092512b1069b760624243bd4108657f3cd22b12ffe7"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/fonts/atkinson-hyperlegible-next.woff2",
+    "file": "site/fonts/atkinson-hyperlegible-next.woff2",
+    "sha256": "1e4cea71d75ec427581d6259fc07148a2e60d60d16cabf4b4f5360487b3f9dc3"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/fonts/fraunces.woff2",
+    "file": "site/fonts/fraunces.woff2",
+    "sha256": "48282a415ec22e31beaf0a0666e6fae0c8cbddcd0b1f6e729f27c3ade8a64e43"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/dropdown",
+    "file": "site/dropdown.html",
+    "sha256": "5f16de513b33bb7bdd9898d47000a2501ba877ade8a496cbfeccfe09f982a46e"
+  },
+  {
+    "source": "https://the-internet.herokuapp.com/add_remove_elements/",
+    "file": "site/add_remove_elements/index.html",
+    "sha256": "a1761390ed2fa03596cdbb19473af6c1c1d4f66ce5d0539f3723c435cf508066"
+  }
+]

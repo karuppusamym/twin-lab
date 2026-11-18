@@ -1,0 +1,631 @@
+{
+  "recording": "combined",
+  "base_url": "http://127.0.0.1:8738",
+  "status": "fail",
+  "steps": [
+    {
+      "seq": 1,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 1,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 2,
+      "action": "type",
+      "selector": "input#my-text-id",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 2,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#my-text-id",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 3,
+      "action": "type",
+      "selector": "textarea[name=\"my-textarea\"]",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 3,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "role textbox \"Textarea\"",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 4,
+      "action": "select",
+      "selector": "select[name=\"my-select\"]",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 4,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "label \"Dropdown (select) Open this select menu One Two Three\"",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 5,
+      "action": "uncheck",
+      "selector": "input#my-check-1",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 5,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#my-check-1",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 6,
+      "action": "check",
+      "selector": "input#my-check-2",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 6,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#my-check-2",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 7,
+      "action": "check",
+      "selector": "input#my-radio-2",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 7,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#my-radio-2",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 8,
+      "action": "click",
+      "selector": "button.btn.btn-outline-primary",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "pass",
+      "differences": [],
+      "note": "ran; no snapshot was recorded after this step to compare",
+      "target": "role button \"Submit\"",
+      "outcome": "replayed",
+      "compared": false
+    },
+    {
+      "seq": 9,
+      "action": "submit",
+      "selector": "form",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 9,
+          "element": "input#my-text-id.form-control",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "input.form-control",
+          "check": "missing",
+          "expected": 6,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "textarea.form-control",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "select.form-select",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "input#my-check-1.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "input#my-check-2.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "input#my-radio-1.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "input#my-radio-2.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "button.btn.btn-outline-primary.mt-3",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "input.form-control.form-control-color",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "input.form-range",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 9,
+          "element": "input[name='my-password']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "textarea[name='my-textarea']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "input[name='my-disabled']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "input[name='my-readonly']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "select[name='my-select']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "input[name='my-datalist']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "#my-options",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "input[name='my-file']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "input[name='my-colors']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "input[name='my-date']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 9,
+          "element": "input[name='my-range']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        }
+      ],
+      "note": null,
+      "target": "submitted by step 19",
+      "outcome": "implied",
+      "compared": true
+    },
+    {
+      "seq": 10,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/submitted-form.html?my-text=Synthetic+trial&my-password=&my-textarea=Synthetic+multi+application+test&my-readonly=Readonly+input&my-select=2&my-datalist=&my-file=&my-check=on&my-radio=on&my-colors=%23563d7c&my-date=&my-range=5&my-hidden=",
+      "status": "pass",
+      "differences": [],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 11,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 11,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 12,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 12,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 13,
+      "action": "type",
+      "selector": "input#my-text-id",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 13,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#my-text-id",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 14,
+      "action": "click",
+      "selector": "button.btn.btn-outline-primary",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "pass",
+      "differences": [],
+      "note": "ran; no snapshot was recorded after this step to compare",
+      "target": "role button \"Submit\"",
+      "outcome": "replayed",
+      "compared": false
+    },
+    {
+      "seq": 15,
+      "action": "submit",
+      "selector": "form",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 15,
+          "element": "input#my-text-id.form-control",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "input.form-control",
+          "check": "missing",
+          "expected": 6,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "textarea.form-control",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "select.form-select",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "input#my-check-1.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "input#my-check-2.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "input#my-radio-1.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "input#my-radio-2.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "button.btn.btn-outline-primary.mt-3",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "input.form-control.form-control-color",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "input.form-range",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 15,
+          "element": "input[name='my-password']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "textarea[name='my-textarea']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "input[name='my-disabled']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "input[name='my-readonly']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "select[name='my-select']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "input[name='my-datalist']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "#my-options",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "input[name='my-file']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "input[name='my-colors']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "input[name='my-date']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 15,
+          "element": "input[name='my-range']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        }
+      ],
+      "note": null,
+      "target": "submitted by step 29",
+      "outcome": "implied",
+      "compared": true
+    },
+    {
+      "seq": 16,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/submitted-form.html?my-text=Second+synthetic+visit&my-password=&my-textarea=&my-readonly=Readonly+input&my-select=Open+this+select+menu&my-datalist=&my-file=&my-check=on&my-radio=on&my-colors=%23563d7c&my-date=&my-range=5&my-hidden=",
+      "status": "pass",
+      "differences": [],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    }
+  ],
+  "coverage": {
+    "steps": 16,
+    "replayed": 16,
+    "implied": 2,
+    "compared": 14,
+    "failed": 12,
+    "skipped": 0,
+    "unresolved": 0,
+    "missing_value": 0,
+    "unsupported": 0,
+    "expected": null,
+    "captured": 16,
+    "missing_expected": []
+  },
+  "problems": [
+    "12 step(s) failed, first step 1 (goto)"
+  ],
+  "verdict": null,
+  "verdict_reasons": [],
+  "categories": {},
+  "cases": [],
+  "visual": [],
+  "visual_setup": null,
+  "baseline": null,
+  "requirements": null,
+  "first_divergence": null,
+  "fingerprint": null,
+  "artifacts": null
+}

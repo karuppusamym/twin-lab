@@ -1,0 +1,327 @@
+{
+  "recording": "combined",
+  "base_url": "http://127.0.0.1:8737",
+  "status": "fail",
+  "steps": [
+    {
+      "seq": 1,
+      "action": "goto",
+      "selector": null,
+      "url": "about:blank",
+      "status": "pass",
+      "differences": [],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 2,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 2,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 3,
+      "action": "check",
+      "selector": "input",
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 3,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "structure #checkboxes > input [0 of 2]",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 4,
+      "action": "uncheck",
+      "selector": "input",
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 4,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "structure #checkboxes > input [1 of 2]",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 5,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 5,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 6,
+      "action": "select",
+      "selector": "select#dropdown",
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 6,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#dropdown",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 7,
+      "action": "select",
+      "selector": "select#dropdown",
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 7,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#dropdown",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 8,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/add_remove_elements/",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 8,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 9,
+      "action": "click",
+      "selector": "button",
+      "url": "https://the-internet.herokuapp.com/add_remove_elements/",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 9,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "role button \"Add Element\"",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 10,
+      "action": "click",
+      "selector": "button",
+      "url": "https://the-internet.herokuapp.com/add_remove_elements/",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 10,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "role button \"Add Element\"",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 11,
+      "action": "click",
+      "selector": "button.added-manually",
+      "url": "https://the-internet.herokuapp.com/add_remove_elements/",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 11,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "structure #elements > button.added-manually [0 of 2]",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 12,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 12,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 13,
+      "action": "check",
+      "selector": "input",
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 13,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "structure #checkboxes > input [0 of 2]",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 14,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 14,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 15,
+      "action": "select",
+      "selector": "select#dropdown",
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 15,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#dropdown",
+      "outcome": "replayed",
+      "compared": true
+    }
+  ],
+  "coverage": {
+    "steps": 15,
+    "replayed": 15,
+    "implied": 0,
+    "compared": 15,
+    "failed": 14,
+    "skipped": 0,
+    "unresolved": 0,
+    "missing_value": 0,
+    "unsupported": 0,
+    "expected": null,
+    "captured": 15,
+    "missing_expected": []
+  },
+  "problems": [
+    "14 step(s) failed, first step 2 (goto)"
+  ],
+  "verdict": null,
+  "verdict_reasons": [],
+  "categories": {},
+  "cases": [],
+  "visual": [],
+  "visual_setup": null,
+  "baseline": null,
+  "requirements": null,
+  "first_divergence": null,
+  "fingerprint": null,
+  "artifacts": null
+}

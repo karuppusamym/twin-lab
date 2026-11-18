@@ -1,0 +1,37 @@
+[
+  {
+    "source": "https://www.selenium.dev/selenium/web/web-form.html",
+    "file": "site/selenium/web/web-form.html",
+    "sha256": "8d0f247da758b3c5cb21983f1fc9a431e3806f9c7dc511d8e8fe08b137238aa8"
+  },
+  {
+    "source": "https://cdn.jsdelivr.net/npm/bootstrap@5.1.0/dist/css/bootstrap.min.css",
+    "file": "site/_assets/2364c4caac2f/bootstrap.min.css",
+    "sha256": "cfc391e34328c09f0680ae8ff3d63e86224ae7e71c973147ccb84540b2fdd9b8"
+  },
+  {
+    "source": "https://code.jquery.com/jquery-3.6.0.min.js",
+    "file": "site/_assets/a3133eb07bfa/jquery-3.6.0.min.js",
+    "sha256": "ff1523fb7389539c84c65aba19260648793bb4f5e29329d2ee8804bc37a3fe6e"
+  },
+  {
+    "source": "https://cdn.jsdelivr.net/npm/bootstrap@5.1.0/dist/js/bootstrap.bundle.min.js",
+    "file": "site/_assets/0e671cc04df2/bootstrap.bundle.min.js",
+    "sha256": "2aebc2552d7dadf4e3a0b80cc830c274e91146584dad8e29b04338b9ecedb363"
+  },
+  {
+    "source": "https://unpkg.com/bootstrap-datepicker@1.9.0/dist/js/bootstrap-datepicker.min.js",
+    "file": "site/_assets/9f7e5e79397e/bootstrap-datepicker.min.js",
+    "sha256": "6ea55ea86749ee1fe560fabac6b3effd81b33046fa74dc657e24d41d28110a9f"
+  },
+  {
+    "source": "https://unpkg.com/bootstrap-datepicker@1.9.0/dist/css/bootstrap-datepicker3.min.css",
+    "file": "site/_assets/506b52cb0eb2/bootstrap-datepicker3.min.css",
+    "sha256": "14039a5d3a65f74fcaf1c5e649db2c91b40dde7298ba5842a4f6dc17319358a2"
+  },
+  {
+    "source": "https://www.selenium.dev/selenium/web/submitted-form.html",
+    "file": "site/selenium/web/submitted-form.html",
+    "sha256": "99ac3b837ce1468bcad56dd21c327bedce604cbef4985bbdcddd16c20f8f72c7"
+  }
+]

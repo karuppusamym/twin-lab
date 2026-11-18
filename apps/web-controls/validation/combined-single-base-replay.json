@@ -1,0 +1,762 @@
+{
+  "recording": "combined",
+  "base_url": "http://127.0.0.1:8737",
+  "status": "blocked",
+  "steps": [
+    {
+      "seq": 1,
+      "action": "goto",
+      "selector": null,
+      "url": "about:blank",
+      "status": "pass",
+      "differences": [],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 2,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 2,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 3,
+      "action": "check",
+      "selector": "input",
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 3,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "structure #checkboxes > input [0 of 2]",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 4,
+      "action": "uncheck",
+      "selector": "input",
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 4,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "structure #checkboxes > input [1 of 2]",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 5,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 5,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 6,
+      "action": "select",
+      "selector": "select#dropdown",
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 6,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#dropdown",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 7,
+      "action": "select",
+      "selector": "select#dropdown",
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 7,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "#dropdown",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 8,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/add_remove_elements/",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 8,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 9,
+      "action": "click",
+      "selector": "button",
+      "url": "https://the-internet.herokuapp.com/add_remove_elements/",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 9,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "role button \"Add Element\"",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 10,
+      "action": "click",
+      "selector": "button",
+      "url": "https://the-internet.herokuapp.com/add_remove_elements/",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 10,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "role button \"Add Element\"",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 11,
+      "action": "click",
+      "selector": "button.added-manually",
+      "url": "https://the-internet.herokuapp.com/add_remove_elements/",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 11,
+          "element": "a.home-link",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "note": null,
+      "target": "structure #elements > button.added-manually [0 of 2]",
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 12,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "fail",
+      "differences": [
+        {
+          "step": 12,
+          "element": "input#my-text-id.form-control",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "input.form-control",
+          "check": "missing",
+          "expected": 6,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "textarea.form-control",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "a",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "select.form-select",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "input#my-check-1.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "input#my-check-2.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "input#my-radio-1.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "input#my-radio-2.form-check-input",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "button.btn.btn-outline-primary.mt-3",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "input.form-control.form-control-color",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "input.form-range",
+          "check": "missing",
+          "expected": 1,
+          "actual": 0
+        },
+        {
+          "step": 12,
+          "element": "input[name='my-password']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "textarea[name='my-textarea']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "input[name='my-disabled']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "input[name='my-readonly']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "select[name='my-select']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "input[name='my-datalist']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "#my-options",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "input[name='my-file']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "input[name='my-colors']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "input[name='my-date']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "step": 12,
+          "element": "input[name='my-range']",
+          "check": "visibility",
+          "expected": true,
+          "actual": false
+        }
+      ],
+      "note": null,
+      "target": null,
+      "outcome": "replayed",
+      "compared": true
+    },
+    {
+      "seq": 13,
+      "action": "type",
+      "selector": "input#my-text-id",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "blocked",
+      "differences": [
+        {
+          "step": 13,
+          "element": "input#my-text-id",
+          "check": "target",
+          "expected": "type",
+          "actual": "no candidate matched exactly one element: #my-text-id: matched 0; role textbox \"Text input\": matched 0; label \"Text input\": matched 0; structure body > main.flex-shrink-2 > div.container > form > div.row > div.col-md-4.py-2 > label.form-label > input.form-control [0 of 8]: matched 0 (8 when recorded); css input#my-text-id: matched 0"
+        }
+      ],
+      "note": "no candidate matched exactly one element: #my-text-id: matched 0; role textbox \"Text input\": matched 0; label \"Text input\": matched 0; structure body > main.flex-shrink-2 > div.container > form > div.row > div.col-md-4.py-2 > label.form-label > input.form-control [0 of 8]: matched 0 (8 when recorded); css input#my-text-id: matched 0",
+      "target": null,
+      "outcome": "unresolved",
+      "compared": false
+    },
+    {
+      "seq": 14,
+      "action": "type",
+      "selector": "textarea[name=\"my-textarea\"]",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 15,
+      "action": "select",
+      "selector": "select[name=\"my-select\"]",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 16,
+      "action": "uncheck",
+      "selector": "input#my-check-1",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 17,
+      "action": "check",
+      "selector": "input#my-check-2",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 18,
+      "action": "check",
+      "selector": "input#my-radio-2",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 19,
+      "action": "click",
+      "selector": "button.btn.btn-outline-primary",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 20,
+      "action": "submit",
+      "selector": "form",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 21,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/submitted-form.html?my-text=Synthetic+trial&my-password=&my-textarea=Synthetic+multi+application+test&my-readonly=Readonly+input&my-select=2&my-datalist=&my-file=&my-check=on&my-radio=on&my-colors=%23563d7c&my-date=&my-range=5&my-hidden=",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 22,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 23,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 24,
+      "action": "check",
+      "selector": "input",
+      "url": "https://the-internet.herokuapp.com/checkboxes",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 25,
+      "action": "goto",
+      "selector": null,
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 26,
+      "action": "select",
+      "selector": "select#dropdown",
+      "url": "https://the-internet.herokuapp.com/dropdown",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 27,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 28,
+      "action": "type",
+      "selector": "input#my-text-id",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 29,
+      "action": "click",
+      "selector": "button.btn.btn-outline-primary",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 30,
+      "action": "submit",
+      "selector": "form",
+      "url": "https://www.selenium.dev/selenium/web/web-form.html",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    },
+    {
+      "seq": 31,
+      "action": "goto",
+      "selector": null,
+      "url": "https://www.selenium.dev/selenium/web/submitted-form.html?my-text=Second+synthetic+visit&my-password=&my-textarea=&my-readonly=Readonly+input&my-select=Open+this+select+menu&my-datalist=&my-file=&my-check=on&my-radio=on&my-colors=%23563d7c&my-date=&my-range=5&my-hidden=",
+      "status": "skipped",
+      "differences": [],
+      "note": "not run: the replay stopped at an earlier step",
+      "target": null,
+      "outcome": "not_run",
+      "compared": false
+    }
+  ],
+  "coverage": {
+    "steps": 31,
+    "replayed": 12,
+    "implied": 0,
+    "compared": 12,
+    "failed": 11,
+    "skipped": 18,
+    "unresolved": 1,
+    "missing_value": 0,
+    "unsupported": 0,
+    "expected": null,
+    "captured": 31,
+    "missing_expected": []
+  },
+  "problems": [
+    "step 13 (type) BLOCKED: no candidate matched exactly one element: #my-text-id: matched 0; role textbox \"Text input\": matched 0; label \"Text input\": matched 0; structure body > main.flex-shrink-2 > div.container > form > div.row > div.col-md-4.py-2 > label.form-label > input.form-control [0 of 8]: matched 0 (8 when recorded); css input#my-text-id: matched 0",
+    "11 step(s) failed, first step 2 (goto)"
+  ],
+  "verdict": "BLOCKED",
+  "verdict_reasons": [
+    "replay BLOCKED",
+    "no required acceptance case ran: structure alone is never a scoped PASS"
+  ],
+  "categories": {
+    "capture": {
+      "status": "NOT_DECLARED",
+      "required_passed": 0,
+      "required_total": 0,
+      "optional_passed": 0,
+      "optional_total": 0,
+      "note": "no expected action list was declared"
+    },
+    "replay": {
+      "status": "BLOCKED",
+      "required_passed": 1,
+      "required_total": 31,
+      "optional_passed": 0,
+      "optional_total": 0,
+      "note": null
+    },
+    "behaviour": {
+      "status": "NOT_DECLARED",
+      "required_passed": 0,
+      "required_total": 0,
+      "optional_passed": 0,
+      "optional_total": 0,
+      "note": null
+    },
+    "data": {
+      "status": "NOT_DECLARED",
+      "required_passed": 0,
+      "required_total": 0,
+      "optional_passed": 0,
+      "optional_total": 0,
+      "note": null
+    },
+    "appearance": {
+      "status": "NOT_DECLARED",
+      "required_passed": 0,
+      "required_total": 0,
+      "optional_passed": 0,
+      "optional_total": 0,
+      "note": null
+    }
+  },
+  "cases": [],
+  "visual": [],
+  "visual_setup": null,
+  "baseline": {
+    "file": null,
+    "empty": true,
+    "source_requests_blocked": 0
+  },
+  "requirements": {
+    "scope": [],
+    "excluded": [],
+    "evidence_backed": [],
+    "assumed": [
+      "the recording is complete (no expected action list was declared)"
+    ],
+    "unobserved": [],
+    "unsupported": []
+  },
+  "first_divergence": {
+    "step": 2,
+    "kind": "step",
+    "what": "goto",
+    "locator": null,
+    "state": "step 2: a.home-link missing (recorded: 1, live: 0)",
+    "before": null,
+    "after": null,
+    "diff": null,
+    "requests": []
+  },
+  "fingerprint": {
+    "version": 1,
+    "replayed_at": "2026-11-18T04:08:21+00:00",
+    "recording": {
+      "id": "combined",
+      "path": "evidence/multi-app-trial/combined",
+      "digest": "be2e522380b4",
+      "source_origin": null,
+      "captured_at": "2026-11-18T04:03:44+00:00",
+      "steps": 31
+    },
+    "files": {
+      "bindings": {
+        "path": null,
+        "digest": null
+      },
+      "acceptance": {
+        "path": null,
+        "digest": null
+      },
+      "baseline": {
+        "path": null,
+        "digest": null
+      },
+      "visual": {
+        "path": null,
+        "digest": null
+      }
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "143.0.7499.4"
+    },
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    }
+  },
+  "artifacts": null
+}
