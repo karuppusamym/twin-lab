@@ -199,6 +199,29 @@ help-desk fixture whose pages are filled by a JSON API), then the gaps were clos
 - `tools/audit_replication_gates.py` is the audit's probe; it exits 0 now. Tests:
   `test_audit_gates.py`.
 
+## 2026-11-18 — Link check: where the links nobody clicked really lead
+- `labctl evidence check-links <recording> [--yes] [--max N] [--delay-ms M] [--storage-state F]`
+  (`labctl/linkcheck.py`) collects every link target the snapshots hold and the recording never
+  visited (`<a>`, `<area>`, GET `<form action>`, `<iframe src>`, `window.open`/`location.href`
+  in inline handlers), one per address pattern, and asks the real application with HEAD (GET
+  when HEAD is refused, and to read an HTML page's title). Opt-in: without `--yes` it only lists
+  the plan; nothing else in the lab runs it.
+- Never asked: an address that looks like it changes something (logout, delete, cancel, approve,
+  pay, ...), a query carrying an action, a token or session id, `mailto:`/`tel:`/`javascript:`/
+  `data:`, downloads, POST forms, any origin the recording did not use. Each skip has its reason.
+  One request a second by default, at most 50 links, a timeout per request, stop on 429 or 503.
+  Anonymous unless the recording's saved browser state is passed; no cookie value, token or
+  body is written.
+- `<recording>/link-check.json` says per link where it was seen, the final status and redirect
+  chain (as patterns), sign-in, content type, masked title and heading, and whether it has the
+  structure of a recorded screen. An unvisited HTML page is kept as a sanitised snapshot
+  (`link-check/pages/`) after the look's data checks; a failed check keeps only title and heading.
+- The navigation map uses it: "leads to a page *Order history* not recorded", "leads to the
+  sign-in page", "missing (404) in the real application: keep the link, answer 404". The brief
+  lists pages that exist but were not recorded; their snapshots travel as
+  `apps/<app>/unrecorded/*.html`, never mixed with recorded screens. Without the file nothing
+  changes. Tests: `test_linkcheck.py`.
+
 ## 2026-11-18 — The build package carries the look of the application
 - A rebuilt application did not look like the original: a builder got value-free page snapshots
   and nothing else. Style sheets delivered as files were not carried, no font was named, no
