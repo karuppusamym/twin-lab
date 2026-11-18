@@ -168,6 +168,13 @@ def _structure_words(raw: dict, labels: set[str]) -> set[str]:
     return out
 
 
+def _is_header(n: dict) -> bool:
+    kids = n.get("children") or []
+    return n.get("type") in ("Header", "HeaderItem") or any(
+        k.get("type") in ("Header", "HeaderItem") for k in kids
+    )
+
+
 def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None = None) -> dict:
     """The value-free copy of a raw window tree (see the module docstring). `known` holds words
     already seen as data in this recording (values, and names of rows and items); data met here
@@ -180,7 +187,7 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
     if structure is not None:
         structure |= struct
         struct = structure
-    message_box = (raw.get("cls") or "") == "#32770"
+    message_box = (raw.get("cls") or "") == "#32770" or bool(raw.get("message_box"))
 
     def walk(n: dict, data: bool, combo: bool) -> dict:
         t = n.get("type") or "Custom"
@@ -214,7 +221,7 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
                         seen.update(words(name))
                     out["name"] = shape(name)
                     out["name_is"] = "data"
-        for key in ("cls", "fw", "access_key", "accel"):
+        for key in ("cls", "fw", "access_key", "accel", "role", "message_box"):
             if n.get(key):
                 out[key] = n[key]
         if n.get("help"):
@@ -248,7 +255,10 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
                 kids.append(walk(c, not kept, kept))
             out["children"] = kids
             return out
-        if children:
+        if children and t in ("Table", "DataGrid") and not data:
+            # A grid's cells are data; its column headers (and a header row) are structure.
+            out["children"] = [walk(c, not _is_header(c), False) for c in children]
+        elif children:
             out["children"] = [walk(c, inside and not combo, combo) for c in children]
         if n.get("truncated"):
             out["truncated"] = n["truncated"]

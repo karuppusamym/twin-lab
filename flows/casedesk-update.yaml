@@ -1,0 +1,16 @@
+id: casedesk-update
+app: casedesk
+requested_by: Twin Lab desktop round (reference app CaseDesk)
+purpose: >-
+  A bot signs in to the CaseDesk desktop client, finds a case, opens it, changes its status and
+  saves it. Built from the UI Automation recording of the reference WinForms app.
+steps:
+  - screen: Sign in
+    do: enter user name and password, press Sign in
+  - screen: CaseDesk - Cases
+    do: type a case number in the search box, press Enter, refresh from the Case menu, press Open
+  - screen: Case X-9999
+    do: write a summary, choose a status, tick Urgent, press Save
+    rules:
+      - A resolved or closed case needs a summary of at least 10 characters
+evidence: [desktop:casedesk-flow]

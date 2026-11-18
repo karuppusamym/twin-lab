@@ -470,7 +470,7 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
     model.evidence += [e for e in part.evidence if e.id not in {x.id for x in model.evidence}]
     model.problems += [p for p in part.problems if p not in model.problems]
     model.flows = _union(model.flows, part.flows)
-    if not model.stack.frontend and not model.stack.backend:
+    if not model.stack.frontend and not model.stack.backend and not model.stack.desktop:
         model.stack = part.stack
     else:  # a recording's detected server technology and libraries add to a stack read from source
         if part.stack.server and not model.stack.server:

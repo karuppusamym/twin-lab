@@ -36,6 +36,27 @@ FIELD_PREFIX = re.compile(r"^(txt|cbo|cmb|ddl|chk|cb|rb|rdo|opt|lst|dtp|num|nud|
                           r"lbl|dgv|grd|grid)(?=[A-Z0-9_])")  # fmt: skip
 
 
+SQL_RESERVED = {
+    "case",
+    "order",
+    "user",
+    "group",
+    "table",
+    "select",
+    "where",
+    "from",
+    "index",
+    "key",
+    "check",
+    "default",
+    "references",
+    "column",
+    "end",
+    "when",
+    "values",
+}
+
+
 class Recording:
     """A desktop recording folder, read."""
 
@@ -231,7 +252,7 @@ def analyse(app: str, path: Path) -> AppModel:  # noqa: C901 - one pass over the
         if s.get("action") != "window_open":
             continue
         tree = rec.tree(s.get("tree")) or {}
-        if tree.get("cls") != "#32770":
+        if tree.get("cls") != "#32770" and not tree.get("message_box"):
             continue
         text = " ".join(node["name"] for node, _a, _i in locator.walk(tree)
                         if node.get("type") == "Text" and node.get("name_is") == "message")  # fmt: skip
@@ -252,6 +273,9 @@ def analyse(app: str, path: Path) -> AppModel:  # noqa: C901 - one pass over the
             where=[screen] if screen else [], basis="observed", **{"from": [ev]}))  # fmt: skip
         if acc is not None:
             acc["messages"].append(text)
+        box = by_key.get((s.get("window") or {}).get("selector"))
+        if box is not None and screen:
+            box["owner"] = screen
 
     # -- screens and elements --------------------------------------------------------------------
     tables: dict[str, dict] = {}
@@ -261,7 +285,8 @@ def analyse(app: str, path: Path) -> AppModel:  # noqa: C901 - one pass over the
         w = acc["window"]
         props = w.get("props") or {}
         name = _title(acc)
-        if props.get("ClassName") == "#32770" and not props.get("AutomationId"):
+        boxed = any(t.get("message_box") for t in acc["trees"])
+        if (props.get("ClassName") == "#32770" and not props.get("AutomationId")) or boxed:
             kind = "message box"
         else:
             kind = "window"
@@ -357,6 +382,12 @@ def analyse(app: str, path: Path) -> AppModel:  # noqa: C901 - one pass over the
             i["accel"] for m in menus for i in m["items"] if i.get("accel")})  # fmt: skip
         access = sorted({f"{e.label}: {e.uia.get('access_key')}" for e in elements.values()
                          if e.uia and e.uia.get("access_key") and e.label})  # fmt: skip
+        desktop_owner = None
+        if kind == "message box":
+            # Its own screen, named after its title and kind (titles repeat: the sign-in dialog
+            # and its message box are both "Sign in"); needed when the window that opens it is.
+            desktop_owner = acc.get("owner")
+            name = f"{name} (message box)"
         desktop = {"kind": kind, "window": {"selector": w.get("selector"), "props": props,
                                             "process": _process_of(acc),
                                             "uipath": locator.to_uipath(w.get("selector") or "",
@@ -366,7 +397,7 @@ def analyse(app: str, path: Path) -> AppModel:  # noqa: C901 - one pass over the
                    "tab_order_seen": list(dict.fromkeys(acc["tab"])),
                    "keys_seen": list(dict.fromkeys(acc["keys"])), "shortcuts": shortcuts,
                    "access_keys": access, "messages": acc["messages"],
-                   "snapshots": len(acc["trees"])}  # fmt: skip
+                   "snapshots": len(acc["trees"]), "opened_from": desktop_owner}  # fmt: skip
         aliases = (
             [props["AutomationId"]]
             if props.get("AutomationId") and props["AutomationId"] != name
@@ -380,6 +411,8 @@ def analyse(app: str, path: Path) -> AppModel:  # noqa: C901 - one pass over the
             gid = locator.parse(g["selector"]).get("AutomationId")
             base = field_name(gid) or snake(name) or "grid"
             tname = singular(base)
+            if tname in SQL_RESERVED:  # `case`, `order`, `user`: a table name the DDL cannot use
+                tname = base if base not in SQL_RESERVED else f"{base}_record"
             t = tables.setdefault(tname, {"columns": {}, "screens": {name}, "grid": g["selector"]})
             for i, col in enumerate(g["columns"]):
                 cname = snake(col)
@@ -394,6 +427,7 @@ def analyse(app: str, path: Path) -> AppModel:  # noqa: C901 - one pass over the
     # A detail window named after a table (its title's first word) adds its fields as columns.
     for screen in model.screens:
         word = singular(snake((screen.name or "").split(" ")[0]))
+        word = next((t for t in tables if singular(t) == word or t == word), word)
         if word not in tables or screen.name in tables[word]["screens"]:
             continue
         cols = tables[word]["columns"]

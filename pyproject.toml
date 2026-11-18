@@ -53,6 +53,9 @@ labctl = ["portal/templates/*.html", "portal/static/*"]
 [tool.pytest.ini_options]
 testpaths = ["lab/labctl/tests", "reference/case-workbench/backend/tests", "lab/lab-agent/tests"]
 pythonpath = ["lab/labctl", "reference/case-workbench/backend", "lab/lab-agent"]
+markers = [
+    "desktop_gui: starts reference desktop apps and clicks in them (Windows; TWINLAB_DESKTOP_GUI=1)",
+]
 
 [tool.ruff]
 line-length = 100

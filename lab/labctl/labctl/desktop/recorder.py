@@ -258,7 +258,8 @@ class Recorder:
         self.last_combo: tuple[dict, float] | None = None  # the combo box last expanded
         self.opened_at: dict[int, float] = {}  # window -> when it was first seen
         self.last_window: dict = {"selector": None, "title": None, "props": {}}
-        self.combo_items: dict[tuple, dict] = {}  # combo box runtime id -> its items (or count)
+        self.combo_items: dict[tuple, dict] = {}
+        self.pending_items: dict | None = None  # items of the drop-down list seen last
         self.pending: list[dict] = []
         self.last_activity = 0.0
         self.focus: dict | None = None
@@ -482,19 +483,24 @@ class Recorder:
         """A combo box's drop-down list opened: its items, kept as a code list when the rule
         allows (labctl.desktop.privacy.code_list), else only counted."""
         raw = self.win.capture(hwnd)
-        if raw is None or self.last_combo is None:
+        if raw is None:
             return
         names = [
             n.get("name") or "" for n, _a, _i in locator.walk(raw) if n.get("type") == "ListItem"
         ]
-        rid = tuple(self.last_combo[0].get("rid") or ())
         if names and privacy.code_list(names, self.known):
             kept = [privacy.keep_text(n) for n in names]
-            self.combo_items[rid] = {"items": kept}
+            found = {"items": kept}
             for n in kept:
                 self.structure |= privacy.words(n)
         elif names:
-            self.combo_items[rid] = {"items_are": "data", "item_count": len(names)}
+            found = {"items_are": "data", "item_count": len(names)}
+        else:
+            return
+        # The list can be seen before the expand event that opened it is handled.
+        self.pending_items = found
+        if self.last_combo is not None:
+            self.combo_items[tuple(self.last_combo[0].get("rid") or ())] = found
 
     def _owner_window(self, popup: int) -> int:
         own = self.win.owner(popup)
@@ -577,6 +583,9 @@ class Recorder:
             action = "expand" if state == "expanded" else "collapse"
             if desc.get("type") == "ComboBox":
                 self.last_combo = (desc, ev["t"])
+                rid = tuple(desc.get("rid") or ())
+                if self.pending_items and rid not in self.combo_items:
+                    self.combo_items[rid] = self.pending_items  # its list was seen first
             self._add({**base, "kind": action, "via": "uia-property"})
         elif kind == "select":
             self._add({**base, "kind": "select", "via": "uia-selection"})
@@ -812,6 +821,10 @@ class Recorder:
                 step["typed_shape"] = a["shape"]
         elif kind in ("toggle",):
             step["state"] = a.get("state")
+        elif kind == "select" and desc and a.get("item") is not None:
+            # The item is already known (a tree diff saw the combo box show it).
+            step["item"], step["item_is"] = a["item"], a.get("item_is", "data")
+            step["container"] = step["selector"]
         elif kind == "select" and desc:
             types = desc.get("ancestor_types") or []
             popup = desc.get("window") in self.popup_owner or not types
@@ -834,7 +847,7 @@ class Recorder:
                 step["item"], step["item_is"] = (step["target"] or {}).get("name"), "data"
                 step["container"] = self._container(desc, [before, snap])
         elif kind in ("expand", "collapse") and desc and desc.get("type") == "ComboBox":
-            found = self.combo_items.get(tuple(desc.get("rid") or ()))
+            found = self.combo_items.get(tuple(desc.get("rid") or ())) or self.pending_items
             if found is None:
                 names = win.item_names(win.by_rid(hwnd, tuple(desc.get("rid") or ())))
                 if names and privacy.code_list(names, self.known):
@@ -963,7 +976,7 @@ def _wait_window(pids: set[int], timeout: float) -> bool:
 
 def attach(out_dir: Path, *, pid: int | None = None, process: str | None = None,
            title: str | None = None, script: Callable[[set[int]], None] | None = None,
-           **kw) -> Path:  # fmt: skip
+           recorder_cls=None, **kw) -> Path:  # fmt: skip
     """Record an application that is already running, found by pid, executable name or a
     regular expression on a window title. It is left running when the recording stops."""
     require()
@@ -978,12 +991,12 @@ def attach(out_dir: Path, *, pid: int | None = None, process: str | None = None,
         pids |= set(win.pids_by_title(title))
     if not pids:
         raise RuntimeError("no running process matches: give --pid, --process or --title")
-    return _run(Path(out_dir), pids, script, **kw)
+    return _run(Path(out_dir), pids, script, recorder_cls, **kw)
 
 
 def record(exe: str, out_dir: Path, *, args: list[str] | None = None,
            script: Callable[[set[int]], None] | None = None, close: bool = True,
-           wait: float = 20.0, **kw) -> Path:  # fmt: skip
+           wait: float = 20.0, recorder_cls=None, **kw) -> Path:  # fmt: skip
     """Start `exe` and record it until it exits (or Ctrl+C). With `script(pids)`, the script
     drives the application while it is recorded (scripted evidence runs and tests); the
     recording stops when the script returns. The application is closed at the end when
@@ -993,7 +1006,7 @@ def record(exe: str, out_dir: Path, *, args: list[str] | None = None,
     try:
         if not _wait_window({proc.pid}, wait):
             raise RuntimeError(f"{Path(exe).name} showed no window within {wait:.0f} s")
-        return _run(Path(out_dir), {proc.pid}, script, **kw)
+        return _run(Path(out_dir), {proc.pid}, script, recorder_cls, **kw)
     finally:
         if close and proc.poll() is None:
             proc.terminate()
@@ -1003,9 +1016,10 @@ def record(exe: str, out_dir: Path, *, args: list[str] | None = None,
                 proc.kill()
 
 
-def _run(out: Path, pids: set[int], script, **kw) -> Path:
+def _run(out: Path, pids: set[int], script, recorder_cls=None, **kw) -> Path:
+    recorder_cls = recorder_cls or Recorder
     if script is None:
-        return Recorder(out, pids, **kw).run()
+        return recorder_cls(out, pids, **kw).run()
     done = threading.Event()
     failure: list[BaseException] = []
 
@@ -1030,7 +1044,7 @@ def _run(out: Path, pids: set[int], script, **kw) -> Path:
 
     t = threading.Thread(target=driver, daemon=True, name="twinlab-desktop-script")
     t.start()
-    path = Recorder(out, pids, stop=done.is_set, **kw).run()
+    path = recorder_cls(out, pids, stop=done.is_set, **kw).run()
     t.join(5)
     if failure:
         raise failure[0]

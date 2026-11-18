@@ -58,6 +58,13 @@ def _controls(tree: dict) -> list[tuple[dict, tuple, int]]:
     return out
 
 
+def _named(path: list[str]) -> list[str]:
+    """The steps of an ancestor path that name a control (AutomationId or Name). Unnamed
+    containers in between (Java's root pane, layered pane and panels; WPF's borders) are left
+    out: toolkits add and reorder them, bots do not anchor on them."""
+    return [p for p in path if "AutomationId=" in p or "Name=" in p]
+
+
 def _rows(node: dict) -> int:
     n = 0
     for c in node.get("children") or []:
@@ -86,10 +93,12 @@ def compare_trees(recorded: dict, live: dict, step: int = 0,
         sel = loc["selector"]
         scoped = "Index=" in sel
         hits = locator.find(live, sel, loc["path"] if scoped else None)
-        if loc.get("ambiguous") and len(hits) > 1:
-            # The real application is ambiguous here too: a bot meets the same; say so once.
-            diffs.append(Difference(step=step, element=sel, check="ambiguous",
-                                    expected=loc["matches"], actual=len(hits)))  # fmt: skip
+        if loc.get("ambiguous"):
+            # Ambiguous in the real application already (the brief lists it): a difference only
+            # when the demo app has another number of matches.
+            if len(hits) != loc["matches"]:
+                diffs.append(Difference(step=step, element=sel, check="ambiguous",
+                                        expected=loc["matches"], actual=len(hits)))  # fmt: skip
             continue
         if not hits:
             diffs.append(Difference(step=step, element=sel, check="missing", expected=1, actual=0))
@@ -106,8 +115,11 @@ def compare_trees(recorded: dict, live: dict, step: int = 0,
             if a and a != b:
                 diffs.append(Difference(step=step, element=sel, check="changed",
                                         expected=f"{label}={a}", actual=f"{label}={b}"))  # fmt: skip
+        if node.get("type") == "MenuItem":
+            continue  # menu items: present or not; where an open menu lists them, and whether it
+            # is open, depends on timing (Java lists them under the menu and in its popup)
         live_path = [locator.step_of(a, a.get("idx", 0)) for a in anc]
-        if live_path != loc["path"]:
+        if _named(live_path) != _named(loc["path"]):
             diffs.append(Difference(step=step, element=sel, check="changed",
                                     expected=" > ".join(loc["path"]),
                                     actual=" > ".join(live_path)))  # fmt: skip

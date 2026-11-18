@@ -254,6 +254,14 @@ def scope(
         same = [r for r in model.routes if r.method == method]
         return src.best_match(path, same, key=lambda r: r.path)
 
+    # A desktop message box is needed when the window whose action opens it is.
+    needed_names = {s.name for s in model.screens if any(f.startswith(NEED) for f in s.from_)}
+    for screen in model.screens:
+        opener = (screen.desktop or {}).get("opened_from")
+        if opener in needed_names and not any(f.startswith(NEED) for f in screen.from_):
+            screen.from_ = screen.from_ + [f for s in model.screens if s.name == opener
+                                           for f in s.from_ if f.startswith(NEED)]  # fmt: skip
+
     # Screens somebody needs, and the API calls they make.
     for screen in model.screens:
         need = [f for f in screen.from_ if f.startswith(NEED)]
@@ -358,6 +366,22 @@ def scope(
             if listed & set(table.from_):
                 _add(brief.tables, table.name,
                      f"may be read by {names}: no source code shows which tables these screens use")  # fmt: skip
+    # A desktop window shows its data in grids and fields, not through routes: the tables read
+    # from the same desktop recording are what its in-scope windows show.
+    for scope_ in brief.screens:
+        if scope_.screen.surface != "desktop":
+            continue
+        rec_ids = {f for f in scope_.screen.from_ if f.startswith("desktop:")}
+        d = scope_.screen.desktop or {}
+        first = (scope_.screen.name or "").split(" ")[0].lower().rstrip("s")
+        for table in model.tables:
+            shows = bool(d.get("grids")) or first == table.name.lower().rstrip("s")
+            if rec_ids & set(table.from_) and shows:
+                _add(
+                    brief.tables,
+                    table.name,
+                    f"shown in window {scope_.screen.name} (grid or fields)",
+                )
     for table in model.tables:
         callers = _by([f for f in table.from_ if f.startswith("automation:")])
         if callers:

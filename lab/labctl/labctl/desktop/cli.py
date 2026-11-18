@@ -71,6 +71,42 @@ def record(
     _done(path)
 
 
+@app.command("record-java")
+def record_java(
+    classpath: str = typer.Option(..., "--cp", help="The Java application's class path."),
+    main: str = typer.Option(..., "--main", help="Its main class."),
+    java: Path = typer.Option(
+        None, "--java", help="java.exe (default: TWINLAB_JAVA_HOME or JAVA_HOME)."
+    ),
+    app_id: str = typer.Option(None, "--app", help="Application id: evidence/<app>/<name>/."),
+    name: str = typer.Option(None, help="Recording name."),
+    out: Path = typer.Option(None, help="Recording folder."),
+    max_minutes: float = typer.Option(30.0, help="Stop after this many minutes."),
+) -> None:
+    """Start a Java Swing/AWT application with the Access Bridge loaded for this run only, and
+    record it through the bridge (labctl.desktop.java)."""
+    from labctl.desktop import DesktopUnavailable
+    from labctl.desktop import java as djava
+
+    exe = str(java or _java_exe())
+    path = _out(out, app_id, name)
+    typer.echo(f"recording {main}; use the application, then close it or press Ctrl+C")
+    try:
+        djava.record(djava.java_command(exe, classpath, main), path, max_seconds=max_minutes * 60)
+    except (DesktopUnavailable, RuntimeError) as exc:
+        _fail(exc)
+    _done(path)
+
+
+def _java_exe() -> Path:
+    import os
+
+    for var in ("TWINLAB_JAVA_HOME", "JAVA_HOME"):
+        if os.environ.get(var):
+            return Path(os.environ[var]) / "bin" / "java.exe"
+    return Path("java.exe")
+
+
 @app.command()
 def attach(
     process: str = typer.Option(None, help="Executable name of a running application."),
@@ -167,6 +203,9 @@ def verify(
         "value matters (a password, a search key). Repeat; several for one id are typed in order.",
     ),  # fmt: skip
     save: bool = typer.Option(True, help="Keep the report where readiness reads it."),
+    java_main: str = typer.Option(
+        None, "--java-main", help="A Java app: its main class (then --exe is its class path)."
+    ),  # fmt: skip
 ) -> None:
     """Start the built app, replay each recording, compare every window's controls."""
     from labctl.behaviour import fidelity
@@ -188,7 +227,13 @@ def verify(
     worst = 0
     for rec in recs:
         try:
-            report = dverify.verify(str(exe), rec, values=values)
+            if java_main:
+                from labctl.desktop import java as djava
+
+                cmd = djava.java_command(str(_java_exe()), str(exe), java_main)
+                report = djava.verify(cmd, rec, values=values)
+            else:
+                report = dverify.verify(str(exe), rec, values=values)
         except DesktopUnavailable as exc:
             _fail(exc)
         typer.echo(report.markdown())

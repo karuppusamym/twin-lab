@@ -194,7 +194,8 @@ def generate(
         text = text.replace(marker, cross + marker, 1) if marker in text else f"{text}\n{cross}"
     _write(brief_file, text)
     _write(schema_file, brief_mod.schema(result, root))
-    write_workflow(root, app_id)
+    if not model.stack.desktop:  # the app pipeline builds a container; a desktop app has none
+        write_workflow(root, app_id)
     kept = app_file.exists()
     if not kept:
         _write(

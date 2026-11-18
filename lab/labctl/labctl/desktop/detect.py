@@ -32,20 +32,20 @@ SUPPORT = {
     "UWP / WinUI": "full",
     "Win32 / MFC": "full",
     "Win32": "full",
-    "Delphi / VCL": "partial: standard VCL controls expose UI Automation through Win32 proxies; "
-    "custom-drawn controls (grids, third-party suites) often show as one Pane",
-    "Qt": "partial: needs the Qt accessibility plug-in (qwindows, on by default in Qt 5/6); "
-    "custom widgets may expose nothing",
-    "Java Swing / AWT": "partial: needs the Java Access Bridge enabled (`jabswitch -enable`, "
-    "then restart the application); without it the window is one empty Pane",
-    "JavaFX": "partial: JavaFX exposes UI Automation from version 8u40 when accessibility is "
-    "on; check the tree before relying on it",
+    "Delphi / VCL": "detected only (standard VCL controls would expose UI Automation through "
+    "Win32 proxies, custom-drawn grids show as one Pane)",
+    "Qt": "detected only (Qt exposes UI Automation through its accessibility plug-in; custom "
+    "widgets may expose nothing)",
+    "Java Swing / AWT": "full through the Java Access Bridge (labctl.desktop.java): enabled for "
+    "all Java programs with `jabswitch -enable` (then restart the application), or for one run "
+    "with -Djavax.accessibility.assistive_technologies=com.sun.java.accessibility.AccessBridge",
+    "JavaFX": "through UI Automation: JavaFX (8u40 and later) is its own UI Automation provider "
+    "(GlassWindowClass windows); proven by unit fixtures only, not on a live JavaFX app",
     "Electron / CEF": "use the web recorder: this is a web application inside a desktop shell; "
     "start it with --remote-debugging-port and use `labctl evidence attach`",
-    "VB6": "partial: intrinsic controls work through Win32 proxies; ActiveX/OCX controls "
-    "(grids, MSFlexGrid) often expose nothing",
-    "PowerBuilder": "partial: DataWindows are drawn by PowerBuilder and expose little or no "
-    "control tree; only the frame and standard controls are recorded",
+    "VB6": "detected only (intrinsic controls are Win32 windows; ActiveX grids expose nothing)",
+    "PowerBuilder": "detected only (DataWindows are drawn by PowerBuilder and expose little or "
+    "no control tree)",
     "Remote session (Citrix / RDP)": "not supported: no control tree — not supported by this "
     "recorder. Only pixels reach this machine; record inside the session where the "
     "application runs",
@@ -100,7 +100,7 @@ RULES: list[Rule] = [
     # Java
     _r("class", r"^SunAwt(Frame|Dialog|Canvas|Window)$", "Java Swing / AWT", CERTAIN, "window class SunAwtFrame/SunAwtDialog"),
     _r("module", r"^(jvm|awt)\.dll$", "Java Swing / AWT", LIKELY, "Java VM loaded (jvm.dll/awt.dll)"),
-    _r("module", r"^WindowsAccessBridge(-64|-32)?\.dll$", "Java Swing / AWT", LIKELY, "Java Access Bridge loaded"),
+    _r("module", r"^(Windows|java)AccessBridge(-64|-32)?\.dll$", "Java Swing / AWT", LIKELY, "Java Access Bridge loaded"),
     _r("class", r"^GlassWndClass-GlassWindowClass-", "JavaFX", CERTAIN, "window class GlassWndClass-GlassWindowClass-*"),
     _r("module", r"^(glass|prism_d3d|javafx_font)\.dll$", "JavaFX", CERTAIN, "JavaFX native library loaded"),
     # Electron / CEF / embedded browsers
@@ -125,6 +125,9 @@ RULES: list[Rule] = [
     _r("class", r"^(TscShellContainerClass|IHWindowClass|OPContainerClass)$", "Remote session (Citrix / RDP)", CERTAIN, "Remote Desktop client window class"),
     _r("process", r"^(mstsc|msrdc|vmconnect)\.exe$", "Remote session (Citrix / RDP)", CERTAIN, "Remote Desktop client process"),
 ]  # fmt: skip
+
+# Detected and reported, never recorded (decided 2026-11-17: out of scope for now).
+NOT_SUPPORTED = {"Delphi / VCL", "Qt", "VB6", "PowerBuilder"}
 
 RUNTIME = re.compile(r"^Microsoft\.(?P<kind>NETCore|WindowsDesktop|AspNetCore)\.App (?P<v>[\d.]+)$")
 SPECIFIC_OVER = {"Win32": ("WinForms", "WPF", "Win32 / MFC", "Delphi / VCL", "VB6", "PowerBuilder",
@@ -232,12 +235,17 @@ def detect(signals: dict) -> dict:
     if tk == "Remote session (Citrix / RDP)":
         result["supported"] = False
         result["problem"] = "no control tree — not supported by this recorder"
+    elif tk in NOT_SUPPORTED:
+        result["supported"] = False
+        result["problem"] = (f"{tk} is detected but not supported by this recorder: "
+                             f"{SUPPORT.get(tk, '')}")  # fmt: skip
     elif tk == "Electron / CEF":
         result["supported"] = False
         result["problem"] = ("a web application inside a desktop shell: record it with the web "
                              "recorder (`labctl evidence attach` to its --remote-debugging-port)")  # fmt: skip
     elif tk == "Java Swing / AWT" and not any(
-        m.lower().startswith("windowsaccessbridge") for m in signals.get("modules") or []
+        m.lower().startswith(("windowsaccessbridge", "javaaccessbridge"))
+        for m in signals.get("modules") or []
     ):
         result["supported"] = True
         result["problem"] = ("Java Access Bridge is not loaded: the window has no control tree "
