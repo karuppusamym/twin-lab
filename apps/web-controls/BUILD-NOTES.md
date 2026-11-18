@@ -17,8 +17,10 @@ and health route were set in app.yaml. No verification labels were raised.
   for the first source from a cookie, but reproducing that server implementation is not claimed.
 - Required CDN resources are local. Analytics is omitted. Public source credits remain in the
   captured pages; original licenses are under licenses/ and vendor headers are retained.
-- Home/index links pointing outside recorded scope were removed. Strict full-page comparison
-  correctly flags those differences. The root URL is a local convenience redirect.
+- Home/index links pointing outside the recorded scope stay on the pages, as recorded. The
+  address they lead to is answered with a redirect to the first screen in scope (the brief's
+  rule for links that leave the scope). They were removed at first and restored on
+  18 November 2026.
 
 ## Validation and limits
 
@@ -28,9 +30,11 @@ query values and Back navigation. Replica runtime requests were restricted to th
 origins: zero external attempts and zero JavaScript page errors. Desktop screenshots were
 inspected; mobile width and health/404 checks passed.
 
-Strict unmodified split-recording fidelity replay does NOT pass. Read validation/raw-replay.md
-and ../../docs/multi-app-recording-trial.md before treating this as a fidelity proof. The original
-sites also fail two submit snapshot comparisons during source-against-source replay.
+The reports under validation/ are from the first build, before the links were restored and
+before the replay fixes; they show failures that no longer occur. After both, a strict replay
+of the combined 30-event recording across the two replicas, with no exclusions, has 0 failed
+steps; its verdict is BLOCKED because no acceptance case is declared. See
+../../docs/multi-app-recording-trial.md.
 
 The brief infers browser storage from the absence of data requests. That is too strong here:
 these pages mostly hold transient DOM/form state, not demonstrated durable storage. No storage
