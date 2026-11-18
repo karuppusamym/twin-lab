@@ -1,35 +1,65 @@
 {
   "id": "angular",
   "technology": "Angular",
-  "version": null,
+  "version": "21.2.26",
   "surface": "web",
-  "result": "NOT RUN",
-  "reason": "framework package not on this machine; needs a download the user has not approved",
+  "result": "CAPTURE VERIFIED",
+  "reason": "rebuild not run: no rebuild replay report is named in the entry",
   "date": "2026-11-18",
   "gates": {
     "detect": {
-      "status": "NOT RUN",
-      "detail": "framework package not on this machine; needs a download the user has not approved",
-      "facts": {}
+      "status": "PASS",
+      "detail": "detected version 21.2.26, framework angular, rendering client",
+      "facts": {
+        "declared": {
+          "framework": "angular",
+          "version": "21.2.26",
+          "rendering": "client"
+        },
+        "detected": {
+          "version": "21.2.26",
+          "framework": "angular",
+          "rendering": "client"
+        },
+        "marker": "ng-version=\"21.2.26\""
+      }
     },
     "capture": {
-      "status": "NOT RUN",
-      "detail": "framework package not on this machine; needs a download the user has not approved",
-      "facts": {}
+      "status": "PASS",
+      "detail": "34 expected action(s), all in the recording (34 action(s) recorded)",
+      "facts": {
+        "expected": 34,
+        "captured": 34,
+        "missing": [],
+        "steps": 35
+      }
     },
     "self-replay": {
-      "status": "NOT RUN",
-      "detail": "framework package not on this machine; needs a download the user has not approved",
-      "facts": {}
+      "status": "PASS",
+      "detail": "34 of 34 step(s) replayed against a fresh instance, 26 compared, 0 failed",
+      "facts": {
+        "status": "pass",
+        "steps": 34,
+        "replayed": 34,
+        "compared": 26,
+        "failed": 0,
+        "skipped": 0,
+        "unresolved": 0,
+        "missing_value": 0,
+        "differences": 0
+      }
     },
     "rebuild": {
       "status": "NOT RUN",
-      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "detail": "no rebuild replay report is named in the entry",
       "facts": {}
     }
   },
   "not_covered": [
-    "everything",
-    "nothing has run"
+    "other Angular versions; zone.js change detection (the build is zoneless)",
+    "server-side rendering and hydration, Angular Material, CDK overlays",
+    "HttpClient calls (the state is in memory, so no request is replayed)",
+    "the route guard's redirect from / is recorded, not checked again by the replay",
+    "a rebuild by a coding agent"
   ]
 }

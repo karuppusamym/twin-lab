@@ -3,8 +3,13 @@
 # and how to add a technology are in docs/10-certification.md.
 #
 # gates.detect: what the lab must detect (every key given is compared; `version` always).
-# gates.capture: the actions the flow has, written by hand from the flow (never from a recording).
+# gates.capture: the actions the flow has, written by hand from the flow (never from a recording):
+#   `expected` (a list here), `expected_from` (a list in the flow file) or `expected_file` (the
+#   `actions` of a YAML file kept beside the application).
 # gates.self-replay.values: synthetic values a replay types, per field, in order.
+# gates.self-replay.records: the title of each record a step acts on that was there before the
+#   recording started, in order.
+# gates.self-replay.bindings_from: a function of the flow file that gives every value instead.
 # gates.rebuild.report: a kept replay report of a rebuilt copy (a path from the repository root).
 version: 1
 entries:
@@ -95,18 +100,50 @@ entries:
       - the files are served as static files, not by the app's own server.py
       - a rebuild by a coding agent
 
-  # Declared for later: what the lab must detect is given, the application and the flow are not.
-  # Set `version` (and gates.detect.version) when the reference application is chosen.
+  # Caseboard (Angular): the committed production build (`site/`), served by the application's
+  # own serve.py, which answers a route's address with index.html (a plain file server would
+  # not). The values are flow.INPUTS and flow.RECORDS (tests/test_certify.py compares them).
   - id: angular
     technology: Angular
+    version: "21.2.26"
     surface: web
-    app: null   # to fill: a small Angular application, built, served as static files
-    flow: null  # to fill: certification/flows/<name>.py and the expected actions
+    app:
+      kind: module
+      file: reference/web/caseboard-angular/serve.py
+      serve: serve
+      namespace: caseboard_angular
+      start: /
+      folder: reference/web/caseboard-angular/site
+      requires: [index.html]
+      requires_reason: the production build, made by `npm run site`
+    flow:
+      file: reference/web/caseboard-angular/flow.py
+      run: flow
+      base_url: true
     gates:
-      detect: {framework: angular, rendering: client}
-    not_run: framework package not on this machine; needs a download the user has not approved
-    not_covered: [everything, nothing has run]
+      detect: {framework: angular, version: "21.2.26", rendering: client}
+      capture: {expected_file: reference/web/caseboard-angular/expected-actions.yaml}  # 34
+      self-replay:
+        values:
+          input#username: [demo]
+          input#password: [not-the-password, demo]
+          input#search: [valve]
+          input#title: [Position sensor recalibrated]
+          select#status: [waiting]
+          input#dueDate: ["2026-12-18"]
+          textarea#notes: ["Checked on site, readings are back to normal."]
+        records:
+          - CB-1007 Valve position sensor reads zero Gray Open Normal 2026-12-11 No
+      rebuild: {}
+    not_covered:
+      - other Angular versions; zone.js change detection (the build is zoneless)
+      - server-side rendering and hydration, Angular Material, CDK overlays
+      - HttpClient calls (the state is in memory, so no request is replayed)
+      - the route guard's redirect from / is recorded, not checked again by the replay
+      - a rebuild by a coding agent
 
+  # Declared for later: what the lab must detect is given, the application and the flow are not.
+  # Set `version` (and gates.detect.version) when the reference application is chosen.
   - id: vue
     technology: Vue
     surface: web
@@ -114,22 +151,48 @@ entries:
     flow: null
     gates:
       detect: {framework: vue, rendering: client}
-    not_run: framework package not on this machine; needs a download the user has not approved
+    not_run: no reference application has been built for it yet
     not_covered: [everything, nothing has run]
 
-  - id: jsf-primefaces
-    technology: JSF / PrimeFaces
+  # Caseboard (JSF): Mojarra 2.3.9 on an embedded Jetty, started by the application's own
+  # run.py (a Java process per instance). It needs a JDK and the 14 jars fetch_libs.py puts in
+  # lib/ (not in Git): without them the entry is NOT RUN with that reason. No page or header
+  # names the implementation's release, so what is declared is what the pages show: the
+  # specification version (2.3) and the implementation (Mojarra).
+  - id: jsf-mojarra
+    technology: JSF (Mojarra)
+    version: "2.3"
     surface: web
-    app: null   # to fill: a JSF application on a servlet container (needs a JDK and the jars)
-    flow: null
+    app:
+      kind: module
+      file: reference/web/caseboard-jsf/run.py
+      serve: serve
+      namespace: caseboard_jsf
+      start: /login.xhtml
+      unavailable: reference/web/caseboard-jsf/build.py:unavailable
+    flow:
+      file: reference/web/caseboard-jsf/flow.py
+      run: flow
+      base_url: true
     gates:
       detect:
         framework: JSF
+        version: "2.3"
         rendering: server
-        ui_library: PrimeFaces
-        server: {technology: Java, framework: JSF}
-    not_run: framework package not on this machine; needs a download the user has not approved
-    not_covered: [everything, nothing has run]
+        server:
+          technology: Java
+          framework: JSF
+          framework_version: "2.3"
+          implementation: Mojarra
+      capture: {expected_file: reference/web/caseboard-jsf/expected-actions.yaml}  # 24
+      self-replay: {bindings_from: bindings_for}  # flow.TYPED, per type and select step
+      rebuild: {}
+    not_covered:
+      - "PrimeFaces, RichFaces and other component libraries (plain h: components only)"
+      - MyFaces; Jakarta Faces 3 and later; client-side state saving
+      - the implementation's release (2.3.9) is in no page or header, so it is not compared
+      - the acceptance cases flow.acceptance_for declares are run by the application's own test, not here
+      - a rebuild by a coding agent
 
   - id: aspnet-webforms
     technology: ASP.NET Web Forms
@@ -141,11 +204,13 @@ entries:
         framework: ASP.NET Web Forms
         rendering: server
         server: {technology: .NET, framework: ASP.NET Web Forms}
-    not_run: framework package not on this machine; needs a download the user has not approved
+    not_run: no reference application has been built for it yet
     not_covered: [everything, nothing has run]
 
   # Desktop entries start a GUI application and click with the real mouse. They run only on
-  # Windows with TWINLAB_DESKTOP_GUI=1. Each app folder has flow.py with build() and flow.
+  # Windows with TWINLAB_DESKTOP_GUI=1. Each app folder has flow.py with build() and flow. The
+  # expected actions are written from that flow: a click on a menu item is `menu` (two for a
+  # path of two), a combo box choice is `select`, a click on a check box is `toggle`.
   - id: winforms
     technology: WinForms
     version: ".NET 6"
@@ -154,8 +219,27 @@ entries:
     gates:
       detect: {toolkit: WinForms, runtime: {name: .NET, version: "6"}}
       capture:
-        expected: [type, type, click, click, type, click, type, "key:Enter", menu, click, type,
-                   select, toggle, click, click, type, click, menu]
+        expected:
+          - type         # user name
+          - type         # a wrong password
+          - click        # Sign in
+          - click        # OK in the message box
+          - type         # the password
+          - click        # Sign in
+          - type         # search text
+          - "key:Enter"  # presses Search, the default button
+          - menu         # Case (the menu bar)
+          - menu         # Refresh
+          - click        # Open
+          - type         # a summary that is too short
+          - select       # status: Resolved
+          - toggle       # Urgent
+          - click        # Save
+          - click        # OK in the message box
+          - type         # a longer summary
+          - click        # Save
+          - menu         # File
+          - menu         # Exit
       self-replay:
         values:
           txtPassword: [wrong, demo]
@@ -174,15 +258,36 @@ entries:
     gates:
       detect: {toolkit: WPF, runtime: {name: .NET, version: "6"}}
       capture:
-        expected: [type, type, click, click, type, click, type, "key:Enter", menu, click, type,
-                   select, toggle, click, click, type, click, menu]
+        expected:
+          - type         # user name
+          - type         # a wrong password (real key presses, as the second)
+          - click        # Sign in
+          - click        # OK in the message box
+          - type         # the password
+          - click        # Sign in
+          - type         # search text
+          - "key:Enter"  # presses Search, the default button
+          - menu         # Case (the menu bar)
+          - menu         # Refresh
+          - click        # Open
+          - type         # a summary that is too short
+          - select       # status: Resolved
+          - toggle       # Urgent
+          - click        # Save
+          - click        # OK in the message box
+          - type         # a longer summary
+          - click        # Save
+          - menu         # File
+          - menu         # Exit
       self-replay:
         values:
           txtPassword: [wrong, demo]
           txtSearch: C-100
       rebuild: {}
     not_covered:
-      - the expected actions and values assume the same flow and control ids as CaseDesk
+      - self-replay does not pass yet; after Save the application selects the saved row again, which is recorded as a select on a data row, and verify does not perform a selection that holds data
+      - intermittent; in some runs the recording has the message box opening before the Save click that caused it, and verify then fails at that step
+      - .NET Framework 4.x builds
       - data templates, virtualised lists, third-party controls
       - a rebuild by a coding agent
 
@@ -194,14 +299,35 @@ entries:
     gates:
       detect: {toolkit: Java Swing / AWT}
       capture:
-        expected: [type, type, click, click, type, click, type, click, menu, click, type, select,
-                   toggle, click, click, type, click, menu]
+        expected:
+          - type         # user name
+          - type         # a wrong password
+          - click        # Sign in
+          - click        # OK in the message box
+          - type         # the password
+          - click        # Sign in
+          - type         # search text
+          - click        # Search
+          - menu         # Case (the menu bar)
+          - menu         # Refresh
+          - click        # Open
+          - type         # a summary that is too short
+          - select       # status: Resolved
+          - toggle       # Urgent
+          - click        # Save
+          - click        # OK in the message box
+          - type         # a longer summary
+          - click        # Save
+          - menu         # File
+          - menu         # Exit
       self-replay:
         values:
           Password: [wrong, demo]
           Case or name: C-100
       rebuild: {}
     not_covered:
+      - capture does not pass; the recording has the Urgent toggle before the status selection, and the flow makes them the other way round, so the expected actions are not found in order
+      - intermittent on this machine; some recordings also miss the OK click on the first message box, and the replay then fails from that step on
       - the Java version is not detected, so it is not compared
       - JavaFX and SWT
       - a rebuild by a coding agent

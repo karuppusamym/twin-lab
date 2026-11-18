@@ -50,6 +50,7 @@ DOC = Path("docs") / "certification-matrix.md"
 DESKTOP_ENV = "TWINLAB_DESKTOP_GUI"
 DESKTOP_KINDS = ("winforms", "wpf", "swing")
 NOT_DECLARED = "the entry declares no application and no flow yet"
+DESKTOP_IMPLIED = "covered by the steps around it"  # desktop verify's note on such a step
 
 
 class MatrixError(ValueError):
@@ -62,10 +63,11 @@ class MatrixError(ValueError):
 class AppSpec(BaseModel, extra="forbid"):
     """The reference application. `static`: a folder of files served as they are. `python`: a
     module with a function returning running servers (attributes named by `origins`, and
-    `stop()`). `winforms`, `wpf`, `swing`: a folder with `flow.py` exposing `build()` and
-    `flow`."""
+    `stop()`). `module`: the application's own starter, a file with a function returning one
+    running instance (`.base`, its address, and `.stop()`). `winforms`, `wpf`, `swing`: a folder
+    with `flow.py` exposing `build()` and `flow`."""
 
-    kind: Literal["static", "python", "winforms", "wpf", "swing"]
+    kind: Literal["static", "python", "module", "winforms", "wpf", "swing"]
     folder: str | None = None
     file: str | None = None
     serve: str = "serve"
@@ -73,12 +75,22 @@ class AppSpec(BaseModel, extra="forbid"):
     start: str = "/"
     requires: list[str] = []  # files under `folder` that must exist (built, not in Git)
     requires_reason: str | None = None
+    # The application's files (and the flow file) load as `<namespace>_<stem>`, the names the
+    # application's own modules give their neighbours, so each is loaded once.
+    namespace: str | None = None
+    # `path/to/file.py:function`: returns why the application cannot start here, or None.
+    unavailable: str | None = None
 
     @model_validator(mode="after")
     def _complete(self):
+        if self.unavailable is not None and ":" not in self.unavailable:
+            raise ValueError("`unavailable` is `path/to/file.py:function`")
         if self.kind == "python":
             if not self.file or not self.origins:
                 raise ValueError("a python app needs `file` and `origins`")
+        elif self.kind == "module":
+            if not self.file:
+                raise ValueError("a module app needs `file`")
         elif not self.folder:
             raise ValueError(f"a {self.kind} app needs `folder`")
         return self
@@ -87,6 +99,7 @@ class AppSpec(BaseModel, extra="forbid"):
 class FlowSpec(BaseModel, extra="forbid"):
     file: str
     run: str = "run"
+    base_url: bool = False  # the function is `run(page, base_url)`, not `run(page)`
 
 
 class Entry(BaseModel, extra="forbid"):
@@ -241,6 +254,7 @@ def detect_gate(declared: dict, detected: dict | None) -> Gate:
     detected = detected or {}
     want = {"version": None, **declared}
     wrong: list[str] = []
+    seen: list[str] = []
 
     def check(key: str, exp, got) -> None:
         if isinstance(exp, dict):
@@ -252,6 +266,8 @@ def detect_gate(declared: dict, detected: dict | None) -> Gate:
         same = _same_version(exp_s, got_s) if key.endswith("version") else exp_s == got_s
         if not same:
             wrong.append(f"{key}: declared {exp_s or 'none'}, detected {got_s or 'none'}")
+        elif got_s is not None:
+            seen.append(f"{key} {got_s}")
 
     for key, exp in want.items():
         check(key, exp, detected.get(key))
@@ -260,8 +276,7 @@ def detect_gate(declared: dict, detected: dict | None) -> Gate:
         facts["marker"] = detected["marker"]
     if wrong:
         return Gate(status=FAIL, detail="; ".join(wrong), facts=facts)
-    shown = ", ".join(f"{k} {detected.get(k)}" for k in want if detected.get(k) is not None)
-    return Gate(status=PASS, detail=f"detected {shown}", facts=facts)
+    return Gate(status=PASS, detail=f"detected {', '.join(seen)}", facts=facts)
 
 
 def capture_gate(expected: list[str], captured: list[str]) -> Gate:
@@ -307,11 +322,12 @@ def rebuild_gate(settings: dict, root: Path) -> Gate:
 # --- starting a reference application --------------------------------------------------------------
 
 
-def _module(path: Path):
+def _module(path: Path, namespace: str | None = None):
     """Load a Python file as a module of its own (a flow, a fixture's servers). Its folder is
-    importable while it loads, so a fixture can import its neighbours."""
+    importable while it loads, so a fixture can import its neighbours. With a `namespace` the
+    module is named `<namespace>_<stem>`, as a reference application names its own files."""
     path = Path(path).resolve()
-    name = f"certify_{path.parent.name}_{path.stem}"
+    name = f"{namespace}_{path.stem}" if namespace else f"certify_{path.parent.name}_{path.stem}"
     loaded = sys.modules.get(name)
     if loaded is not None and Path(getattr(loaded, "__file__", "")).resolve() == path:
         return loaded
@@ -361,39 +377,68 @@ def start_app(app: AppSpec, root: Path) -> Running:
         run = getattr(_module(Path(root) / app.file), app.serve)()
         origins = {name: getattr(run, name) for name in app.origins}
         return Running(origins, app.start.format(**origins), run.stop)
+    if app.kind == "module":
+        run = getattr(_module(Path(root) / app.file, app.namespace), app.serve)()
+        base = str(run.base).rstrip("/")
+        return Running({"app": base}, base + app.start, run.stop)
     raise ValueError(f"{app.kind} is not a web application")
 
 
 def missing_requirements(app: AppSpec, root: Path) -> str | None:
     """Why the application cannot start here, or None."""
-    if app.kind == "python":
-        return None if (Path(root) / app.file).is_file() else f"{app.file} is not there"
-    folder = Path(root) / app.folder
-    if not folder.is_dir():
-        return "reference app not present"
-    gone = [r for r in app.requires if not (folder / r).is_file()]
-    if gone:
-        why = f" ({app.requires_reason})" if app.requires_reason else ""
-        return f"{', '.join(gone)} not in {app.folder}{why}"
+    if app.file and not (Path(root) / app.file).is_file():
+        return f"{app.file} is not there"
+    if app.folder:
+        folder = Path(root) / app.folder
+        if not folder.is_dir():
+            return "reference app not present"
+        gone = [r for r in app.requires if not (folder / r).is_file()]
+        if gone:
+            why = f" ({app.requires_reason})" if app.requires_reason else ""
+            return f"{', '.join(gone)} not in {app.folder}{why}"
+    if app.unavailable:
+        name, _, function = app.unavailable.rpartition(":")
+        if not (Path(root) / name).is_file():
+            return f"{name} is not there"
+        why = getattr(_module(Path(root) / name, app.namespace), function)()
+        return str(why) if why else None
     return None
 
 
 # --- web entries -----------------------------------------------------------------------------------
 
 
-def expected_actions(settings: dict, flow_mod) -> list[str]:
-    """The expected actions: `expected`, a list in the entry, or `expected_from`, a list the
-    flow file declares by hand (an item may be a tuple whose first part is the action)."""
+def expected_actions(settings: dict, flow_mod, root: Path | None = None) -> list[str]:
+    """The expected actions: `expected`, a list in the entry; `expected_from`, a list the flow
+    file declares by hand (an item may be a tuple whose first part is the action); or
+    `expected_file`, a YAML file kept beside the application whose `actions` is that list."""
     items = settings.get("expected")
     if items is None and settings.get("expected_from"):
         items = getattr(flow_mod, str(settings["expected_from"]))
+    if items is None and settings.get("expected_file"):
+        path = Path(root or ".") / str(settings["expected_file"])
+        items = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("actions")
     return [str(i if isinstance(i, str) else i[0]) for i in items or []]
 
 
-def fill_bindings(rec_dir: Path, values: dict[str, list]) -> list[str]:
+def bindings_from_flow(rec_dir: Path, make) -> None:
+    """bindings.yaml as the flow file gives it: `make` is called with the numbers of the
+    recording's `type` and `select` steps, in order, and returns the bindings document. A flow
+    that does not fit the recording raises, and the replay is not started."""
+    from labctl.behaviour import bindings as bnd
+
+    lines = (Path(rec_dir) / "steps.jsonl").read_text(encoding="utf-8").splitlines()
+    steps = [json.loads(line) for line in lines if line.strip()]
+    valued = [s["seq"] for s in steps if s.get("action") in bnd.VALUED]
+    text = yaml.safe_dump(make(valued), sort_keys=False)
+    (Path(rec_dir) / bnd.FILE).write_text(text, encoding="utf-8")
+
+
+def fill_bindings(rec_dir: Path, values: dict[str, list], records: list | None = None) -> list[str]:
     """Give each typed or selected field its synthetic value, in the order the steps come: the
-    longest key of `values` that is part of the field's selector, its next value. Returns the
-    fields no key matched (the replay then blocks there and says so)."""
+    longest key of `values` that is part of the field's selector, its next value. A step on a
+    record that was there before the recording started gets the next title of `records`.
+    Returns the fields no key matched (the replay then blocks there and says so)."""
     from labctl.behaviour import bindings as bnd
     from labctl.botlog.recording import load
 
@@ -401,7 +446,13 @@ def fill_bindings(rec_dir: Path, values: dict[str, list]) -> list[str]:
     doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     used: dict[str, int] = {}
     unbound: list[str] = []
+    titles = [str(t) for t in records or []]
     for entry in (doc.get("steps") or {}).values():
+        if "record" in entry:
+            if titles:
+                entry["record"] = titles.pop(0)
+            else:
+                unbound.append(f"{entry.get('field') or ''} (a record)")
         if "value" not in entry:
             continue
         field = entry.get("field") or ""
@@ -432,6 +483,10 @@ def detect_web(entry_id: str, rec_dir: Path, work: Path) -> dict:
     return found
 
 
+def _with_base(script, base_url: str, page) -> None:
+    script(page, base_url)
+
+
 def _short(exc: BaseException) -> str:
     text = str(exc).strip().splitlines()
     return f"{type(exc).__name__}: {text[0] if text else ''}"[:300]
@@ -449,14 +504,16 @@ def run_web(entry: Entry, root: Path, work: Path) -> dict[str, Gate]:
         return _all_not_run("Playwright is not installed")
     gates = _all_not_run("the flow was not recorded")
     gates["rebuild"] = rebuild_gate(entry.gates.get("rebuild") or {}, root)
-    flow_mod = _module(Path(root) / entry.flow.file)
-    expected = expected_actions(entry.gates.get("capture") or {}, flow_mod)
+    flow_mod = _module(Path(root) / entry.flow.file, entry.app.namespace)
+    expected = expected_actions(entry.gates.get("capture") or {}, flow_mod, root)
     rec_dir = work / entry.id
     source = start_app(entry.app, root)
+    script = getattr(flow_mod, entry.flow.run)
+    if entry.flow.base_url:
+        script = partial(_with_base, script, next(iter(source.origins.values())))
     try:
         try:
-            recorder.record(source.start, rec_dir, headless=True,
-                            script=getattr(flow_mod, entry.flow.run))  # fmt: skip
+            recorder.record(source.start, rec_dir, headless=True, script=script)
         except Exception as exc:  # noqa: BLE001 - whatever stopped the flow is the result
             gates["capture"] = Gate(status=FAIL, detail=f"the flow did not finish: {_short(exc)}")
             why = "the recording is not complete"
@@ -470,7 +527,16 @@ def run_web(entry: Entry, root: Path, work: Path) -> dict[str, Gate]:
     gates["capture"] = capture_gate(expected, fidelity.captured_actions(rec))
     gates["capture"].facts["steps"] = len(rec.steps)
 
-    unbound = fill_bindings(rec_dir, (entry.gates.get("self-replay") or {}).get("values") or {})
+    settings = entry.gates.get("self-replay") or {}
+    try:
+        if settings.get("bindings_from"):
+            unbound: list[str] = []
+            bindings_from_flow(rec_dir, getattr(flow_mod, str(settings["bindings_from"])))
+        else:
+            unbound = fill_bindings(rec_dir, settings.get("values") or {}, settings.get("records"))
+    except Exception as exc:  # noqa: BLE001 - a flow whose values do not fit the recording
+        gates["self-replay"] = Gate(status=FAIL, detail=f"no bindings: {_short(exc)}")
+        return gates
     fresh = start_app(entry.app, root)
     try:
         origins = {source.origins[k]: fresh.origins[k] for k in source.origins}
@@ -582,22 +648,33 @@ def run_desktop(entry: Entry, root: Path, work: Path) -> dict[str, Gate]:
     except Exception as exc:  # noqa: BLE001
         gates["self-replay"] = Gate(status=FAIL, detail=f"the replay stopped: {_short(exc)}")
         return gates
+    gates["self-replay"] = desktop_replay_gate(report)
+    return gates
+
+
+def desktop_replay_gate(report) -> Gate:
+    """Passes when every recorded step was performed and compared against the fresh start, or
+    is one the steps around it cover (a focus change, a menu or a list opening: verify marks
+    those `skipped` with that note). A step verify could not perform (no value for a password
+    field, an item that holds data) is `skipped` too and is never a pass."""
     failed = [s for s in report.steps if s.status == "fail"]
     ran = [s for s in report.steps if s.status == "pass"]
+    implied = [s for s in report.steps if s.status == "skipped" and s.note == DESKTOP_IMPLIED]
+    left = [s for s in report.steps if s not in failed and s not in ran and s not in implied]
     facts = {"status": report.status, "steps": len(report.steps), "replayed": len(ran),
-             "failed": len(failed)}  # fmt: skip
-    if report.status == "pass" and ran and not failed:
-        gates["self-replay"] = Gate(status=PASS, facts=facts,
-                                    detail=f"{len(ran)} of {len(report.steps)} step(s) verified "
-                                    "against a fresh start, 0 failed")  # fmt: skip
-    else:
-        first = failed[0] if failed else None
-        diff = first.differences[0].text() if first and first.differences else ""
-        where = f"; first: step {first.seq} ({first.action}) {diff}"[:400] if first else ""
-        gates["self-replay"] = Gate(status=FAIL, facts=facts,
-                                    detail=f"verify {report.status}: {len(failed)} failed of "
-                                    f"{len(report.steps)} step(s){where}")  # fmt: skip
-    return gates
+             "implied": len(implied), "failed": len(failed), "skipped": len(left)}  # fmt: skip
+    if report.status == "pass" and ran and not failed and not left:
+        return Gate(status=PASS, facts=facts,
+                    detail=f"{len(ran)} of {len(report.steps)} step(s) verified against a fresh "
+                    f"start, {len(implied)} covered by the steps around them, 0 failed")  # fmt: skip
+    first = next(iter([*failed, *left]), None)
+    where = ""
+    if first is not None:
+        diff = first.differences[0].text() if first.differences else (first.note or "")
+        where = f"; first: step {first.seq} ({first.action}) {diff}"[:400]
+    return Gate(status=FAIL, facts=facts,
+                detail=f"verify {report.status}: {len(failed)} failed, {len(left)} not performed, "
+                f"of {len(report.steps)} step(s){where}")  # fmt: skip
 
 
 # --- running the matrix ----------------------------------------------------------------------------

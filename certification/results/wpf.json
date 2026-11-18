@@ -3,24 +3,55 @@
   "technology": "WPF",
   "version": ".NET 6",
   "surface": "desktop",
-  "result": "NOT RUN",
-  "reason": "reference app not present",
+  "result": "PARTIAL",
+  "reason": "self-replay failed: verify pass: 0 failed, 1 not performed, of 37 step(s); first: step 32 (select) the item selected holds data (its name was not recorded); not replayed",
   "date": "2026-11-18",
   "gates": {
     "detect": {
-      "status": "NOT RUN",
-      "detail": "reference app not present",
-      "facts": {}
+      "status": "PASS",
+      "detail": "detected toolkit WPF, runtime.name .NET, runtime.version 6.0.3",
+      "facts": {
+        "declared": {
+          "toolkit": "WPF",
+          "runtime": {
+            "name": ".NET",
+            "version": "6"
+          }
+        },
+        "detected": {
+          "version": null,
+          "toolkit": "WPF",
+          "runtime": {
+            "name": ".NET",
+            "version": "6.0.3",
+            "marker": "shared runtime folder of loaded modules: Microsoft.NETCore.App 6.0.3, Microsoft.WindowsDesktop.App 6.0.3",
+            "confidence": "certain"
+          }
+        },
+        "marker": "FrameworkId WPF"
+      }
     },
     "capture": {
-      "status": "NOT RUN",
-      "detail": "reference app not present",
-      "facts": {}
+      "status": "PASS",
+      "detail": "20 expected action(s), all in the recording (37 action(s) recorded)",
+      "facts": {
+        "expected": 20,
+        "captured": 37,
+        "missing": [],
+        "steps": 37
+      }
     },
     "self-replay": {
-      "status": "NOT RUN",
-      "detail": "reference app not present",
-      "facts": {}
+      "status": "FAIL",
+      "detail": "verify pass: 0 failed, 1 not performed, of 37 step(s); first: step 32 (select) the item selected holds data (its name was not recorded); not replayed",
+      "facts": {
+        "status": "pass",
+        "steps": 37,
+        "replayed": 29,
+        "implied": 7,
+        "failed": 0,
+        "skipped": 1
+      }
     },
     "rebuild": {
       "status": "NOT RUN",
@@ -29,7 +60,9 @@
     }
   },
   "not_covered": [
-    "the expected actions and values assume the same flow and control ids as CaseDesk",
+    "self-replay does not pass yet; after Save the application selects the saved row again, which is recorded as a select on a data row, and verify does not perform a selection that holds data",
+    "intermittent; in some runs the recording has the message box opening before the Save click that caused it, and verify then fails at that step",
+    ".NET Framework 4.x builds",
     "data templates, virtualised lists, third-party controls",
     "a rebuild by a coding agent"
   ]

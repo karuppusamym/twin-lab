@@ -2,6 +2,35 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — Certification matrix: Angular, JSF and the three desktop toolkits run
+- The matrix ([certification-matrix.md](certification-matrix.md)) now has real results for
+  seven of its nine entries. Angular 21.2.26 and JSF 2.3 (Mojarra) run on the two Caseboard
+  reference applications; WinForms, WPF and Java Swing were run for the first time
+  (`TWINLAB_DESKTOP_GUI=1`, one at a time, on the real mouse and keyboard).
+- CAPTURE VERIFIED: server-rendered HTML forms (62 expected actions, 107 of 107 steps replayed),
+  React 16.7.0 (20; 24 of 24), Angular 21.2.26 (34; 34 of 34), JSF 2.3 / Mojarra on Jetty
+  (24; 48 of 48, with the server detected as Java, JSF 2.3, Mojarra), WinForms on .NET 6.0.3
+  (20; 29 of 36 steps verified, the other 7 covered by the steps around them). None failed a step.
+- PARTIAL, published as they ended: WPF (detect and capture pass, 20 expected actions; verify
+  does not perform the selection of a data row the application makes after Save, so one of 37
+  steps was not performed and self-replay fails; one earlier run also recorded a message box
+  opening before the click that caused it). Java Swing (detect and self-replay pass, 30 of 33
+  steps verified; capture fails because the recording has the check box toggle before the
+  status selection the flow makes first; one run of three also missed the OK click on the first
+  message box, the intermittent fault known on this machine).
+- The harness, `labctl certify`: an application can be started by its own module
+  (`app.kind: module`, with `namespace` and `unavailable`), a flow can take the address
+  (`flow.base_url`), the expected actions can be the application's own `expected-actions.yaml`
+  (`expected_file`), a replay's values can come from a function of the flow file
+  (`bindings_from`) and a step on an existing record gets its title (`records`). The desktop
+  gate now fails on a step verify could not perform, where verify's own status stays `pass`;
+  the detect line names the declared keys instead of printing a nested mapping.
+- The JSF entry is named for what it is (`jsf-mojarra`, not PrimeFaces). It needs a JDK and
+  the 14 jars `fetch_libs.py` downloads; without them, as in CI, it is NOT RUN with that reason.
+- Left open: no entry is CERTIFIED (no rebuild was judged). Vue and ASP.NET Web Forms are
+  declared and NOT RUN: no reference application has been built for either. The two desktop
+  failures are defects of the recorder and of verify, not of the entries; they stay in the
+  table until fixed. PrimeFaces is no longer declared.
 ## 2026-11-18 — Certification matrix: which technologies are proven
 - Detection has rules for about 30 web stacks; few were proven on a live application. The
   matrix (`certification/matrix.yaml`, [10-certification.md](10-certification.md)) has one entry

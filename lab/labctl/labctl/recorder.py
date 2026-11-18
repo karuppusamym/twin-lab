@@ -440,17 +440,22 @@ LISTENER_JS = r"""
   // nothing is sent while the document is being torn down: no step depends on such a call.
   let eidSeq = 0;
   let loadStep = false;  // this document's load step was written (or it has none: a blank page)
-  function flush(leaving) {
+  function flush(leaving, shown) {
     clearTimeout(timer); timer = null;
     if (!TOP || !pending.length) return Promise.resolve();
     const eids = pending.map((p) => p.eid); pending = []; first = 0;
     // A field typed into that no longer has the focus as the snapshot is taken: what the page
     // does when a field is left (a message for a required field, a framework marking the field
-    // as visited) is in the snapshot, so the replay must leave the field too.
+    // as visited) is in the snapshot, so the replay must leave the field too. Only when the
+    // page has had its turn to show it (`rendered`, or `shown` by the caller): on a busy
+    // machine the next action can arrive first, the snapshot then shows the field as not left
+    // yet, and a replay that left it would differ.
     const left = eids.filter((e) => {
       const el = fields.get(e);
       fields.delete(e);
-      try { return !!el && !(el.isConnected && el.matches(":focus")); } catch (err) { return false; }
+      const had = shown || rendered.has(e);
+      rendered.delete(e);
+      try { return had && !!el && !(el.isConnected && el.matches(":focus")); } catch (err) { return false; }
     });
     if (leaving) return Promise.resolve();
     try {
@@ -667,8 +672,15 @@ LISTENER_JS = r"""
     if (!typable(el)) return;
     // Typing is written as a step when it ends, but it changes the page from its first character
     // (a list filtering as you type, a framework marking the field as edited): the step before
-    // it is snapshotted now, in the capture phase, before the page's own handlers see the input.
-    if (!dirty.has(el) && TOP && pending.length) flush();
+    // it is snapshotted before the page's own handlers show this input. Not in this very call:
+    // leaving the field before has effects the page renders a moment later (a framework marks it
+    // as visited at its next change detection), and a step that says its field was left must
+    // show them. A timer set here, in the capture phase, runs after the timers the page set
+    // when the field was left and before those its handlers set for this input.
+    if (!dirty.has(el) && TOP && pending.length) {
+      const open = pending[0].eid;
+      setTimeout(() => { if (pending.length && pending[0].eid === open) flush(false, true); }, 0);
+    }
     const d = dirty.get(el) || {typed: ""};
     if (el.type === "password") d.typed = null;
     else if (e.inputType && e.inputType.startsWith("delete")) d.typed = null;
@@ -677,6 +689,18 @@ LISTENER_JS = r"""
   }
   const written = new WeakMap();  // field -> the value its last type step had (in memory only)
   const fields = new Map();  // a type step not snapshotted yet (event id) -> its field
+  // Type steps whose field the page has had its turn to show as left: two timer turns (the
+  // page's own handlers set theirs after ours) and then a frame or a short wait, whichever
+  // comes first, as a framework schedules its change detection.
+  const rendered = new Set();
+  function whenRendered(eid) {
+    setTimeout(() => setTimeout(() => {
+      let done = false;
+      const mark = () => { if (!done) { done = true; if (fields.has(eid)) rendered.add(eid); } };
+      try { requestAnimationFrame(mark); } catch (e) {}
+      setTimeout(mark, 30);
+    }, 0), 0);
+  }
   const valueOf = (el) => el.isContentEditable ? el.innerText : String(el.value == null ? "" : el.value);
   function emitType(el) {
     const d = dirty.get(el);
@@ -694,7 +718,7 @@ LISTENER_JS = r"""
     releaseHeld();
     const ev = make("type", el, extra);
     emit(ev);
-    if (TOP && ev.eid) fields.set(ev.eid, el);
+    if (TOP && ev.eid) { fields.set(ev.eid, el); whenRendered(ev.eid); }
   }
   function emitAllTyped() { for (const el of Array.from(dirty.keys())) emitType(el); }
   function onChange(e) {

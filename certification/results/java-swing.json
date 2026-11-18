@@ -3,24 +3,47 @@
   "technology": "Java Swing",
   "version": "Java 11",
   "surface": "desktop",
-  "result": "NOT RUN",
-  "reason": "set TWINLAB_DESKTOP_GUI=1",
+  "result": "PARTIAL",
+  "reason": "capture failed: 1 of 20 expected action(s) not in the recording: toggle",
   "date": "2026-11-18",
   "gates": {
     "detect": {
-      "status": "NOT RUN",
-      "detail": "set TWINLAB_DESKTOP_GUI=1",
-      "facts": {}
+      "status": "PASS",
+      "detail": "detected toolkit Java Swing / AWT",
+      "facts": {
+        "declared": {
+          "toolkit": "Java Swing / AWT"
+        },
+        "detected": {
+          "version": null,
+          "toolkit": "Java Swing / AWT"
+        },
+        "marker": "window class SunAwtFrame/SunAwtDialog"
+      }
     },
     "capture": {
-      "status": "NOT RUN",
-      "detail": "set TWINLAB_DESKTOP_GUI=1",
-      "facts": {}
+      "status": "FAIL",
+      "detail": "1 of 20 expected action(s) not in the recording: toggle",
+      "facts": {
+        "expected": 20,
+        "captured": 33,
+        "missing": [
+          "toggle"
+        ],
+        "steps": 33
+      }
     },
     "self-replay": {
-      "status": "NOT RUN",
-      "detail": "set TWINLAB_DESKTOP_GUI=1",
-      "facts": {}
+      "status": "PASS",
+      "detail": "30 of 33 step(s) verified against a fresh start, 3 covered by the steps around them, 0 failed",
+      "facts": {
+        "status": "pass",
+        "steps": 33,
+        "replayed": 30,
+        "implied": 3,
+        "failed": 0,
+        "skipped": 0
+      }
     },
     "rebuild": {
       "status": "NOT RUN",
@@ -29,6 +52,8 @@
     }
   },
   "not_covered": [
+    "capture does not pass; the recording has the Urgent toggle before the status selection, and the flow makes them the other way round, so the expected actions are not found in order",
+    "intermittent on this machine; some recordings also miss the OK click on the first message box, and the replay then fails from that step on",
     "the Java version is not detected, so it is not compared",
     "JavaFX and SWT",
     "a rebuild by a coding agent"
