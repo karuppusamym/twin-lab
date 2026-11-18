@@ -329,6 +329,13 @@ def _check_tables(
         psycopg = None
     for touch in touches:
         url = b.apps[touch.app].db
+        if b.apps[touch.app].db_engine == "browser":
+            # Not a missing table: there is no database to have one. A bot that reads or writes
+            # tables cannot work on this app, and no database coverage is claimed for it (R07).
+            report.items.append(Item("table", touch.app, "database", "failed",
+                                     "this app keeps its business data in the browser: it has no "
+                                     "database and no tables for a bot to read or write"))  # fmt: skip
+            continue
         sqlite = b.apps[touch.app].db_engine == "sqlite"
         if psycopg is None and not sqlite:
             report.errors.append("psycopg is not installed; tables not checked")
@@ -446,6 +453,10 @@ def _check_fidelity(root: Path, automation: Automation, report: Report, require:
             report.items.append(Item("fidelity", app_id, what, missing,
                                      "the app changed after this replay: replay again"))  # fmt: skip
             continue
+        if rep.status == "blocked":  # a step could not run: nothing is known about the rest
+            why = (rep.problems or ["see the report"])[0]
+            report.items.append(Item("fidelity", app_id, what, "failed", f"replay BLOCKED: {why}"))
+            continue
         failed = [s for s in rep.steps if s.status == "fail"]
         if not failed:
             report.items.append(Item("fidelity", app_id, what, "ok"))
@@ -499,6 +510,9 @@ def app_facts(root: Path, app_id: str) -> dict:
     lab = data.get("lab") if isinstance(data.get("lab"), dict) else {}
     rest = {k: v for k, v in data.items() if k != "lab"}  # ports and sign-in are not the app
     copies = data.get("copies") if isinstance(data.get("copies"), dict) else {}
+    stack = data.get("stack") if isinstance(data.get("stack"), dict) else {}
+    held = stack.get("data") if isinstance(stack.get("data"), dict) else {}
+    browser = held.get("kind") == "browser"
     return {
         "app_yaml": _digest(json.dumps(rest, sort_keys=True, default=str).encode())
         if data
@@ -507,7 +521,9 @@ def app_facts(root: Path, app_id: str) -> dict:
         "schema": _file_digest(folder / "db" / "schema.sql"),
         "copies_ref": copies.get("ref"),
         "changed_at": _app_changed_at(root, app_id, _NOT_THE_BUILD),
-        "database": dbservers.choice(lab.get("database")),
+        "database": "browser storage (no database)"
+        if not lab.get("database") and browser
+        else dbservers.choice(lab.get("database")),
     }
 
 

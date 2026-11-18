@@ -25,7 +25,7 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import parse_qsl, urlsplit
@@ -82,6 +82,9 @@ class Step:
     action: str
     selector: str | None
     dom: Path | None
+    # Optional browser storage after the step (today's recorder does not write it; see
+    # `storage_facts`): {"localStorage": {key: value}, "sessionStorage": {...}, "indexedDB": [...]}
+    storage: dict | None = None
 
 
 @dataclass
@@ -150,7 +153,8 @@ def _steps(folder: Path, rec: Recording) -> list[Step]:
                     rec.problems.append(f"steps.jsonl line {n}: snapshot {data['dom']} not found")
                     dom = None
             out.append(Step(int(data.get("seq", n)), _time(data.get("ts")), str(data.get("url") or ""),
-                            str(data.get("action") or ""), data.get("selector"), dom))  # fmt: skip
+                            str(data.get("action") or ""), data.get("selector"), dom,
+                            data.get("storage") if isinstance(data.get("storage"), dict) else None))  # fmt: skip
         except (ValueError, TypeError, AttributeError):
             rec.problems.append(f"steps.jsonl line {n} is not a step; skipped")
     return out
@@ -1698,6 +1702,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         )
 
     screens: dict[str, _ScreenAcc] = {}
+    served_grids = False  # a served document already holds a data grid: records came from a server
 
     def screen(url_path: str) -> _ScreenAcc:
         pattern = sanitize.route_pattern(url_path)
@@ -1756,6 +1761,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         if e.resp_mime != "text/html" or e.resp_text is None:
             continue
         info = sanitize.page(e.resp_text, known)
+        served_grids = served_grids or bool(info.grids)
         if e.started:
             timeline.append((e.started, sanitize.route_pattern(e.path)))
         if info.has_content:
@@ -1764,6 +1770,13 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             shells.append(info)
             screen(e.path)
     timeline.sort(key=lambda t: t[0])
+    # No request for data, no grid served, and the page changed by itself (or browser storage was
+    # recorded): the state is not on the server (R07).
+    browser_candidate = (
+        not served_grids
+        and not any(_is_data_call(e) for e in entries)
+        and (_unexplained_changes(rec.steps, entries) or bool(storage_facts(rec.steps)["kinds"]))
+    )
 
     scripts = [(e.path, e.resp_text) for e in entries if e.kind == "asset" and e.resp_text]
     all_pages = [p for s in screens.values() for p in s.pages]
@@ -1860,7 +1873,13 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             )
         )
 
-    html_tables = _html_tables(screens, {_norm(n) for n in tables}, model.problems, ev)
+    # A grid on a page of an app whose data is in the browser is not a table (R07). Server-rendered
+    # pages are server evidence, so they never take this branch.
+    html_tables = (
+        []
+        if browser_candidate
+        else _html_tables(screens, {_norm(n) for n in tables}, model.problems, ev)
+    )
     for name, cols in tables.items():
         model.tables.append(
             Table(
@@ -1992,11 +2011,207 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         server=tech["server"] or None,
         libraries=tech["libraries"],
         detected=tech["evidence"],
+        data=data_location(
+            entries,
+            rec.steps,
+            scripts
+            + [(e.path, e.resp_text) for e in entries if e.kind == "document" and e.resp_text],
+            served_grids=served_grids,
+        ),
         **{"from": [ev]},
     )
     if not frontend:
         model.problems.append(f"{ev}: no framework marker found in the recorded pages or scripts")
     return model
+
+
+# --- where the data lives (R07) ------------------------------------------------------------------
+#
+# A recording shows requests, page snapshots and (when the recorder adds it) browser storage. It
+# cannot show a server's database. What it can show is whether the application sent its state to
+# its own server: state-changing requests (server), or none while the page changed (browser).
+# Without either the answer is unknown, and unknown stays unknown: no table, no database is invented.
+
+STATE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+INTERACTIONS = {"click", "dblclick", "type", "fill", "select", "check", "uncheck", "press",
+                "keypress", "submit"}  # fmt: skip
+TELEMETRY = re.compile(
+    r"/(collect|analytics|beacon|track|tracking|telemetry|metrics|csp-report|log|logs|"
+    r"gtag|ping|rum|vitals|sentry)(/|$)",
+    re.I,
+)
+HEALTHY_PATH = re.compile(r"/(health|healthz|ready|status|version|config)(\.json)?$", re.I)
+STORAGE_REF = re.compile(r"\b(localStorage|sessionStorage)\b")
+STORAGE_KEY = re.compile(
+    r"\b(localStorage|sessionStorage)\s*(?:\.\s*(?:getItem|setItem|removeItem)\s*\(\s*|\[\s*)"
+    r"([\"'`])([\w.:@/-]{1,80})\2"
+)
+INDEXED_DB = re.compile(r"\bindexedDB\b")
+SECRET_KEY = re.compile(r"token|secret|passw|api[-_]?key|session|cookie|auth|credential|jwt", re.I)
+MAX_KEYS = 30
+SLACK = timedelta(seconds=1)  # a step is logged a moment after its request
+
+
+def _is_data_call(e: Exchange) -> bool:
+    """A request the application made to its own origin for its data (not a page, an asset,
+    telemetry or a health probe)."""
+    if e.kind not in ("api", "form") and not (e.method in STATE_METHODS and e.kind != "asset"):
+        return False
+    if TELEMETRY.search(e.path) or (e.method == "GET" and HEALTHY_PATH.search(e.path)):
+        return False
+    return True
+
+
+def _unexplained_changes(steps: list[Step], entries: list[Exchange]) -> bool:
+    """Some click or typing left the page different from the snapshot before it, and no request to
+    the app's own origin (a page, a form, a call; not an asset or a beacon) started while that step
+    was the latest: the page changed by itself. A link that loads another page is explained by its
+    request. Steps without a time or a snapshot never count."""
+    requests = sorted(
+        e.started for e in entries
+        if e.started and e.kind != "asset" and not TELEMETRY.search(e.path)
+    )  # fmt: skip
+    previous: bytes | None = None
+    for n, step in enumerate(steps):
+        current = None
+        if step.dom is not None:
+            try:
+                current = step.dom.read_bytes()
+            except OSError:
+                current = None
+        if step.action in INTERACTIONS and None not in (previous, current) and previous != current:
+            later = [x.ts for x in steps[n + 1 :] if x.ts]
+            end = later[0] if later else None
+            if step.ts and not any(
+                step.ts - SLACK <= t and (end is None or t < end) for t in requests
+            ):
+                return True
+        if current is not None:
+            previous = current
+    return False
+
+
+def _stored_shape(value: Any) -> Any:
+    """The shape of a stored value: JSON text is parsed, anything else is a string."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return "string"
+    return shape(value)
+
+
+def storage_facts(steps: list[Step]) -> dict:
+    """Browser storage the recorder captured: {kinds, keys, shape}. Values are never kept, only
+    key names and the shape of each stored record; the shape of a credential-like key's value is
+    not described at all. Today's recorder writes no `storage` on its steps, so this is empty
+    unless a recording from a newer recorder (or a person) adds it."""
+    kinds: dict[str, None] = {}
+    keys: dict[str, None] = {}
+    shapes: dict[str, Any] = {}
+    for step in steps:
+        for kind in ("localStorage", "sessionStorage"):
+            items = (step.storage or {}).get(kind)
+            if not isinstance(items, dict) or not items:
+                continue
+            kinds[kind] = None
+            for key, value in items.items():
+                name = _field(str(key))
+                label = f"{kind}:{name}"
+                keys[label] = None
+                if SECRET_KEY.search(name):
+                    shapes[label] = "(credential-like key: not described)"
+                else:
+                    new = _stored_shape(value)
+                    shapes[label] = merge_shapes(shapes[label], new) if label in shapes else new
+        stores = (step.storage or {}).get("indexedDB")
+        if isinstance(stores, list) and stores:
+            kinds["indexedDB"] = None
+            for item in stores:
+                if isinstance(item, dict) and item.get("db"):
+                    label = "indexedDB:" + _field(str(item["db"]))
+                    keys[label] = None
+                    names = item.get("stores")
+                    names = list(names) if isinstance(names, (dict, list)) else []
+                    shapes[label] = {"stores": [_field(str(n)) for n in names][:20]}
+    return {"kinds": list(kinds), "keys": list(keys)[:MAX_KEYS], "shape": shapes}
+
+
+def data_location(
+    entries: list[Exchange],
+    steps: list[Step],
+    scripts: list[tuple[str, str]],
+    *,
+    served_grids: bool = False,
+) -> dict:
+    """Where the application's business data lives, with the evidence for it (R07).
+
+    - `server`: a state-changing request to the app's own origin was seen, or a response carries
+      records (JSON items, or a data grid in a served page).
+    - `browser`: no request for data at all, and a click or typing changed the page with no
+      request to explain it, and/or browser storage was recorded with data. Which storage is `not observed` unless the recorder wrote
+      it; scripts that mention localStorage/sessionStorage are listed as `referenced`.
+    - `unknown`: neither can be shown.
+    """
+    calls = [e for e in entries if _is_data_call(e)]
+    writes = [e for e in calls if e.method in STATE_METHODS]
+    records = [e for e in calls if e.method == "GET" and 200 <= e.status < 300
+               and _items(e.resp_json)]  # fmt: skip
+    seen = storage_facts(steps)
+    referenced: dict[str, None] = {}
+    keys: dict[str, None] = {}
+    for _path, text in scripts:
+        for m in STORAGE_REF.finditer(text or ""):
+            referenced[m.group(1)] = None
+        for m in STORAGE_KEY.finditer(text or ""):
+            keys[f"{m.group(1)}:{m.group(3)}"] = None
+        if text and INDEXED_DB.search(text):
+            referenced["indexedDB"] = None
+    changed = not served_grids and _unexplained_changes(steps, entries)
+    out: dict[str, Any] = {"kind": "unknown", "storage": seen["kinds"],
+                           "referenced": list(referenced), "keys": list(seen["keys"]),
+                           "shape": seen["shape"], "evidence": []}  # fmt: skip
+    ev: list[str] = out["evidence"]
+    if writes or records or served_grids:
+        out["kind"] = "server"
+        if writes:
+            where = sorted({f"{e.method} {sanitize.route_pattern(e.path)}" for e in writes})
+            ev.append(f"{len(writes)} state-changing request(s) to the app's own origin: "
+                      + ", ".join(where[:5]) + (" ..." if len(where) > 5 else ""))  # fmt: skip
+        if records:
+            where = sorted({sanitize.route_pattern(e.path) for e in records})
+            ev.append("responses carry records: GET " + ", ".join(where[:5]))
+        if served_grids and not (writes or records):
+            ev.append("the served pages already hold data grids: records came from the server")
+        if seen["kinds"]:
+            ev.append("browser storage was also recorded: " + ", ".join(seen["kinds"]))
+    elif not calls and (seen["kinds"] or changed):
+        out["kind"] = "browser"
+        ev.append("no state-changing request and no data request to the app's own origin in the "
+                  "whole recording")  # fmt: skip
+        if changed:
+            n = sum(1 for s in steps if s.action in INTERACTIONS)
+            ev.append(f"the page changed after interaction ({n} click/typing step(s) recorded) "
+                      "with no request")  # fmt: skip
+        if seen["kinds"]:
+            ev.append("browser storage recorded with data: " + ", ".join(seen["kinds"]))
+        else:
+            ev.append("storage kind: not observed (the recorder does not capture browser "
+                      "storage); it is inferred from the absence of requests")  # fmt: skip
+        if referenced:
+            ev.append("scripts reference " + ", ".join(referenced)
+                      + " (a script mention is not proof of what is stored)")  # fmt: skip
+        out["script_keys"] = list(keys)[:MAX_KEYS]
+    else:
+        why = (
+            "the recording has no page snapshots, so a change of state cannot be seen"
+            if not any(s.dom for s in steps)
+            else "no interaction changed the page and no state-changing request was seen"
+        )
+        ev.append(f"not shown: {why}")
+        if referenced:
+            ev.append("scripts reference " + ", ".join(referenced))
+    return out
 
 
 # --- tables from HTML grids and forms ------------------------------------------------------------

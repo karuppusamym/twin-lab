@@ -445,6 +445,8 @@ def _merge_into(model: AppModel, part: AppModel) -> None:
         for kind in ("libraries", "detected"):
             have = getattr(model.stack, kind)
             have += [x for x in getattr(part.stack, kind) if x not in have]
+    if part.stack.data and not model.stack.data:  # where the data lives (R07), from a recording
+        model.stack.data = part.stack.data
     for screen in part.screens:
         have = _find_screen(model.screens, screen)
         if have:
@@ -528,7 +530,31 @@ def merge(app: str, parts: list[AppModel]) -> AppModel:
             dict.fromkeys(names[t.lower()] for t in route.tables if t.lower() in names)
         )
     _find_conflicts(model)
+    _declared_database(model)
     return model
+
+
+def _declared_database(model: AppModel) -> None:
+    """A recording that shows no server write does not outweigh a source, a DDL file, an API
+    description or an automation that declares a database: the app has one (R07)."""
+    data = model.stack.data
+    if not data or data.get("kind") != "browser":
+        return
+    declared = [e.id for e in model.evidence if e.kind in ("source", "ddl", "openapi", "postman")]
+    declared += [
+        f
+        for t in model.tables
+        for f in t.from_
+        if f.startswith("automation:") and f not in declared
+    ]
+    if declared:
+        model.stack.data = {
+            **data,
+            "kind": "server",
+            "evidence": [*data.get("evidence", []), "declared by " + ", ".join(sorted(declared)[:5])
+                         + ": a database exists, so the recording's lack of writes does not "
+                         "make this a browser-only app"],
+        }  # fmt: skip
 
 
 def _find_conflicts(model: AppModel) -> None:

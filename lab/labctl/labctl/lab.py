@@ -119,7 +119,7 @@ def compose(root: Path, app_id: str) -> dict:
     token = lab_token(root)
     bind = bind_address(root)
     pw = db_password(root)  # not "lab": the DB port can be reachable from the network
-    choice = dbservers.choice(app.lab.database)
+    choice = dbservers.app_choice(app)
     if choice == "sqlite":
         doc = _compose_sqlite(root, app_id, app, app_port, db_env, schema, token, bind)
         return {**doc, "name": project(lab_id)}
@@ -422,7 +422,7 @@ def up(root: Path, app_id: str, build: bool = True) -> str:
     file = compose_file(root, app_id)
     lab_id, app = app_id, load_app(root, app_id)
     app_id = app.id  # the database inside the lab is named after the app, also in a copy
-    choice = dbservers.choice(app.lab.database)
+    choice = dbservers.app_choice(app)
     if choice == "sqlite":
         return _up_sqlite(root, lab_id, file, build)
     if choice != "postgres":

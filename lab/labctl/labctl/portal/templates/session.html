@@ -12,10 +12,16 @@
   <div class="step"><b>{{ sm.wall_s }} s</b><span>start to stop</span></div>
   <div class="step"><b>{{ sm.waiting_on_app_s }} s</b><span>waiting on the app (incl. added delay)</span></div>
   <div class="step"><b>{{ sm.errors }}</b><span>errors (5xx or injected faults)</span></div>
-  <div class="step"><b>{{ s.changes | length }}</b><span>rows changed</span></div>
+  {% if browser_only %}<div class="step"><b>n/a</b><span>rows changed: this app keeps its data in the browser</span></div>
+  {% else %}<div class="step"><b>{{ s.changes | length }}</b><span>rows changed</span></div>{% endif %}
 </div>
 
-{% if verdict %}
+{% if browser_only %}
+<div class="card" id="verdict">
+  <h2>Database change check: <span class="pill">not applicable</span></h2>
+  <p class="muted">This app keeps its data in the browser. There is no database, so there are no row changes to check, and this session says nothing about them. The requests above and the outcome check still apply.</p>
+</div>
+{% elif verdict %}
 <div class="card" id="verdict">
   <h2>Database change check:
     <span class="pill {{ 'ok' if verdict.status == 'PASS' else 'err' if verdict.status == 'FAIL' else 'warn' }}">{{ verdict.status | replace('_', ' ') }}</span></h2>
@@ -46,7 +52,7 @@
 </div>
 {% endif %}
 
-<div class="card">
+{% if not browser_only %}<div class="card">
   <h2>Rows changed</h2>
   {% if s.changes %}
   <div class="scroll"><table class="small"><thead><tr><th>Table</th><th>Change</th><th>Key</th><th>Columns</th><th></th></tr></thead><tbody>
@@ -54,9 +60,9 @@
     <td>{% if why %}<span class="pill err" title="{{ why }}">unexpected</span> <span class="small">{{ why }}</span>{% endif %}</td></tr>{% endfor %}
   </tbody></table></div>
   {% else %}<p class="muted">Nothing changed in the database.</p>{% endif %}
-</div>
+</div>{% endif %}
 
-{% if tables_used is not none %}
+{% if tables_used is not none and not browser_only %}
 <div class="card">
   <h2>Tables used</h2>
   {% if tables_used %}

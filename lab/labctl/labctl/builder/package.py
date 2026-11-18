@@ -477,6 +477,48 @@ def _engine_text(engine: str, db_var: str) -> str:
     )
 
 
+def browser_only(conf: dict) -> bool:
+    """app.yaml says the business data is in the browser (R07): no database, no tables."""
+    return (((conf.get("stack") or {}).get("data") or {}).get("kind")) == "browser"
+
+
+def _serve_example(app_id: str, port: str) -> str:
+    app = f"twinlab-{app_id}-app"
+    return f"   ```bash\n   docker run -d --name {app} -p 18080:{port} twinlab/{app_id}:dev\n   ```"
+
+
+def _browser_database_text(conf: dict, app: str) -> str:
+    data = (conf.get("stack") or {}).get("data") or {}
+    kinds = data.get("storage") or data.get("referenced") or []
+    keys = data.get("keys") or []
+    named = [k for k in data.get("script_keys") or [] if k not in keys]
+    seen = "observed" if data.get("storage") else "referenced by the page's scripts; not observed"
+    return (
+        "**There is no server database.** This app keeps its business data in the browser: "
+        + (
+            ", ".join(f"`{k}`" for k in kinds) + f" ({seen})"
+            if kinds
+            else "storage kind not observed"
+        )
+        + (
+            ", under the keys " + ", ".join(f"`{k}`" for k in keys)
+            if keys
+            else ", key names not observed"
+            + (
+                " (the page's scripts name " + ", ".join(f"`{k}`" for k in named) + ")"
+                if named
+                else ""
+            )
+        )
+        + f". Keep it there, under the same keys and the same record shape as the brief's "
+        "*Browser storage* section; where the brief says a key or shape was not observed, choose "
+        "one, write the choice in BUILD-NOTES.md and do not claim it was recorded. The container "
+        "only serves the files: its health is hosting health, not business-data health. "
+        f"`{app}/db/schema.sql` has no table: create no table, no server-side store and no "
+        "endpoint for the data, and do not read a database address."
+    )
+
+
 def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | None = None) -> str:
     """The task text for the coding agent. Pasted unchanged by a person, or passed by a builder."""
     repo_root = Path(repo_root)
@@ -565,7 +607,72 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         enhance_rule = ""
         title = f"{app_id}: demo app from brief {digest}"
         new_section = ""
-    db_example = _db_example(engine, app_id, db_var, port_text)
+    browser = browser_only(conf)
+    db_example = (
+        _serve_example(app_id, port_text)
+        if browser
+        else _db_example(engine, app_id, db_var, port_text)
+    )
+    if browser:
+        database_section = _browser_database_text(conf, app)
+        env_step = (
+            "5. One `Dockerfile` in `{app}/`. The app has no database address: it opens no "
+            "database and reads no database variable. No secrets in the image. Synthetic data "
+            "only."
+        ).format(app=app)
+        objects_step = (
+            "6. Database objects: none. `{app}/db/schema.sql` holds no table because the "
+            "business data is in browser storage; create no table, no server-side store and no "
+            "endpoint for the data."
+        ).format(app=app)
+        run_check = (
+            "4. Run the container alone (there is no database to start), as "
+            "`docs/factory-playbook.md` describes. For example:"
+        )
+        run_tail = (
+            "   Then open the app in a browser, add and change records, reload, and confirm "
+            "they are kept in the browser storage under the keys the brief names."
+        )
+        health_check = (
+            f"5. Against the running container: the health route {health_text} answers 200 "
+            "(this is hosting health: it says the files are served, not that any business data "
+            "is correct); each screen"
+        )
+    else:
+        database_section = (
+            f"The database engine to target is {_engine_text(engine, db_var)} Only the **tables "
+            f"and data** are needed: create the tables from `{app}/db/schema.sql` and fill them "
+            "with synthetic rows. Do not rebuild the original system's business logic, stored "
+            "procedures or jobs beyond the behaviours the brief lists."
+        )
+        env_step = (
+            f"5. One `Dockerfile` in `{app}/`. The app reads its database address from the "
+            f"environment\n   variable `{db_var}` (a URL such as "
+            "`mssql+pymssql://user:password@host:1433/db`); the lab also\n   sets `DB_ENGINE`, "
+            "`DB_HOST`, `DB_PORT`, `DB_NAME` (Oracle: `DB_SERVICE`), `DB_USER`,\n   "
+            "`DB_PASSWORD` and `DB_CONNECTION_STRING` (ADO.NET style) for stacks that want the "
+            "parts. No\n   secrets in the image. Synthetic data only."
+        )
+        objects_step = (
+            f"6. Database objects: create tables from `{app}/db/schema.sql` when the database has "
+            "none (the lab\n   may have created them already: then leave them). A view in the "
+            "schema is a **table** in the\n   demo database, with sample rows; read it like a "
+            "table. Stored procedures, functions and\n   triggers are not created; the brief "
+            "says which the real app has. `schema.sql` is written in\n   the real system's SQL "
+            "dialect, which can differ from the demo database's engine: when you\n   create the "
+            "tables yourself, translate types and identity columns to that engine; do not run\n"
+            "   the file unchanged."
+        )
+        run_check = (
+            "4. Run the container against a real database of the brief's engine, as\n   "
+            "`docs/factory-playbook.md` describes. For example (throwaway local values, not "
+            "secrets):"
+        )
+        run_tail = "   Use the URL scheme the app's database driver expects."
+        health_check = (
+            f"5. Against the running container: the health route {health_text} answers 200; each "
+            "screen"
+        )
     stack = _stack_text(repo_root, app_id)
     stack_block = f"\n{stack}\n" if stack.strip() else ""
     return f"""# Twin Lab build task: `{app_id}`
@@ -600,10 +707,7 @@ elements by these, and a changed id breaks them silently.
 
 ## Database
 
-The database engine to target is {_engine_text(engine, db_var)} Only the **tables and data** are
-needed: create the tables from `{app}/db/schema.sql` and fill them with synthetic rows. Do not
-rebuild the original system's business logic, stored procedures or jobs beyond the behaviours the
-brief lists.
+{database_section}
 
 {new_section}## 1. Repository and branch
 
@@ -643,18 +747,8 @@ brief lists.
    `run:` section. Every rule keeps `verification: hypothesis`.
 4. Same framework and versions as "Stack to pin", same element ids and classes as the brief's
    screen tables.
-5. One `Dockerfile` in `{app}/`. The app reads its database address from the environment
-   variable `{db_var}` (a URL such as `mssql+pymssql://user:password@host:1433/db`); the lab also
-   sets `DB_ENGINE`, `DB_HOST`, `DB_PORT`, `DB_NAME` (Oracle: `DB_SERVICE`), `DB_USER`,
-   `DB_PASSWORD` and `DB_CONNECTION_STRING` (ADO.NET style) for stacks that want the parts. No
-   secrets in the image. Synthetic data only.
-6. Database objects: create tables from `{app}/db/schema.sql` when the database has none (the lab
-   may have created them already: then leave them). A view in the schema is a **table** in the
-   demo database, with sample rows; read it like a table. Stored procedures, functions and
-   triggers are not created; the brief says which the real app has. `schema.sql` is written in
-   the real system's SQL dialect, which can differ from the demo database's engine: when you
-   create the tables yourself, translate types and identity columns to that engine; do not run
-   the file unchanged.{enhance_rule}
+{env_step}
+{objects_step}{enhance_rule}
 
 ## 4. Check
 
@@ -664,13 +758,12 @@ later). Keep the exact result of each one for steps 5 and 6.
 1. `python -m pytest -q`
 2. `python -m labctl validate` (if `labctl` is not installed, run it from `lab/labctl`)
 3. `docker build -t twinlab/{app_id}:dev {app}`
-4. Run the container against a real database of the brief's engine, as
-   `docs/factory-playbook.md` describes. For example (throwaway local values, not secrets):
+{run_check}
 
 {db_example}
 
-   Use the URL scheme the app's database driver expects.
-5. Against the running container: the health route {health_text} answers 200; each screen in
+{run_tail}
+{health_check} in
    the brief opens and shows its listed selectors; each route in the brief answers on its method
    and path; each rule in `{app}/app.yaml` behaves as written; nothing out of scope answers
    (expect 404). Remove the containers and the network afterwards.

@@ -447,7 +447,8 @@ def test_live_recording_of_the_showcase_gives_the_same_screens_and_routes(tmp_pa
     assert {s["action"] for s in steps} >= {"goto", "type", "click", "select", "submit"}
     base = {"seq", "ts", "url", "action", "selector", "dom"}
     # never "value": typed text is not kept
-    extra = {"dom_before", "screenshot", "typed_shape", "frame", "before_scope", "frames_unread"}
+    extra = {"dom_before", "screenshot", "typed_shape", "frame", "before_scope", "frames_unread",
+             "locators", "key", "modifiers", "nav", "caused_by", "blank"}  # fmt: skip
     assert all(base <= set(s) <= base | extra for s in steps)
     assert not any(
         "workbench-demo" in p.read_text(encoding="utf-8") for p in (out / "dom").iterdir()

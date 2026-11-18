@@ -178,6 +178,11 @@ def brief(
     db_engine: str = typer.Option(
         None, help="Database the real system runs: postgres, mssql, oracle, db2, mysql, sqlite."
     ),
+    data: str = typer.Option(
+        None,
+        "--data",
+        help="Where the business data lives, if the recording cannot show it: browser or server.",
+    ),
 ) -> None:
     """Write apps/<app>/model.yaml, BRIEF.md, db/schema.sql and a first app.yaml from the evidence."""
     root = _root()
@@ -186,6 +191,9 @@ def brief(
         raise typer.Exit(2)
     if db_engine is not None and db_engine not in sam.ENGINES:
         typer.echo(f"unknown --db-engine; one of {', '.join(sam.ENGINES)}", err=True)
+        raise typer.Exit(2)
+    if data is not None and data not in ("browser", "server"):
+        typer.echo("--data is browser or server", err=True)
         raise typer.Exit(2)
     found = factory.discover(root, app_id)
     if found.kinds():
@@ -198,6 +206,7 @@ def brief(
             source,
             db_engine,
             force,
+            data,
         )
     except factory.FactoryError as exc:
         typer.echo(str(exc), err=True)

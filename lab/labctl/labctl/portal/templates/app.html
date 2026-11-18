@@ -189,11 +189,13 @@
   {% if not app %}<p class="muted">Generate the brief first.</p>
   {% else %}
     {% if app.lab %}
-      <p>Front door <code>http://127.0.0.1:{{ app.lab.port }}</code> · database {% if app.lab.db_port %}(through the slowdown proxy) <code>127.0.0.1:{{ app.lab.db_port }}</code>{% else %}SQLite file, no port{% endif %}</p>
+      <p>Front door <code>http://127.0.0.1:{{ app.lab.port }}</code> · database {% if browser_only %}none: the business data is in the browser{% elif app.lab.db_port %}(through the slowdown proxy) <code>127.0.0.1:{{ app.lab.db_port }}</code>{% else %}SQLite file, no port{% endif %}</p>
+      {% if browser_only %}<p class="small muted" id="data-location">Business data: <b>in the browser</b>{% if data_info and data_info.storage %} ({{ data_info.storage | join(", ") }}){% else %} (storage kind not observed{% if data_info and data_info.referenced %}; scripts reference {{ data_info.referenced | join(", ") }}{% endif %}){% endif %}{% if data_info and data_info.keys %}, keys {{ data_info.keys | join(", ") }}{% else %}, keys not observed{% endif %}. The lab only hosts the files.</p>{% endif %}
       {% if status %}
         <p>{% if status.running %}<span class="pill ok">running</span>{% else %}<span class="pill">stopped</span>{% endif %}
           {% for svc, st in status.services.items() %}<span class="pill">{{ svc }}: {{ st }}</span> {% endfor %}
-          {% if status.health %}<span class="pill {{ 'ok' if status.health.app == 'ok' and status.health.db == 'ok' else 'err' }}">app {{ status.health.app }}, db {{ status.health.db }}</span>{% endif %}</p>
+          {% if status.health and browser_only %}<span class="pill {{ 'ok' if status.health.app == 'ok' else 'err' }}">hosting: {{ status.health.app }}</span> <span class="pill">business data: in the browser (not checked by the lab)</span>
+          {% elif status.health %}<span class="pill {{ 'ok' if status.health.app == 'ok' and status.health.db == 'ok' else 'err' }}">app {{ status.health.app }}, db {{ status.health.db }}</span>{% endif %}</p>
         {% if status.error %}<p class="small muted">{{ status.error }}</p>{% endif %}
         {% if lab_unreachable %}<p><span class="pill err">lab not reachable</span> <span class="small muted">its lab agent did not answer; whether readiness is still current cannot be confirmed.</span></p>{% endif %}
       {% endif %}
@@ -243,6 +245,11 @@
         </form>
       </details>
       {% endif %}
+      {% if browser_only %}
+      <details open><summary>Database: not applicable</summary>
+        <p class="small muted">Not applicable: this app keeps its data in the browser, so there is no database to choose. The lab runs with no database container.</p>
+      </details>
+      {% else %}
       <details {{ 'open' if db_current != 'postgres' }}><summary>Database: {{ db_label }}</summary>
         <p class="small muted">The engine the real application uses, so bots that query the database directly get the same SQL. Twin Lab creates the app's tables there from its schema (views become tables you can load sample data into). Servers your DBA provides are listed under <a href="/settings#databases">Settings</a>.</p>
         <form method="post" action="/apps/{{ app_id }}/database" class="row" data-confirm="Change the database of {{ app_id }}? Rebuild and restart afterwards; data in the old database stays there.">
@@ -251,6 +258,7 @@
         </form>
         {% if app.stack and app.stack.db and app.stack.db.engine %}<p class="small muted">The brief says the real application runs on <b>{{ app.stack.db.engine }}</b>.</p>{% endif %}
       </details>
+      {% endif %}
       <details><summary>Ports and test sign-in</summary>
         {{ ports_form() }}
       </details>
@@ -262,7 +270,9 @@
 {% set running = status and status.running %}
 <section class="card" id="data">
   <h2>5 · Data</h2>
-  {% if not running %}<p class="muted">Start the app to load data.</p>{% else %}
+  {% if browser_only %}
+  <p id="data-na"><span class="pill">not applicable</span> This app keeps its data in the browser, so the lab has no database to load, reset, baseline or save as a pack. Loading test data, Reset, baselines, named data packs and row-change checks do not apply; they are not offered. To start from clean data, clear the site's storage in the browser or use a fresh browser context.</p>
+  {% elif not running %}<p class="muted">Start the app to load data.</p>{% else %}
   {% if lab_info and lab_info.baseline %}<p class="small">Baseline: <b>{{ lab_info.baseline.label or lab_info.baseline.id }}</b> <span class="muted">{{ lab_info.baseline.loaded_at }}</span></p>{% endif %}
   <div>
     <h3>Load test data</h3>
@@ -332,12 +342,13 @@
 
 <section class="card" id="conditions">
   <h2>6 · Conditions</h2>
-  <p class="small muted">Make the app or its database slow, or fail now and then, to see how automations cope. Applies immediately; no restart.</p>
+  <p class="small muted">Make the app{% if not browser_only %} or its database{% endif %} slow, or fail now and then, to see how automations cope. Applies immediately; no restart.</p>
+  {% if browser_only %}<p class="small muted" id="conditions-na">Web conditions (slow or failing requests to the app) apply. Database conditions do not: not applicable, this app keeps its data in the browser.{% if db_only_conditions %} Not offered: {{ db_only_conditions | join(", ") }}.{% endif %}</p>{% endif %}
   {% if not running %}<p class="muted">Start the app to set conditions.</p>{% else %}
   <p>Now: <b>{{ condition.id if condition and condition.id else "normal" }}</b></p>
   <form method="post" action="/apps/{{ app_id }}/condition" class="row">
     <div><label for="cond">Condition</label><select id="cond" name="condition_id"><option value="">normal (no added delay)</option>
-      {% for c in conditions %}<option value="{{ c.id }}" {{ 'selected' if condition and condition.id == c.id }}>{{ c.id }}: {{ c.description }}</option>{% endfor %}</select></div>
+      {% for c in conditions if not (browser_only and c.id in db_only_conditions) %}<option value="{{ c.id }}" {{ 'selected' if condition and condition.id == c.id }}>{{ c.id }}: {{ c.description }}</option>{% endfor %}</select></div>
     <div><button type="submit">Apply</button></div>
   </form>
   <p class="small muted">Profiles live in <code>conditions/</code>. One whose target app is <code>any</code> applies to every app.</p>
@@ -346,7 +357,7 @@
 
 <section class="card" id="sessions">
   <h2>7 · Sessions</h2>
-  <p class="small muted">Record what an automation does: start, run the bot as you normally would, stop. You get every request with its waiting time and every row it changed.</p>
+  <p class="small muted">Record what an automation does: start, run the bot as you normally would, stop. You get every request with its waiting time{% if browser_only %}. Row changes are not applicable: this app keeps its data in the browser{% else %} and every row it changed{% endif %}.</p>
   {% if not running %}<p class="muted">Start the app to record sessions.</p>{% else %}
   {% if lab_info and lab_info.session %}
     <p><span class="pill warn">recording</span> session <code>{{ lab_info.session }}</code></p>
@@ -355,7 +366,7 @@
   <form method="post" action="/apps/{{ app_id }}/session/start" class="row">
     <div><label for="sauto">Automation</label><select id="sauto" name="automation"><option value="">(not said)</option>{% for a in automations %}<option value="{{ a.id }}">{{ a.id }}</option>{% endfor %}</select></div>
     <div><label for="slabel">Label</label><input id="slabel" type="text" name="label" placeholder="UiPath, peak-hour"></div>
-    <div><label><input type="checkbox" name="reset" value="1" checked> reset data first</label></div>
+    {% if not browser_only %}<div><label><input type="checkbox" name="reset" value="1" checked> reset data first</label></div>{% endif %}
     <div><button type="submit">Start recording</button></div>
   </form>
   {% endif %}
