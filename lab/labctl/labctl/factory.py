@@ -220,6 +220,17 @@ def generate(
     if cross:
         marker = "## Running in the lab"
         text = text.replace(marker, cross + marker, 1) if marker in text else f"{text}\n{cross}"
+    # The look (apps/<app>/look/): style sheets, design tokens, a picture per screen.
+    from labctl import lookfeel
+
+    try:
+        lookfeel.write(root, app_id)
+        look = lookfeel.brief_section(root, app_id)
+    except lookfeel.LookError as exc:  # data in what would be carried: nothing is carried
+        look = lookfeel.brief_section(root, app_id, refused=exc.places)
+    if look:
+        marker = "## Running in the lab"
+        text = text.replace(marker, look + marker, 1) if marker in text else f"{text}\n{look}"
     _write(brief_file, text)
     _write(schema_file, brief_mod.schema(result, root))
     if not model.stack.desktop:  # the app pipeline builds a container; a desktop app has none
@@ -317,7 +328,7 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
 
 
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
-             "behaviours.json", "pages", "steps")  # fmt: skip
+             "behaviours.json", "pages", "steps", "look")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:

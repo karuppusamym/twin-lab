@@ -8,7 +8,7 @@ Rules (AGENTS.md states them; this makes CI enforce them):
 2. Inputs stay as generated, on AI-built pull requests (branch `devin/...` or `build/...`, or label `ai-built`).
    The builder may not edit what the factory generated from the evidence: `BRIEF.md`,
    `model.yaml`, `db/schema.sql`, `db/seed.sql` (and `db/seed.json`: the seed the acceptance
-   replay depends on), `behaviours.json`, `pages/`, or anything in `app.yaml` outside
+   replay depends on), `behaviours.json`, `pages/`, `look/`, or anything in `app.yaml` outside
    its `run:` section.
 3. Independent oracle, on AI-built pull requests. The checks that judge the app (`automations/`,
    `flows/`, `lab/`, `conditions/`) may not change in the same pull request as an app. Otherwise
@@ -98,7 +98,7 @@ def check(changed: list[str], read_old, read_new, labels: set[str], ai_built: bo
     if ai_built:
         for path in changed:
             m = APP_FILE.match(path)
-            if m and (m.group(2) in GENERATED or m.group(2).startswith("pages/")):
+            if m and (m.group(2) in GENERATED or m.group(2).startswith(("pages/", "look/"))):
                 problems.append(
                     f"{path}: generated from the evidence; the builder may not edit it. If it is "
                     "wrong, say so in BUILD-NOTES.md."

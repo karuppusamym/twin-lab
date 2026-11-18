@@ -80,6 +80,8 @@ problem; see [Troubleshooting](#5-troubleshooting).
 
    - `BUILD_TASK.md`: the task for Devin, step by step;
    - `apps/<app>/BRIEF.md`, `model.yaml`, `db/schema.sql`, `app.yaml`, `pages/*.html`;
+   - `apps/<app>/look/`: the original style sheets, `theme.json`, a rendered picture per screen,
+     the interface's images and `texts.json` (see [06-evidence.md](06-evidence.md));
    - `evidence/<app>/screenshots/*` if there are any;
    - `AGENTS.md` and `docs/factory-playbook.md`;
    - `MANIFEST.json`: every file with its sha256.
