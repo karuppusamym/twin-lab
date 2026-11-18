@@ -363,6 +363,9 @@ def test_claude_builder_with_pr_commits_pushes_and_opens_it(tmp_path, monkeypatc
         )
 
     monkeypatch.setattr(claude_mod, "_gh", fake_gh)
+    for who in ("AUTHOR", "COMMITTER"):  # the builder commits as whoever git is set up for
+        monkeypatch.setenv(f"GIT_{who}_NAME", "Twin Lab test")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "test@example.invalid")
     package = bpkg.build(repo, "demo", tmp_path / "out")
     builder = fake_claude(tmp_path)
     builder.open_pr = True
