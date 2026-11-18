@@ -1,0 +1,71 @@
+/* QTT demo copy. Written for the demo; the real stylesheet was not available. */
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1d2430; background: #f3f5f8; }
+a { color: #1f5fae; }
+.app-header { display: flex; align-items: center; gap: 24px; padding: 10px 20px; background: #1f2f46; color: #fff; }
+.app-title { color: #fff; font-weight: 700; text-decoration: none; font-size: 16px; }
+.app-sub { font-weight: 400; opacity: .75; margin-left: 6px; font-size: 13px; }
+.main-nav { display: flex; gap: 16px; flex: 1; }
+.main-nav a { color: #d6e2f3; text-decoration: none; }
+.main-nav a:hover { color: #fff; }
+.user-box { display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.user-box a { color: #d6e2f3; }
+.content { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.app-footer { text-align: center; color: #6b7686; font-size: 12px; padding: 16px; }
+h1 { font-size: 22px; margin: 0 0 14px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+.card { background: #fff; border: 1px solid #dde3ea; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+.login-card { max-width: 360px; margin: 40px auto; display: block; }
+.login-card form { display: flex; flex-direction: column; gap: 6px; }
+.login-card input { padding: 7px 8px; border: 1px solid #bcc6d2; border-radius: 4px; }
+.login-card .btn { margin-top: 10px; }
+.btn { display: inline-block; padding: 6px 14px; border: 1px solid #b7c2cf; border-radius: 4px; background: #fff; color: #1d2430; cursor: pointer; font: inherit; text-decoration: none; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn-primary { background: #1f5fae; border-color: #1f5fae; color: #fff; }
+.btn-danger { background: #b3261e; border-color: #b3261e; color: #fff; }
+.btn-link { border-color: transparent; background: transparent; color: #1f5fae; }
+.btn-small { padding: 3px 10px; font-size: 13px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.filters input[type=text], .filters select { padding: 5px 8px; border: 1px solid #bcc6d2; border-radius: 4px; }
+.filters input[type=text] { min-width: 240px; }
+.check { display: inline-flex; gap: 4px; align-items: center; }
+.count { color: #4a5565; margin: 6px 0; }
+.hint { color: #4a5565; }
+.empty { color: #6b7686; font-style: italic; }
+.grid { width: 100%; border-collapse: collapse; background: #fff; }
+.grid th, .grid td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #e5e9ef; vertical-align: top; }
+.grid thead th { background: #eef2f6; font-weight: 600; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e6e9ee; }
+.status-open { background: #e3eefc; color: #1f4f8f; }
+.status-in_progress { background: #fff2d6; color: #7a5300; }
+.status-submitted { background: #ece3fb; color: #55308f; }
+.status-returned { background: #fde4e1; color: #8f2a1f; }
+.status-approved { background: #dff3e4; color: #1f6b35; }
+.title-row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.title-row h1 { margin: 0; }
+.msg { min-height: 0; margin: 8px 0; }
+.msg-ok { padding: 8px 12px; border-radius: 4px; background: #dff3e4; color: #1f6b35; }
+.msg-error { padding: 8px 12px; border-radius: 4px; background: #fde4e1; color: #8f2a1f; }
+.notice { padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; }
+.notice[hidden] { display: none; }
+.notice-locked { background: #eef2f6; border: 1px solid #ccd5e0; }
+.notice-returned { background: #fff2d6; border: 1px solid #ecd39a; }
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.summary dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.summary dt { color: #4a5565; }
+.summary dd { margin: 0; }
+.category-row th { background: #f7f9fb; font-weight: 600; }
+.item-code { white-space: nowrap; font-family: ui-monospace, Consolas, monospace; }
+.guidance { color: #6b7686; font-size: 12px; margin-top: 2px; }
+.comment-input { width: 100%; padding: 4px 6px; border: 1px solid #bcc6d2; border-radius: 4px; }
+.comment-input.required { border-color: #c8851a; }
+.item-status { margin-left: 6px; font-size: 12px; }
+.item-status.ok { color: #1f6b35; }
+.item-status.error { color: #8f2a1f; }
+.findings { margin: 0; padding-left: 18px; }
+.finding-comment { color: #4a5565; }
+.actions textarea { width: 100%; margin: 6px 0 10px; padding: 6px; border: 1px solid #bcc6d2; border-radius: 4px; font: inherit; }
+.buttons { display: flex; gap: 8px; }
+.audit .when { white-space: nowrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.error { max-width: 520px; margin: 40px auto; }
+@media (max-width: 800px) { .columns { grid-template-columns: 1fr; } .app-header { flex-wrap: wrap; } }
