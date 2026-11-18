@@ -2,6 +2,16 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — A page load right after a submit is that submit's result
+- Re-running the public-site trial recording showed one of its findings still failing on that
+  recording: source against source, the two submit steps were compared with the form snapshot
+  while the replay was already on the result page. That recorder named the click behind a submit
+  but not the page load the submit caused. A load within half a second of a submit, in the same
+  tab, is now attributed to it, so the click and the submit are compared at the loaded page.
+- Result on the trial recording: source against source 30 of 30, 0 failed; against both replicas
+  with a map and a declared scope 30 of 30, 0 failed, 24 differences excluded. The table is in
+  `docs/multi-app-recording-trial.md`.
+
 ## 2026-11-18 — Portal: replica addresses for a replay across applications
 - The page of a recording across applications now lists each included application with the
   address it was recorded at and a field for its replica address, filled from the lab port.

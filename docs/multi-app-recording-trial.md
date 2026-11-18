@@ -62,6 +62,23 @@ establishes preservation of captured events, not proof that every possible user 
 | P1 | Full-page fidelity and scope removal conflict: required removal of out-of-scope index links produces failures. | Define reviewed scope/exclusions before the run, or capture and include the index pages. Keep strict results visible; do not silently ignore missing elements after seeing failures. |
 | P1 | The initial about:blank event is omitted from proposal counts but retained in the first split/sequence. | Classify setup events explicitly and report consistent counts, while preserving their provenance and excluding them from claimed business coverage. |
 
+## Re-run with the current code, 18 November 2026
+
+The same combined recording (31 events, unchanged) was split and replayed again after the fixes.
+
+| Finding | State now | How it was checked |
+|---|---|---|
+| P0 split leaves `caused_by` at the global number | Fixed | Re-split: web-form steps 9 and 15 point to 8 and 14; `global_seq` is kept |
+| P0 submit compared with the form snapshot | Fixed in this change | Source against source: 30 of 30 replayed, 0 failed (was 2). The recorder of that day named the click behind a submit but not the page load the submit caused; a load within half a second of a submit is now taken as its result |
+| P0 one base address for two origins | Fixed | One run with a source-to-replica map: 30 of 30 replayed on both replicas, 0 blocked (was 12 of 31) |
+| P1 browser-storage wording | Fixed in the brief generator | The committed `apps/web-form/BRIEF.md` and `apps/web-controls/BRIEF.md` were generated before the fix and still carry the old wording |
+| P1 removed out-of-scope links fail the comparison | Fixed | With a `scope.yaml` naming the two removed links: 0 failed, 24 differences reported as excluded and not counted as passed |
+| P1 `about:blank` counted differently | Fixed | Proposal and parts both report 14 and 16 steps and 1 setup event |
+
+The replica run's status is BLOCKED, not PASS: no acceptance case or expected action list was
+declared for this recording, and structure alone is never a scoped PASS. The `scope.yaml` of the
+re-run was written for the check and is not a person's review.
+
 ## Artifacts and reproduction
 
 - Combined evidence: evidence/multi-app-trial/combined/ (HAR, DOM, screenshots, trial checkpoints).
