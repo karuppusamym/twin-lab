@@ -1,0 +1,17 @@
+app: web-controls
+id: web-controls-trial
+purpose: Verify one combined recording across two public apps and five pages
+requested_by: demo team
+steps:
+- do: Reproduce the recorded page, its controls and observed navigation with synthetic
+    test inputs
+  path: /checkboxes
+  screen: checkboxes
+- do: Reproduce the recorded page, its controls and observed navigation with synthetic
+    test inputs
+  path: /dropdown
+  screen: dropdown
+- do: Reproduce the recorded page, its controls and observed navigation with synthetic
+    test inputs
+  path: /add_remove_elements/
+  screen: Add remove elements

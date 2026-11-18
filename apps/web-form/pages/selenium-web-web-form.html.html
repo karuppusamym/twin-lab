@@ -1,0 +1,132 @@
+<!-- /selenium/web/web-form.html: value-free snapshot from har:combined. Structure, ids, classes and the application's own labels are real; every other text and value is masked (letters x/X, digits 9). -->
+<!DOCTYPE html>
+<html lang="en" class="h-999">
+
+<head>
+  <title>Web form</title>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link href="/npm/{id}/dist/css/bootstrap.min.css" rel="stylesheet">
+  
+  
+  
+  <link href="/{id}/dist/css/bootstrap-datepicker3.min.css" rel="stylesheet">
+</head>
+
+<body class="d-flex flex-column h-999">
+  <main class="flex-shrink-2">
+    <div class="container">
+      <div class="row">
+        <div class="col-12">
+          <h1 class="display-6">Web form</h1>
+        </div>
+      </div>
+      <form method="get" action="submitted-form.html">
+        <div class="row">
+          <div class="col-md-4 py-2">
+            <label class="form-label w-999">Text input
+              <input type="text" class="form-control" name="my-text" id="my-text-id" myprop="xxxxxxx">
+            </label>
+
+            <label class="form-label w-999">Password
+              <input type="password" class="form-control" name="my-password" autocomplete="off">
+            </label>
+
+            <label class="form-label w-999">Textarea
+              <textarea class="form-control" name="my-textarea" rows="3"></textarea>
+            </label>
+
+            <label class="form-label w-999">Disabled input
+              <input class="form-control" type="text" name="my-disabled" placeholder="Disabled input" disabled>
+            </label>
+
+            <label class="form-label w-999">Xxxxxxxx input
+              <input class="form-control" type="text" name="my-readonly" value="Xxxxxxxx xxxxx" readonly>
+            </label>
+
+            <div class="form-group tp-align-right mt-3">
+              <a href="./index.html">
+                Xxxxxx xx xxxxx
+              </a>
+            </div>
+          </div>
+
+          <div class="col-md-4 py-2">
+            <label class="form-label w-999">Dropdown (select)
+              <select class="form-select" name="my-select">
+                <option selected>Open this select menu</option>
+                <option value="9">One</option>
+                <option value="9">Two</option>
+                <option value="9">Three</option>
+              </select>
+            </label>
+
+            <label class="form-label w-999">Dropdown (datalist)
+              <input class="form-control" list="my-options" name="my-datalist" placeholder="Type to search...">
+              <datalist id="my-options">
+                <option value="Xxx Xxxxxxxxx">
+                <option value="Xxx Xxxx">
+                <option value="Xxxxxxx">
+                <option value="Xxx Xxxxxxx">
+                <option value="Xxxxxxx">
+              </option></option></option></option></option></datalist>
+            </label>
+
+            <label class="form-label w-999">File input
+              <input class="form-control" type="file" name="my-file">
+            </label>
+
+            <div class="form-check">
+              <label class="form-check-label w-999">
+                <input class="form-check-input" type="checkbox" name="my-check" id="my-check-1" checked>
+                Checked checkbox
+              </label>
+
+              <label class="form-check-label w-999">
+                <input class="form-check-input" type="checkbox" name="my-check" id="my-check-2">
+                Default checkbox
+              </label>
+            </div>
+
+            <div class="form-check">
+              <label class="form-check-label w-999">
+                <input class="form-check-input" type="radio" name="my-radio" id="my-radio-1" checked>
+                Checked radio
+              </label>
+            </div>
+            <div class="form-check">
+              <label class="form-check-label w-999">
+                <input class="form-check-input" type="radio" name="my-radio" id="my-radio-2">
+                Default radio
+              </label>
+            </div>
+
+            <button type="submit" class="btn btn-outline-primary mt-3">Submit</button>
+
+          </div>
+
+          <div class="col-md-4 py-2">
+            <label class="form-label w-999">Color picker
+              <input type="color" class="form-control form-control-color" name="my-colors" value="#999x9x">
+            </label>
+
+            <label class="form-label w-999">Date picker
+              <input type="text" class="form-control" name="my-date">
+            </label>
+
+            <label class="form-label w-999">Example range
+              <input type="range" class="form-range" name="my-range" min="0" max="10" step="1" value="9">
+            </label>
+
+            <input type="hidden" name="my-hidden">
+          </div>
+        </div>
+      </form>
+    </div>
+  </main>
+  
+</body>
+
+</html>

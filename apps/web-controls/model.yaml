@@ -1,0 +1,360 @@
+app: web-controls
+evidence:
+- id: har:combined
+  kind: har
+  ref: sha256:ba360f2aa45a1967
+  complete: []
+- id: flow:web-controls-trial
+  kind: flow
+  ref: demo team
+  complete: []
+stack:
+  frontend:
+    framework: server-rendered
+    rendering: server
+    marker: pages arrive with their content; no client framework marker
+  pinned: {}
+  env: []
+  server:
+    technology: Ruby
+    marker: rack.session cookie
+    confidence: likely
+  libraries:
+  - name: jQuery
+    marker: jquery script
+    confidence: certain
+    role: library
+    version: 3.7.1
+  - name: jQuery UI
+    marker: jquery-ui script
+    confidence: certain
+    role: library
+    version: 1.11.4
+  detected:
+  - kind: lib
+    name: jQuery
+    marker: jquery script
+    confidence: certain
+    version: 3.7.1
+  - kind: lib
+    name: jQuery
+    marker: jQuery banner in a bundle
+    confidence: certain
+    version: 3.7.1
+  - kind: lib
+    name: jQuery UI
+    marker: jquery-ui script
+    confidence: certain
+    version: 1.11.4
+  - kind: lib
+    name: jQuery UI
+    marker: jQuery UI banner in a bundle
+    confidence: certain
+    version: 1.11.4
+  - kind: server
+    name: Ruby
+    marker: rack.session cookie
+    confidence: likely
+  data:
+    kind: browser
+    storage: []
+    referenced: []
+    keys: []
+    shape: {}
+    evidence:
+    - no state-changing request and no data request to the app's own origin in the whole recording
+    - the page changed after interaction (9 click/typing step(s) recorded) with no request
+    - 'storage kind: not observed (the recorder does not capture browser storage); it is inferred from
+      the absence of requests'
+    script_keys: []
+  from:
+  - har:combined
+screens:
+- basis: observed
+  from:
+  - har:combined
+  - flow:web-controls-trial
+  name: checkboxes
+  aliases: []
+  path: /checkboxes
+  files:
+  - apps/web-controls/pages/checkboxes.html
+  ids:
+  - checkboxes
+  - content
+  - flash-messages
+  - page-footer
+  classes:
+  - columns
+  - example
+  - foundation-mq-large
+  - foundation-mq-medium
+  - foundation-mq-small
+  - home-link
+  - large-12
+  - large-6
+  - large-centered
+  - no-js
+  - row
+  - skip-link
+  elements:
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#flash-messages
+    label: Messages
+    actions: []
+    tag: div
+    classes:
+    - large-12
+    - columns
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#content
+    actions: []
+    tag: div
+    classes:
+    - large-12
+    - columns
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: form#checkboxes
+    actions: []
+    tag: form
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#page-footer
+    actions: []
+    tag: div
+    classes:
+    - row
+    options: []
+  calls: []
+  snapshots: 7
+- basis: observed
+  from:
+  - har:combined
+  - flow:web-controls-trial
+  name: dropdown
+  aliases: []
+  path: /dropdown
+  files:
+  - apps/web-controls/pages/dropdown.html
+  ids:
+  - content
+  - dropdown
+  - flash-messages
+  - page-footer
+  classes:
+  - columns
+  - example
+  - foundation-mq-large
+  - foundation-mq-medium
+  - foundation-mq-small
+  - home-link
+  - large-12
+  - large-6
+  - large-centered
+  - no-js
+  - row
+  - skip-link
+  elements:
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#flash-messages
+    label: Messages
+    actions: []
+    tag: div
+    classes:
+    - large-12
+    - columns
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#content
+    actions: []
+    tag: div
+    classes:
+    - large-12
+    - columns
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: select#dropdown
+    actions:
+    - select
+    tag: select
+    classes: []
+    options:
+    - Please select an option
+    - Option 1
+    - Option 2
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#page-footer
+    actions: []
+    tag: div
+    classes:
+    - row
+    options: []
+  calls: []
+  snapshots: 7
+- basis: observed
+  from:
+  - har:combined
+  - flow:web-controls-trial
+  name: add_remove_elements
+  aliases:
+  - Add remove elements
+  path: /add_remove_elements/
+  files:
+  - apps/web-controls/pages/add-remove-elements.html
+  ids:
+  - content
+  - elements
+  - flash-messages
+  - page-footer
+  classes:
+  - added-manually
+  - columns
+  - example
+  - foundation-mq-large
+  - foundation-mq-medium
+  - foundation-mq-small
+  - home-link
+  - large-12
+  - large-6
+  - large-centered
+  - no-js
+  - row
+  - skip-link
+  elements:
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#flash-messages
+    label: Messages
+    actions: []
+    tag: div
+    classes:
+    - large-12
+    - columns
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#content
+    actions: []
+    tag: div
+    classes:
+    - large-12
+    - columns
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#elements
+    actions: []
+    tag: div
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: div#page-footer
+    actions: []
+    tag: div
+    classes:
+    - row
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: button
+    actions:
+    - click
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: button.added-manually
+    actions:
+    - click
+    classes: []
+    options: []
+  calls: []
+  snapshots: 5
+routes:
+- basis: observed
+  from:
+  - har:combined
+  method: GET
+  path: /checkboxes
+  query: []
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 2
+    p50_ms: 210
+    p95_ms: 210
+    max_ms: 210
+- basis: observed
+  from:
+  - har:combined
+  method: GET
+  path: /dropdown
+  query: []
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 2
+    p50_ms: 141
+    p95_ms: 141
+    max_ms: 141
+- basis: observed
+  from:
+  - har:combined
+  method: GET
+  path: /add_remove_elements/
+  query: []
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 1
+    p50_ms: 40
+    p95_ms: 40
+    max_ms: 40
+tables: []
+rules: []
+flows:
+- web-controls-trial
+codes: {}
+conflicts: []
+problems: []

@@ -1,0 +1,18 @@
+app: web-todo
+id: web-todo-lifecycle
+purpose: Replicate a recorded public task-list flow using synthetic tasks
+requested_by: demo team
+steps:
+- do: Add tasks using Enter, complete tasks, filter All Active Completed, double-click
+    to edit, clear completed, delete tasks, reload to retain tasks
+  fields:
+  - New task
+  - Task title
+  - Completion
+  path: /todomvc/
+  rules:
+  - Whitespace-only tasks are ignored
+  - Enter saves a task; Escape cancels editing
+  - Tasks persist after reloading the browser
+  - Active and Completed filters show matching tasks only
+  screen: Task list

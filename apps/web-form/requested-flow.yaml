@@ -1,0 +1,13 @@
+app: web-form
+id: web-form-trial
+purpose: Verify one combined recording across two public apps and five pages
+requested_by: demo team
+steps:
+- do: Reproduce the recorded page, its controls and observed navigation with synthetic
+    test inputs
+  path: /selenium/web/web-form.html
+  screen: web-form.html
+- do: Reproduce the recorded page, its controls and observed navigation with synthetic
+    test inputs
+  path: /selenium/web/submitted-form.html
+  screen: submitted-form.html

@@ -1,0 +1,174 @@
+app: web-todo
+evidence:
+- id: har:public-demo
+  kind: har
+  ref: sha256:a913a8afa4c5f7ba
+  complete: []
+- id: flow:web-todo-lifecycle
+  kind: flow
+  ref: demo team
+  complete: []
+stack:
+  frontend:
+    framework: react
+    version: 16.7.0
+    rendering: client
+    marker: react-dom bundle, rendererPackageName
+  pinned:
+    react-dom: 16.7.0
+  env: []
+  libraries: []
+  detected:
+  - kind: front
+    name: react
+    marker: react-dom bundle, rendererPackageName
+    confidence: certain
+  from:
+  - har:public-demo
+screens:
+- basis: observed
+  from:
+  - har:public-demo
+  - flow:web-todo-lifecycle
+  name: todomvc
+  aliases:
+  - Task list
+  path: /todomvc/
+  files:
+  - apps/web-todo/pages/todomvc.html
+  ids:
+  - toggle-all
+  classes:
+  - clear-completed
+  - completed
+  - destroy
+  - edit
+  - filters
+  - footer
+  - header
+  - info
+  - main
+  - new-todo
+  - selected
+  - todo-count
+  - todo-list
+  - todoapp
+  - toggle
+  - toggle-all
+  - view
+  elements:
+  - basis: observed
+    from:
+    - har:public-demo
+    selector: input#toggle-all
+    label: Mark all as complete
+    actions: []
+    tag: input
+    type: checkbox
+    classes:
+    - toggle-all
+    options: []
+  - basis: observed
+    from:
+    - har:public-demo
+    selector: input.toggle
+    actions:
+    - click
+    - type
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:public-demo
+    selector: a
+    actions:
+    - click
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:public-demo
+    selector: label
+    actions:
+    - click
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:public-demo
+    selector: input.edit
+    actions:
+    - type
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:public-demo
+    selector: button.clear-completed
+    actions:
+    - click
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:public-demo
+    selector: button.destroy
+    actions:
+    - click
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:web-todo-lifecycle
+    label: New task
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:web-todo-lifecycle
+    label: Task title
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:web-todo-lifecycle
+    label: Completion
+    actions: []
+    classes: []
+    options: []
+  calls: []
+  snapshots: 15
+routes: []
+tables: []
+rules:
+- basis: described
+  from:
+  - flow:web-todo-lifecycle
+  text: Whitespace-only tasks are ignored
+  where:
+  - Task list
+- basis: described
+  from:
+  - flow:web-todo-lifecycle
+  text: Enter saves a task; Escape cancels editing
+  where:
+  - Task list
+- basis: described
+  from:
+  - flow:web-todo-lifecycle
+  text: Tasks persist after reloading the browser
+  where:
+  - Task list
+- basis: described
+  from:
+  - flow:web-todo-lifecycle
+  text: Active and Completed filters show matching tasks only
+  where:
+  - Task list
+flows:
+- web-todo-lifecycle
+codes: {}
+conflicts: []
+problems: []

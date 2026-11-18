@@ -1,0 +1,43 @@
+id: web-todo
+name: Public TodoMVC task-list demo (demo copy)
+mode: reconstruction
+copies:
+  system: Public TodoMVC task-list demo
+  source: null
+  ref: sha256:4bd670110dba449e
+  analysed: '2026-11-17'
+stack:
+  db:
+    engine: sqlite
+  frontend:
+    framework: react
+    version: 16.7.0
+    marker: react-dom bundle, rendererPackageName
+run:
+  web:
+    port: 8000
+  api:
+    port: 8000
+    health: /api/health
+db:
+  schema: db/schema.sql
+  derived_from: []
+built_for:
+- web-todo-lifecycle
+rules:
+- id: R1
+  where: Task list
+  rule: Whitespace-only tasks are ignored
+  verification: hypothesis
+- id: R2
+  where: Task list
+  rule: Enter saves a task; Escape cancels editing
+  verification: hypothesis
+- id: R3
+  where: Task list
+  rule: Tasks persist after reloading the browser
+  verification: hypothesis
+- id: R4
+  where: Task list
+  rule: Active and Completed filters show matching tasks only
+  verification: hypothesis

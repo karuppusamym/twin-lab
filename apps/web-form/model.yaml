@@ -1,0 +1,423 @@
+app: web-form
+evidence:
+- id: har:combined
+  kind: har
+  ref: sha256:e0e1ea99056e5fee
+  complete: []
+- id: flow:web-form-trial
+  kind: flow
+  ref: demo team
+  complete: []
+stack:
+  frontend:
+    framework: server-rendered
+    rendering: server
+    marker: pages arrive with their content; no client framework marker
+    ui_library: Bootstrap
+  pinned: {}
+  env: []
+  libraries:
+  - name: Bootstrap
+    marker: bootstrap/<version> script
+    confidence: certain
+    role: ui
+    version: 5.1.0
+  - name: jQuery
+    marker: jquery script
+    confidence: certain
+    role: library
+    version: 3.6.0
+  detected:
+  - kind: lib
+    name: jQuery
+    marker: jquery script
+    confidence: certain
+    version: 3.6.0
+  - kind: ui
+    name: Bootstrap
+    marker: bootstrap script
+    confidence: certain
+  - kind: ui
+    name: Bootstrap
+    marker: bootstrap stylesheet
+    confidence: certain
+  - kind: ui
+    name: Bootstrap
+    marker: bootstrap/<version> script
+    confidence: certain
+    version: 5.1.0
+  - kind: ui
+    name: Bootstrap
+    marker: bootstrap/<version> stylesheet
+    confidence: certain
+    version: 5.1.0
+  - kind: ui
+    name: Bootstrap
+    marker: form-select / ms-auto classes (Bootstrap 5)
+    confidence: likely
+    version: '5'
+  - kind: ui
+    name: Bootstrap
+    marker: navbar-nav / btn-primary / col-md-* classes
+    confidence: guess
+  data:
+    kind: browser
+    storage: []
+    referenced: []
+    keys: []
+    shape: {}
+    evidence:
+    - no state-changing request and no data request to the app's own origin in the whole recording
+    - the page changed after interaction (11 click/typing step(s) recorded) with no request
+    - 'storage kind: not observed (the recorder does not capture browser storage); it is inferred from
+      the absence of requests'
+    script_keys: []
+  from:
+  - har:combined
+screens:
+- basis: observed
+  from:
+  - har:combined
+  - flow:web-form-trial
+  name: selenium-web-web-form.html
+  aliases:
+  - web-form.html
+  path: /selenium/web/web-form.html
+  files:
+  - apps/web-form/pages/selenium-web-web-form.html.html
+  ids:
+  - my-check-1
+  - my-check-2
+  - my-options
+  - my-radio-1
+  - my-radio-2
+  - my-text-id
+  classes:
+  - btn
+  - btn-outline-primary
+  - col-12
+  - col-md-4
+  - container
+  - d-flex
+  - display-6
+  - flex-column
+  - flex-shrink-2
+  - form-check
+  - form-check-input
+  - form-check-label
+  - form-control
+  - form-control-color
+  - form-group
+  - form-label
+  - form-range
+  - form-select
+  - h-999
+  - mt-3
+  - py-2
+  - row
+  - tp-align-right
+  - w-999
+  elements:
+  - basis: observed
+    from:
+    - har:combined
+    selector: input#my-text-id
+    label: Text input
+    actions:
+    - type
+    tag: input
+    name: my-text
+    type: text
+    classes:
+    - form-control
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input[name="my-password"]
+    label: Password
+    actions: []
+    tag: input
+    name: my-password
+    type: password
+    classes:
+    - form-control
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: textarea[name="my-textarea"]
+    label: Textarea
+    actions:
+    - type
+    tag: textarea
+    name: my-textarea
+    classes:
+    - form-control
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input[name="my-disabled"]
+    label: Disabled input
+    actions: []
+    tag: input
+    name: my-disabled
+    type: text
+    classes:
+    - form-control
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input[name="my-readonly"]
+    label: Xxxxxxxx input
+    actions: []
+    tag: input
+    name: my-readonly
+    type: text
+    classes:
+    - form-control
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: select[name="my-select"]
+    label: Dropdown (select) Open this select menuOneTwoThree
+    actions:
+    - select
+    tag: select
+    name: my-select
+    classes:
+    - form-select
+    options:
+    - Open this select menu
+    - One
+    - Two
+    - Three
+  - basis: observed
+    from:
+    - har:combined
+    selector: input[name="my-datalist"]
+    label: Type to search...
+    actions: []
+    tag: input
+    name: my-datalist
+    classes:
+    - form-control
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: datalist#my-options
+    actions: []
+    tag: datalist
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input[name="my-file"]
+    label: File input
+    actions: []
+    tag: input
+    name: my-file
+    type: file
+    classes:
+    - form-control
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input#my-check-1
+    label: Checked checkbox
+    actions: []
+    tag: input
+    name: my-check
+    type: checkbox
+    classes:
+    - form-check-input
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input#my-check-2
+    label: Default checkbox
+    actions: []
+    tag: input
+    name: my-check
+    type: checkbox
+    classes:
+    - form-check-input
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input#my-radio-1
+    label: Checked radio
+    actions: []
+    tag: input
+    name: my-radio
+    type: radio
+    classes:
+    - form-check-input
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input#my-radio-2
+    label: Default radio
+    actions: []
+    tag: input
+    name: my-radio
+    type: radio
+    classes:
+    - form-check-input
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input[name="my-colors"]
+    label: Color picker
+    actions: []
+    tag: input
+    name: my-colors
+    type: color
+    classes:
+    - form-control
+    - form-control-color
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input[name="my-date"]
+    label: Date picker
+    actions: []
+    tag: input
+    name: my-date
+    type: text
+    classes:
+    - form-control
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: input[name="my-range"]
+    label: Example range
+    actions: []
+    tag: input
+    name: my-range
+    type: range
+    classes:
+    - form-range
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: button.btn.btn-outline-primary
+    actions:
+    - click
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:combined
+    selector: form
+    actions:
+    - submit
+    classes: []
+    options: []
+  calls: []
+  snapshots: 15
+- basis: observed
+  from:
+  - har:combined
+  - flow:web-form-trial
+  name: selenium-web-submitted-form.html
+  aliases:
+  - submitted-form.html
+  path: /selenium/web/submitted-form.html
+  files:
+  - apps/web-form/pages/selenium-web-submitted-form.html.html
+  ids:
+  - message
+  classes:
+  - col-12
+  - container
+  - d-flex
+  - display-6
+  - flex-column
+  - flex-shrink-2
+  - h-999
+  - lead
+  - py-2
+  - row
+  elements:
+  - basis: observed
+    from:
+    - har:combined
+    selector: p#message
+    actions: []
+    tag: p
+    classes:
+    - lead
+    options: []
+  calls: []
+  snapshots: 4
+routes:
+- basis: observed
+  from:
+  - har:combined
+  method: GET
+  path: /selenium/web/web-form.html
+  query: []
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 3
+    p50_ms: 1
+    p95_ms: 539
+    max_ms: 539
+- basis: observed
+  from:
+  - har:combined
+  method: GET
+  path: /selenium/web/submitted-form.html
+  query:
+  - my-text
+  - my-password
+  - my-textarea
+  - my-readonly
+  - my-select
+  - my-datalist
+  - my-file
+  - my-check
+  - my-radio
+  - my-colors
+  - my-date
+  - my-range
+  - my-hidden
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 2
+    p50_ms: 34
+    p95_ms: 34
+    max_ms: 34
+tables: []
+rules: []
+flows:
+- web-form-trial
+codes: {}
+conflicts: []
+problems: []
