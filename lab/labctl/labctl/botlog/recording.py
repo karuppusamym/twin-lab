@@ -14,7 +14,11 @@ The recorder also writes (all optional, so older recordings load unchanged):
   recorded (see labctl.locate.resolve);
 - `blank`: a typed value that was empty or only spaces (the value itself, as it is not data);
 - `nav` on a `goto` (`navigate`, `reload`, `back_forward`, `push`, `replace`, `pop`) and
-  `caused_by` (the seq of the click or key press that caused a submit or navigation).
+  `caused_by` (the seq of the click or key press that caused a submit or navigation);
+- `tab`, `opener` and `origin`: the tab a step happened in, the tab that opened it, and the
+  top-level page's origin; a recording that used several tabs also has the actions `tab-open`,
+  `tab-switch` and `tab-close`, and `storage` (browser storage keys and masked shapes, read by
+  labctl.har).
 
 Only request shapes are taken from the HAR (method, URL path, status, timing). Headers, cookies
 and bodies are never read.
@@ -54,6 +58,9 @@ class RecStep:
     blank: str | None = None  # type: the value was empty or spaces only (kept, it is no data)
     nav: str | None = None  # goto: how the page was reached
     caused_by: int | None = None  # submit/goto: the step whose action caused it
+    tab: str | None = None  # the tab it happened in (t1, t2...)
+    opener: str | None = None  # the tab that opened that tab (a popup, target=_blank)
+    origin: str | None = None  # of the top-level page
 
     @property
     def path(self) -> str | None:
@@ -220,7 +227,7 @@ def load(path: Path) -> Recording:
 def _extra(d: dict) -> dict:
     """The optional fields newer recorders write; anything malformed is left out."""
     out: dict = {}
-    for name in ("frame", "key", "nav", "blank"):
+    for name in ("frame", "key", "nav", "blank", "tab", "opener", "origin"):
         if isinstance(d.get(name), str):
             out[name] = d[name]
     mods = d.get("modifiers")

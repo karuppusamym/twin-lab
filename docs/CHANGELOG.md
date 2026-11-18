@@ -2,6 +2,35 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — Several applications in one recording, end to end; gaps R05, R06, R08, R11; OpenShift by hand
+- **The recorder follows every tab and popup** on one numbered sequence; each step names its
+  tab, opener and origin, and opening, switching and closing a tab are steps. One HAR covers all
+  tabs. Each step can carry browser storage keys with masked shapes, cookie names and IndexedDB
+  names (never values). The recording notes the browser, viewport and the masked areas of each
+  picture. Typed values are also removed from step addresses and storage keys.
+- **From a recording to a package per application.** `labctl evidence record-across <name>
+  <url>`, then `labctl evidence build-all <recording>`: it proposes the applications and stops
+  for review; with `--proposal <file>` or `--yes` it writes each application's evidence, a draft
+  flow to review, its brief (an existing app is enhanced, not replaced) and its build package,
+  and a summary of what a person still has to do. Each brief and build task says which
+  application comes before and after it in the flow. The portal has a Recordings page to review
+  the split and create the applications; an app page links its recording and sibling apps.
+- **R05 acceptance cases** beside a recording (`acceptance.yaml`): text, count, order, value,
+  flags, address, browser storage and database outcome, each PASS, FAIL, BLOCKED or SKIPPED.
+  **R06 browser-data baselines** (`baseline.yaml`): replay starts from a declared state in a fresh
+  context and never sends a cookie of the real site to the demo app. **R08 pictures**
+  (`visual.yaml`): pinned viewport, declared exclusions, exact mode. **R11**: a replay result
+  names what it compared and goes out of date when the app, bindings, cases or baseline change.
+  The verdict is PASS WITHIN DECLARED SCOPE, FAIL or BLOCKED; no executed case is BLOCKED.
+  `labctl behaviour acceptance|baseline|visual <recording>` write templates.
+- **OpenShift without a pipeline.** `labctl ocp render <app> --manual --out deploy/ocp/<app>`
+  writes numbered manifests and a README of the manual steps; images are built in the cluster
+  from the branch. `--all` renders every app; `labctl ocp check <dir>` validates a folder
+  offline. `deploy/ocp/` holds showcase, qtt and loandesk. SQLite and browser-only labs run as
+  one pod. Nothing here has been applied to a real cluster.
+- Left open: replay of a recording across several tabs or applications in one run; attach mode
+  cannot see what a tab did before attaching; downloads, uploads and service workers; R09, R12.
+
 ## 2026-11-17 — Replication gaps R01–R04 and R07 (`docs/replication-gaps.md`)
 - **Recorder:** key presses that are not text (Enter, Escape, Tab, chords) and double-clicks are
   steps of their own; checkboxes are `check`/`uncheck`; typing is flushed before a submit, key

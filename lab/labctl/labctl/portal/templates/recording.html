@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}{{ rec.name }} · Recordings · Twin Lab{% endblock %}
+{% block content %}
+<p class="small"><a href="/recordings">← Recordings</a></p>
+<h1>{{ rec.name }}</h1>
+<p class="lead">{{ rec.steps }} step(s){% if rec.tabs %} in tab(s) {{ rec.tabs | join(", ") }}{% endif %}. Check which applications Twin Lab found, change what is wrong, then create the applications: each gets its own evidence, a draft of the flow it needs, a brief and a build package.</p>
+
+{% if problem %}<div class="flash error" role="status">{{ problem }}</div>{% endif %}
+
+{% if proposal %}
+<form method="post" action="/recordings/{{ rec.name }}/proposal" class="card" id="proposal">
+  <h2>1 · The applications in this recording</h2>
+  <p class="small muted">Rename an application (lower-case letters, digits, dashes). Give two the same name to merge them. Leave one out with the tick box. A sign-on page is left out unless you include it.</p>
+  <div class="grid">
+  {% for e in proposal.apps %}
+    <fieldset class="card" style="margin:0;overflow-wrap:anywhere">
+      <legend><b>{{ e.kind }}</b>{% if not e.include %} · <span class="pill">left out</span>{% endif %}</legend>
+      <label for="id_{{ loop.index0 }}">Name</label>
+      <input id="id_{{ loop.index0 }}" type="text" name="id_{{ loop.index0 }}" value="{{ e.id }}" pattern="[a-z0-9][a-z0-9-]*" required>
+      <p class="small"><code>{{ e.origin }}</code>{% if e.path_prefix %} under <code>{{ e.path_prefix }}</code>{% endif %}<br>
+        {{ e.steps }} step(s), {{ e.screens }} screen(s){% if e.tabs %}, tab(s) {{ e.tabs | join(", ") }}{% endif %}</p>
+      <label><input type="checkbox" name="include_{{ loop.index0 }}" value="1" {{ 'checked' if e.include }}> Include</label>
+      {% if e.path_prefix %}
+        <input type="hidden" name="prefix_{{ loop.index0 }}" value="{{ e.path_prefix }}">
+        <label><input type="checkbox" name="remove_{{ loop.index0 }}" value="1"> Take this part back into the site</label>
+      {% endif %}
+      {% for o in e.embedded %}
+        <p class="small">Embeds <code>{{ o }}</code> (kind <b>embedded</b>)</p>
+        <label><input type="checkbox" name="separate" value="{{ o }}"> Make it its own application</label>
+      {% endfor %}
+      {% if built.get(e.id) %}<p class="small"><a href="/apps/{{ e.id }}">Open the application ↗</a></p>{% endif %}
+    </fieldset>
+  {% endfor %}
+  </div>
+  <details class="more">
+    <summary>Split one site by path</summary>
+    <p class="small muted">Two applications on the same site: name the second and the path it starts with.</p>
+    <div class="row">
+      <div><label for="split_origin">Site</label><select id="split_origin" name="split_origin"><option value="">-</option>{% for o in proposal.apps | map(attribute="origin") | unique %}<option value="{{ o }}">{{ o }}</option>{% endfor %}</select></div>
+      <div><label for="split_id">Name</label><input id="split_id" type="text" name="split_id" pattern="[a-z0-9][a-z0-9-]*" placeholder="finance"></div>
+      <div><label for="split_prefix">Path starts with</label><input id="split_prefix" type="text" name="split_prefix" placeholder="/finance"></div>
+    </div>
+  </details>
+  <button type="submit" class="secondary">Save the proposal</button>
+</form>
+<form method="post" action="/recordings/{{ rec.name }}/proposal/reset" class="inline"><button type="submit" class="secondary">Propose again from the recording</button></form>
+
+<section class="card" id="create">
+  <h2>2 · Create the applications</h2>
+  <p class="small">Splits the recording, drafts each application's flow (to review), writes each brief and builds each package. Running it again is safe: an application built before is enhanced from all its evidence, not replaced.</p>
+  <form method="post" action="/recordings/{{ rec.name }}/create"><button type="submit">Create applications</button></form>
+  {% if jobs %}<ul class="small">{% for j in jobs %}<li><a href="/jobs/{{ j.id }}">{{ j.title }}</a> <span class="pill {{ 'ok' if j.status == 'done' else 'err' if j.status in ('failed', 'interrupted') else 'warn' }}">{{ j.status }}</span></li>{% endfor %}</ul>{% endif %}
+</section>
+{% endif %}
+
+{% if rec.summary %}
+<section class="card" id="created">
+  <h2>3 · What was created</h2>
+  <div class="grid">
+  {% for a in rec.summary.apps %}
+    <div class="card" style="margin:0;overflow-wrap:anywhere">
+      <h3><a href="/apps/{{ a.id }}">{{ a.id }}</a></h3>
+      <p class="small"><code>{{ a.origin }}</code>, {{ a.steps }} step(s)<br>
+        {{ a.screens }} screen(s), {{ a.routes }} route(s), {{ a.tables | length }} table(s){% if a.tables %}: {{ a.tables | join(", ") }}{% endif %}<br>
+        Technology: {{ a.technology or "not identified" }}<br>Data: {{ a.data or "not assessed" }}</p>
+      {% if a.needs %}<p class="small"><b>Needs you:</b></p><ul class="small">{% for n in a.needs %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+      {% if a.errors %}<p class="small"><span class="pill err">failed</span> {{ a.errors | join("; ") }}</p>{% endif %}
+    </div>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if sequence %}
+<section class="card" id="sequence">
+  <h2>The flow across the applications</h2>
+  {% if sequence.handovers %}
+  <ul class="small">{% for h in sequence.handovers %}
+    <li>Step {{ h["from"].step }} → {{ h["to"].step }}: from <a href="/apps/{{ h['from'].app }}">{{ h["from"].app }}</a> <code>{{ h["from"].screen }}</code> to <a href="/apps/{{ h['to'].app }}">{{ h["to"].app }}</a> <code>{{ h["to"].screen }}</code>, {{ h.how }}</li>
+  {% endfor %}</ul>
+  {% endif %}
+  {% if sequence.travels %}
+  <p class="small"><b>Values that seem to travel</b> (a guess from their shape, never the values):</p>
+  <ul class="small" style="overflow-wrap:anywhere">{% for t in sequence.travels %}
+    <li><code>{{ t.shape }}</code> {{ "typed" if t.how == "typed" else "shown" }} in {{ t["from"].app }} ({{ t["from"].screen }}), typed into <code>{{ t["to"].field }}</code> in {{ t["to"].app }} ({{ t["to"].screen }})</li>
+  {% endfor %}</ul>
+  {% endif %}
+  <p class="small muted">Every step, in order: <code>evidence/_sequences/{{ rec.name }}.flow.yaml</code>.</p>
+</section>
+{% endif %}
+{% endblock %}

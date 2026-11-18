@@ -186,4 +186,7 @@ GLOSSARY = [
     ("Parity", "A production run of a bot compared with the same bot's run in the lab."),
     ("Fidelity replay", "A recording of the real app replayed against the demo app, step by "
                         "step, to find differences."),
+    ("Recording across applications", "One recorded flow that goes through several "
+                                      "applications and tabs; split into one recording per "
+                                      "application, the order across them kept."),
 ]  # fmt: skip

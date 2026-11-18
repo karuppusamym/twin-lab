@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Recordings · Twin Lab{% endblock %}
+{% block content %}
+<h1>Recordings across applications</h1>
+<p class="lead">One recorded flow that goes through several applications (one, then another in a new tab, and back). Twin Lab tells the applications apart, you confirm the split, and each application gets its own evidence, brief and build package. The order of the steps across them is kept.</p>
+
+<div class="grid">
+{% for r in recordings %}
+  <div class="card">
+    <h2><a href="/recordings/{{ r.name }}">{{ r.name }}</a></h2>
+    <p class="small">{{ r.steps }} step(s){% if r.tabs %} in {{ r.tabs | length }} tab(s){% endif %}, {{ r.origins | length }} site(s)</p>
+    <ul class="small" style="overflow-wrap:anywhere">{% for origin, n in r.origins.items() %}<li><code>{{ origin }}</code>: {{ n }} step(s)</li>{% endfor %}</ul>
+    {% if r.summary %}
+      <p class="small"><span class="pill ok">applications created</span>
+      {% for a in r.summary.apps %}<a href="/apps/{{ a.id }}">{{ a.id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+    {% elif r.proposal %}<p class="small"><span class="pill warn">split proposed: review it</span></p>
+    {% else %}<p class="small"><span class="pill">not split yet</span></p>{% endif %}
+    <a class="button secondary" href="/recordings/{{ r.name }}">Open</a>
+  </div>
+{% else %}
+  <div class="card"><p class="muted">No recording across applications yet. Record one below, or with <code>labctl evidence record-across &lt;name&gt; &lt;start address&gt;</code>; a recording folder anywhere can also go through <code>labctl evidence build-all &lt;folder&gt;</code>.</p></div>
+{% endfor %}
+</div>
+
+<form class="card" method="post" action="/recordings/record">
+  <h2>Record a flow across applications</h2>
+  <p class="small muted">Opens a browser on this machine. Go through the whole flow, in every application and tab it takes; close the last window to finish. Every tab and popup is recorded on one sequence. Typed values are never written. It is saved under <code>{{ folder }}/</code>.</p>
+  <div class="row">
+    <div><label for="xname">Recording name</label><input id="xname" type="text" name="name" required pattern="[a-z0-9][a-z0-9-]*" placeholder="order-to-invoice"></div>
+    <div><label for="xurl">Start address</label><input id="xurl" type="url" name="url" required placeholder="https://orders.uat.example/login"></div>
+    <div><label for="xmin">Stop after (minutes)</label><input id="xmin" type="number" name="minutes" value="30" min="1" max="240"></div>
+  </div>
+  <button type="submit">Start recording</button>
+</form>
+{% endblock %}

@@ -257,6 +257,26 @@ Check it:
 labctl ocp smoke showcase --namespace twinlab
 ```
 
+## 4a. Applying by hand, with no pipeline and no token on your machine
+
+When the only thing you can do is check code into a branch, use the files under
+`deploy/ocp/<app>/`. Each folder has numbered manifests and a `README.md` with the exact steps
+for whoever has access to the project: create one Secret, apply the folder (or paste the files
+into the console's Import YAML), start the two builds, check health through the Route. The
+images are built inside the cluster from the branch, so no outside registry is needed.
+
+```bash
+labctl ocp render <app> --manual --git-ref <branch> --out deploy/ocp/<app>
+```
+
+```bash
+labctl ocp check deploy/ocp/<app>
+```
+
+Commit the folder with the branch. `labctl ocp render --all --manual --out deploy/ocp` renders
+every app. An app on SQLite, or one that keeps its data in the browser, runs as one pod. These
+files have not been applied to a real cluster yet: the README lists what to watch on the first try.
+
 ## 5. Rolling back
 
 Each deploy changes the image tag, so OpenShift keeps the previous versions. To go back one

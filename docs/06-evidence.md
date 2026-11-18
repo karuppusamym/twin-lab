@@ -160,6 +160,14 @@ step keeping its number in the whole recording, and the sequence across applicat
 `evidence/_sequences/<recording>.flow.yaml`. Requests are assigned by their Referer and time, so
 check the proposal's step counts before applying.
 
+### Every tab, and from a recording to packages
+
+The recorder follows every tab and popup the flow opens, on one numbered sequence. `labctl
+evidence record-across <name> <url>` records such a flow, and `labctl evidence build-all
+<recording>` takes it to one evidence set, draft flow, brief and build package per application,
+stopping first for a person to confirm the proposed applications. The portal's Recordings page
+does the same.
+
 ## Privacy
 
 A HAR or a database export from a real system holds customer data, cookies and tokens. So:

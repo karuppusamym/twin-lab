@@ -18,13 +18,15 @@ import secrets
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 import yaml
 
+from labctl import dbservers
 from labctl.bindings import load_app
-from labctl.lab import _grants_sql, _roles_sql
+from labctl.lab import SQLITE_DIR, _grants_sql, _roles_sql, sqlite_app_env, sqlite_path
 
 POSTGRES_IMAGE = "quay.io/sclorg/postgresql-16-c9s"  # runs under the restricted SCC, any UID
 SECRET_KEYS = ("lab-token", "db-password", "bot-password")
@@ -62,6 +64,45 @@ echo "database logins set up"
 
 class OcpError(Exception):
     pass
+
+
+TRIGGER_ANNOTATION = "image.openshift.io/triggers"
+INTERNAL_REGISTRY = "image-registry.openshift-image-registry.svc:5000"
+
+
+@dataclass(frozen=True)
+class Images:
+    """Which images a lab runs. `agent` and `app` are image references. With `agent_stream` and
+    `app_stream` (ImageStream names, tag `latest`) the images are built inside the cluster and
+    each Deployment carries an `image.openshift.io/triggers` annotation, so it rolls out whenever a
+    build pushes a new image to the stream."""
+
+    agent: str
+    app: str
+    agent_stream: str | None = None
+    app_stream: str | None = None
+
+    @classmethod
+    def registry(cls, registry: str, app_id: str, tag: str) -> Images:
+        return cls(image(registry, "lab-agent", tag), image(registry, app_id, tag))
+
+    @classmethod
+    def streams(cls, app_id: str, namespace: str) -> Images:
+        agent, app = name(app_id, "agent"), name(app_id, "app")
+        base = f"{INTERNAL_REGISTRY}/{namespace}"
+        return cls(f"{base}/{agent}:latest", f"{base}/{app}:latest", agent, app)
+
+    def triggers(self, containers: dict[tuple[str, str], str]) -> dict[str, str]:
+        """The Deployment annotation for `{(pod field, container name): "agent" | "app"}`."""
+        if self.agent_stream is None or self.app_stream is None:
+            return {}
+        streams = {"agent": self.agent_stream, "app": self.app_stream}
+        found = [
+            {"from": {"kind": "ImageStreamTag", "name": f"{streams[which]}:latest"},
+             "fieldPath": f'spec.template.spec.{path}[?(@.name=="{cname}")].image'}
+            for (path, cname), which in containers.items()
+        ]  # fmt: skip
+        return {TRIGGER_ANNOTATION: json.dumps(found, separators=(",", ":"))}
 
 
 def name(app_id: str, part: str) -> str:
@@ -135,13 +176,29 @@ def _resources(cpu: str, memory: str, cpu_limit: str, memory_limit: str) -> dict
     }
 
 
-def _pvc(app_id: str, component: str, obj_name: str, namespace: str, size: str) -> dict:
+def _pvc(
+    app_id: str, component: str, obj_name: str, namespace: str, size: str, storage_class=None
+) -> dict:
+    spec: dict = {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": size}}}
+    if storage_class:
+        spec["storageClassName"] = storage_class
     return {
         "apiVersion": "v1",
         "kind": "PersistentVolumeClaim",
         "metadata": _meta(app_id, component, obj_name, namespace),
-        "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": size}}},
+        "spec": spec,
     }
+
+
+def _storage(
+    docs: list[dict], app_id: str, component: str, claim: str, namespace: str, size: str,
+    volume: str, *, ephemeral: bool, storage_class: str | None,
+) -> dict:  # fmt: skip
+    """A pod volume for data: a PVC (added to `docs`), or an emptyDir that goes with the pod."""
+    if ephemeral:
+        return {"name": volume, "emptyDir": {}}
+    docs.append(_pvc(app_id, component, claim, namespace, size, storage_class))
+    return {"name": volume, "persistentVolumeClaim": {"claimName": claim}}
 
 
 def _service(app_id: str, component: str, namespace: str, ports: list[tuple[str, int]]) -> dict:
@@ -157,15 +214,22 @@ def _service(app_id: str, component: str, namespace: str, ports: list[tuple[str,
 
 
 def _deployment(
-    app_id: str, component: str, namespace: str, pod: dict, *, recreate: bool, annotations=None
-) -> dict:
+    app_id: str, component: str, namespace: str, pod: dict, *, recreate: bool, annotations=None,
+    deployment_annotations=None, obj_name: str | None = None,
+) -> dict:  # fmt: skip
     template_meta: dict = {"labels": _labels(app_id, component)}
     if annotations:
         template_meta["annotations"] = annotations
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
-        "metadata": _meta(app_id, component, name(app_id, component), namespace),
+        "metadata": _meta(
+            app_id,
+            component,
+            obj_name or name(app_id, component),
+            namespace,
+            **({"annotations": deployment_annotations} if deployment_annotations else {}),
+        ),
         "spec": {
             "replicas": 1,
             "strategy": {"type": "Recreate" if recreate else "RollingUpdate"},
@@ -197,12 +261,16 @@ def render(
     root: Path,
     app_id: str,
     *,
-    registry: str,
-    tag: str,
+    registry: str | None = None,
+    tag: str | None = None,
     namespace: str,
     postgres_image: str = POSTGRES_IMAGE,
     pull_secret: str | None = None,
     expose_db: bool = False,
+    images: Images | None = None,
+    ephemeral: bool = False,
+    storage_class: str | None = None,
+    network_policy: bool = False,
 ) -> list[dict]:
     """OpenShift manifests for one app's lab, equivalent to `labctl.lab.compose`. The Secret is not
     among them: `deploy` creates it once (see `ensure_secret`).
@@ -211,7 +279,17 @@ def render(
     `lab.database`, configured in `databases:`): then no database is deployed, a Job creates the
     app's tables there, and its connection details come from the Secret `twinlab-<app>-dbconn`,
     which every deploy refreshes. `expose_db` adds a NodePort Service for the database link, so
-    bots outside the cluster can query the database (through the agent, slowdowns included)."""
+    bots outside the cluster can query the database (through the agent, slowdowns included).
+
+    The images are `registry/<name>:tag`, or `images` (built in the cluster, see `Images`). On
+    SQLite (and for apps that keep their data in the browser) there is no database pod: the app and
+    the agent run in one pod that shares a volume. `ephemeral` replaces every PVC by an emptyDir
+    (data is lost when the pod restarts); `network_policy` adds NetworkPolicies."""
+    if images is None:
+        if not registry or not tag:
+            raise OcpError("give the image registry and tag (or images built in the cluster)")
+        images = Images.registry(registry, app_id, tag)
+    tag = tag or "latest"
     _check_names(app_id)
     if not DNS1123.match(namespace):
         raise OcpError(f"namespace {namespace!r} is not a DNS-1123 name")
@@ -228,6 +306,12 @@ def render(
     if not schema_file.is_file():
         raise OcpError(f"apps/{app_id}/db/schema.sql is missing")
     schema = schema_file.read_text(encoding="utf-8")
+    if dbservers.app_choice(app) == "sqlite":
+        return _render_sqlite(
+            app_id, app, namespace, images, schema, app_port, health_port, health_path,
+            tag=tag, pull_secret=pull_secret, ephemeral=ephemeral, storage_class=storage_class,
+            network_policy=network_policy,
+        )  # fmt: skip
 
     db_host, agent_host = name(app_id, "db"), name(app_id, "agent")
     db_url = f"postgresql://lab:$(DB_PASSWORD)@%s/{app_id}"  # $(VAR): expanded by Kubernetes
@@ -251,7 +335,8 @@ def render(
 
     if ext is None:
         # --- database ------------------------------------------------------------------------------
-        docs.append(_pvc(app_id, "db", name(app_id, "db"), namespace, "5Gi"))
+        db_volume = _storage(docs, app_id, "db", name(app_id, "db"), namespace, "5Gi", "data",
+                             ephemeral=ephemeral, storage_class=storage_class)  # fmt: skip
         docs.append(_service(app_id, "db", namespace, [("postgres", DB_PORT)]))
         ready = ["pg_isready", "-q", "-h", "127.0.0.1", "-U", "lab", "-d", app_id]
         db_container = {
@@ -279,9 +364,8 @@ def render(
             "resources": _resources("100m", "256Mi", "1", "1Gi"),
             "securityContext": _restricted(),
         }
-        db_volumes = [{"name": "data", "persistentVolumeClaim": {"claimName": name(app_id, "db")}}]
         docs.append(
-            _deployment(app_id, "db", namespace, _pod([db_container], db_volumes), recreate=True)
+            _deployment(app_id, "db", namespace, _pod([db_container], [db_volume]), recreate=True)
         )
 
         # --- database logins (run on every deploy; idempotent) -------------------------------------
@@ -320,15 +404,16 @@ def render(
         })  # fmt: skip
 
     else:
-        docs.append(_tables_job(app_id, namespace, ext, registry, tag, pull_secret))
+        docs.append(_tables_job(app_id, namespace, ext, images.agent, pull_secret))
 
     # --- lab agent: front door, admin API, DB link proxy ---------------------------------------
-    docs.append(_pvc(app_id, "agent", name(app_id, "agent-state"), namespace, "1Gi"))
+    state_volume = _storage(docs, app_id, "agent", name(app_id, "agent-state"), namespace, "1Gi",
+                            "state", ephemeral=ephemeral, storage_class=storage_class)  # fmt: skip
     docs.append(_service(app_id, "agent", namespace, [("http", AGENT_PORT), ("db", AGENT_DB_PORT)]))
     probe = {"exec": {"command": ["python", "-c", _AGENT_PROBE]}, "timeoutSeconds": 6}
     agent_container = {
         "name": "agent",
-        "image": image(registry, "lab-agent", tag),
+        "image": images.agent,
         "env": [
             _secret_env("LAB_TOKEN", app_id, "lab-token"),
             _secret_env("DB_PASSWORD", app_id, "db-password"),
@@ -358,7 +443,7 @@ def render(
     }
     agent_volumes = [
         {"name": "schema", "configMap": {"name": name(app_id, "schema")}},
-        {"name": "state", "persistentVolumeClaim": {"claimName": name(app_id, "agent-state")}},
+        state_volume,
     ]
     schema_sum = hashlib.sha256(schema.encode("utf-8")).hexdigest()[:16]
     docs.append(
@@ -369,6 +454,7 @@ def render(
             _pod([agent_container], agent_volumes, pull_secret),
             recreate=True,  # its state volume is ReadWriteOnce
             annotations={"twinlab.io/schema-sha256": schema_sum},
+            deployment_annotations=images.triggers({("containers", "agent"): "agent"}),
         )
     )
 
@@ -378,7 +464,7 @@ def render(
     http_probe = {"httpGet": {"path": health_path, "port": health_port}, "timeoutSeconds": 3}
     app_container = {
         "name": "app",
-        "image": image(registry, app_id, tag),
+        "image": images.app,
         "env": _app_db_env(app_id, ext, app.run.env.database_url, db_url, agent_host),
         "ports": [{"name": n, "containerPort": p} for n, p in app_ports],
         "startupProbe": {**http_probe, "periodSeconds": 5, "failureThreshold": 36},
@@ -389,7 +475,12 @@ def render(
     }
     docs.append(
         _deployment(
-            app_id, "app", namespace, _pod([app_container], None, pull_secret), recreate=False
+            app_id,
+            "app",
+            namespace,
+            _pod([app_container], None, pull_secret),
+            recreate=False,
+            deployment_annotations=images.triggers({("containers", "app"): "app"}),
         )
     )
 
@@ -402,8 +493,159 @@ def render(
                      "ports": [{"name": "db", "port": AGENT_DB_PORT, "targetPort": "db"}]},
         })  # fmt: skip
 
-    # --- the front door: HTTPS to the agent's port 9000 only (never 15432) ---------------------
+    docs.append(_route(app_id, namespace))
+    if network_policy:
+        docs.extend(_network_policies(app_id, namespace, [("agent", AGENT_PORT)], expose_db))
+    return docs
+
+
+def _network_policies(
+    app_id: str, namespace: str, front: list[tuple[str, int]], expose_db: bool = False
+) -> list[dict]:
+    """Ingress rules for the lab's pods: the router reaches the front door (and only it), the lab's
+    own pods reach each other, and nothing else does. Selecting the pods isolates them, so these
+    are the whole list of who may connect. `front` is (component, port) of the pod the Route serves."""
+    instance = {"app.kubernetes.io/instance": app_id}
+
+    def policy(part: str, selector: dict, ingress: list[dict]) -> dict:
+        return {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": _meta(app_id, "network", name(app_id, part), namespace),
+            "spec": {"podSelector": {"matchLabels": selector}, "policyTypes": ["Ingress"],
+                     "ingress": ingress},
+        }  # fmt: skip
+
+    router = {
+        "namespaceSelector": {"matchLabels": {"policy-group.network.openshift.io/ingress": ""}}
+    }
+    out = []
+    for component, port in front:
+        out.append(policy(
+            "allow-router", _selector(app_id, component),
+            [{"from": [router], "ports": [{"protocol": "TCP", "port": port}]}],
+        ))  # fmt: skip
+    out.append(policy("allow-same-lab", instance,
+                      [{"from": [{"podSelector": {"matchLabels": instance}}]}]))  # fmt: skip
+    if expose_db:
+        out.append(policy("allow-db-link", _selector(app_id, "agent"),
+                          [{"ports": [{"protocol": "TCP", "port": AGENT_DB_PORT}]}]))  # fmt: skip
+    return out
+
+
+def _render_sqlite(
+    app_id: str, app, namespace: str, images: Images, schema: str, app_port: int,
+    health_port: int, health_path: str, *, tag: str, pull_secret, ephemeral: bool,
+    storage_class, network_policy: bool,
+) -> list[dict]:  # fmt: skip
+    """SQLite, or an app that keeps its data in the browser: no database pod and no database link.
+    The app and the lab agent run in ONE pod and share a volume for the database file, as the two
+    containers of the local lab share a Docker volume. An init container runs
+    `python -m lab_agent.sqlite_init` first (the file, WAL mode and the tables), as `lab up` does.
+    The agent reaches the app on 127.0.0.1. A browser-only app has no tables, so its volume is
+    always an emptyDir."""
+    docs: list[dict] = [{
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": _meta(app_id, "lab", name(app_id, "schema"), namespace),
+        "data": {"schema.sql": schema},
+    }]  # fmt: skip
+    state = _storage(docs, app_id, "lab", name(app_id, "agent-state"), namespace, "1Gi", "state",
+                     ephemeral=ephemeral, storage_class=storage_class)  # fmt: skip
+    data = _storage(docs, app_id, "lab", name(app_id, "sqlite"), namespace, "1Gi", "sqlite",
+                    ephemeral=ephemeral or app.browser_only, storage_class=storage_class)  # fmt: skip
+    schema_volume = {"name": "schema", "configMap": {"name": name(app_id, "schema")}}
+    db_mount = {"name": "sqlite", "mountPath": SQLITE_DIR}
+    schema_mount = {"name": "schema", "mountPath": "/lab", "readOnly": True}
+    sqlite_url = f"sqlite:///{sqlite_path(app_id)}"
+
+    init = {
+        "name": "sqlite-init",
+        "image": images.agent,
+        "command": ["python", "-m", "lab_agent.sqlite_init"],
+        "env": [
+            {"name": "ADMIN_DATABASE_URL", "value": sqlite_url},
+            {"name": "SCHEMA_PATH", "value": "/lab/schema.sql"},
+        ],
+        "volumeMounts": [schema_mount, db_mount],
+        "resources": _resources("50m", "128Mi", "500m", "512Mi"),
+        "securityContext": _restricted(),
+    }
+    probe = {"exec": {"command": ["python", "-c", _AGENT_PROBE]}, "timeoutSeconds": 6}
+    agent = {
+        "name": "agent",
+        "image": images.agent,
+        "env": [
+            _secret_env("LAB_TOKEN", app_id, "lab-token"),
+            {"name": "APP_ID", "value": app_id},
+            {"name": "APP_UPSTREAM", "value": f"http://127.0.0.1:{app_port}"},
+            {"name": "APP_HEALTH_PATH", "value": health_path},
+            {"name": "APP_VERSION", "value": tag},
+            {"name": "ADMIN_DATABASE_URL", "value": sqlite_url},
+            {"name": "SCHEMA_PATH", "value": "/lab/schema.sql"},
+            {"name": "STATE_DIR", "value": "/var/lib/twinlab"},
+            {"name": "LAB_PORT", "value": str(AGENT_PORT)},
+        ],
+        "ports": [{"name": "http", "containerPort": AGENT_PORT}],
+        "volumeMounts": [schema_mount, {"name": "state", "mountPath": "/var/lib/twinlab"}, db_mount],
+        "startupProbe": {**probe, "periodSeconds": 5, "failureThreshold": 24},
+        "readinessProbe": {**probe, "periodSeconds": 10},
+        "livenessProbe": {**probe, "periodSeconds": 20, "failureThreshold": 3},
+        "resources": _resources("100m", "128Mi", "1", "512Mi"),
+        "securityContext": _restricted(),
+    }  # fmt: skip
+    http_probe = {"httpGet": {"path": health_path, "port": health_port}, "timeoutSeconds": 3}
+    app_container = {
+        "name": "app",
+        "image": images.app,
+        "env": [{"name": k, "value": v}
+                for k, v in sqlite_app_env(app_id, app.run.env.database_url).items()],
+        "ports": [{"name": "app", "containerPort": app_port}],
+        "volumeMounts": [db_mount],
+        "startupProbe": {**http_probe, "periodSeconds": 5, "failureThreshold": 36},
+        "readinessProbe": {**http_probe, "periodSeconds": 10},
+        "livenessProbe": {**http_probe, "periodSeconds": 20, "failureThreshold": 3},
+        "resources": _resources("100m", "256Mi", "1", "768Mi"),
+        "securityContext": _restricted(),
+    }  # fmt: skip
+    pod = _pod([agent, app_container], [schema_volume, state, data], pull_secret)
+    pod = {
+        "securityContext": pod["securityContext"],
+        "initContainers": [init],
+        **{k: v for k, v in pod.items() if k != "securityContext"},
+    }  # init steps first
+    schema_sum = hashlib.sha256(schema.encode("utf-8")).hexdigest()[:16]
+    docs.append(
+        _deployment(
+            app_id, "lab", namespace, pod,
+            recreate=True,  # the volumes are ReadWriteOnce, and SQLite has one writer
+            annotations={"twinlab.io/schema-sha256": schema_sum},
+            deployment_annotations=images.triggers({
+                ("initContainers", "sqlite-init"): "agent",
+                ("containers", "agent"): "agent",
+                ("containers", "app"): "app",
+            }),
+            obj_name=name(app_id, "lab"),
+        )
+    )  # fmt: skip
+    # The front door keeps the name of the Compose lab's agent: bots and the Route use it.
     docs.append({
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": _meta(app_id, "lab", name(app_id, "agent"), namespace),
+        "spec": {"selector": _selector(app_id, "lab"),
+                 "ports": [{"name": "http", "port": AGENT_PORT, "targetPort": "http",
+                            "protocol": "TCP"}]},
+    })  # fmt: skip
+    docs.append(_route(app_id, namespace))
+    if network_policy:
+        docs.extend(_network_policies(app_id, namespace, [("lab", AGENT_PORT)]))
+    return docs
+
+
+def _route(app_id: str, namespace: str) -> dict:
+    """The front door: HTTPS to the agent's port 9000 only (never the database link)."""
+    return {
         "apiVersion": "route.openshift.io/v1",
         "kind": "Route",
         "metadata": _meta(
@@ -411,13 +653,12 @@ def render(
             annotations={"haproxy.router.openshift.io/timeout": "300s"},
         ),
         "spec": {
-            "to": {"kind": "Service", "name": agent_host, "weight": 100},
+            "to": {"kind": "Service", "name": name(app_id, "agent"), "weight": 100},
             "port": {"targetPort": "http"},
             "tls": {"termination": "edge", "insecureEdgeTerminationPolicy": "Redirect"},
             "wildcardPolicy": "None",
         },
-    })  # fmt: skip
-    return docs
+    }  # fmt: skip
 
 
 def conn_secret_name(app_id: str) -> str:
@@ -426,10 +667,8 @@ def conn_secret_name(app_id: str) -> str:
 
 def _external_server(root: Path, app):
     """The DBA's server an app uses, or None for Twin Lab's own Postgres."""
-    from labctl import dbservers
-
-    choice = dbservers.choice(app.lab.database if app.lab else None)
-    if choice == "postgres":
+    choice = dbservers.app_choice(app)
+    if choice in ("postgres", "sqlite"):  # sqlite: no server, the file is in the lab's pod
         return None
     if choice == "sqlserver":
         raise OcpError(
@@ -482,7 +721,7 @@ def _app_db_env(app_id: str, ext, var: str, db_url: str, agent_host: str) -> lis
     ]
 
 
-def _tables_job(app_id: str, namespace: str, ext, registry: str, tag: str, pull_secret) -> dict:
+def _tables_job(app_id: str, namespace: str, ext, agent_image: str, pull_secret) -> dict:
     """Creates the app's tables on the DBA's server from schema.sql (views become tables).
     Runs in the lab agent's image, which has the drivers; existing tables are left alone."""
     script = (
@@ -494,7 +733,7 @@ def _tables_job(app_id: str, namespace: str, ext, registry: str, tag: str, pull_
     )
     container = {
         "name": "db-tables",
-        "image": image(registry, "lab-agent", tag),
+        "image": agent_image,
         "command": ["python", "-c", script],
         "env": [
             _conn_env("ADMIN_DATABASE_URL", app_id, "admin-url"),
@@ -693,23 +932,27 @@ def deploy(
         _oc(["apply", "-n", namespace, "-f", "-"],
             stdin=json.dumps(conn_secret_manifest(app_id, namespace, ext)))  # fmt: skip
         log(f"secret {conn_secret_name(app_id)} updated for {ext.label} at {ext.host}")
-    job = next(d for d in docs if d["kind"] == "Job")
+    job = next((d for d in docs if d["kind"] == "Job"), None)  # none on SQLite
     rest = [d for d in docs if d["kind"] != "Job"]
     log(f"applying {len(rest)} objects to {namespace}")
     out = _oc(["apply", "-n", namespace, "-f", "-"], stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": rest}))  # fmt: skip
     log(out.stdout.strip())
-    if ext is None:
+    sqlite = job is None
+    if sqlite:
+        pass
+    elif ext is None:
         _oc(["rollout", "status", f"deployment/{name(app_id, 'db')}", "-n", namespace,
              f"--timeout={timeout}s"], timeout=timeout + 60)  # fmt: skip
         log("database ready; setting up its logins")
     else:
         log(f"creating the app's tables on {ext.label} where missing")
-    _run_setup_job(app_id, namespace, job, timeout)
-    for component in ("agent", "app"):
+    if not sqlite:
+        _run_setup_job(app_id, namespace, job, timeout)
+    for component in ("lab",) if sqlite else ("agent", "app"):
         _oc(["rollout", "status", f"deployment/{name(app_id, component)}", "-n", namespace,
              f"--timeout={timeout}s"], timeout=timeout + 60)  # fmt: skip
         log(f"{name(app_id, component)} rolled out")
-    if ext is None:
+    if ext is None and not sqlite:
         _run_setup_job(app_id, namespace, job, timeout)  # grants on the tables the app created
         log("database grants refreshed")
     if not smoke_check:

@@ -1,0 +1,36 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: twinlab-qtt-agent
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: qtt
+    app.kubernetes.io/component: agent-image
+    app.kubernetes.io/name: twinlab-qtt-agent-image
+    app.kubernetes.io/managed-by: labctl
+spec:
+  runPolicy: Serial
+  source:
+    type: Git
+    git:
+      uri: https://github.com/karuppusamym/twin-lab.git
+      ref: main
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: lab/lab-agent/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: twinlab-qtt-agent:latest
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: '1'
+      memory: 2Gi
+  successfulBuildsHistoryLimit: 3
+  failedBuildsHistoryLimit: 3
+  triggers: []

@@ -170,6 +170,37 @@ def test_two_titles_typed_into_the_same_input_replay_as_two_titles(servers, tmp_
     assert seen["titles"] == ["Synthetic one", "Synthetic two"]
 
 
+def test_the_gate_passes_its_declared_acceptance_cases_within_scope(gate, replayed, servers,
+                                                                   tmp_path):  # fmt: skip
+    """R05/R11 on the gate: the end state declared from the flow, values from the bindings."""
+    copy = tmp_path / "rec"
+    shutil.copytree(gate.path, copy)
+    typed = [s.seq for s in load(copy).steps if s.action == "type" and s.blank is None]
+    titles = [{"binding": typed[2]}, {"binding": typed[7]}]
+    (copy / "acceptance.yaml").write_text(yaml.safe_dump({
+        "scope": ["the first completion gate"], "cases": [
+            {"id": "titles", "check": "texts", "locator": ".todo-list li label", "equals": titles},
+            {"id": "none-completed", "check": "count", "locator": ".todo-list li.completed",
+             "equals": 0},
+            {"id": "left", "check": "text", "locator": ".todo-count", "equals": "2 items left"},
+            {"id": "stored", "check": "storage", "area": "localStorage", "key": tf.KEY,
+             "path": "$[1].title", "equals": titles[1]},
+            {"id": "after-reload", "check": "texts", "reload": True, "category": "data",
+             "locator": ".todo-list li label", "equals": titles},
+            {"id": "isolated", "check": "count", "fresh_context": True, "category": "data",
+             "locator": ".todo-list li", "equals": 0},
+        ]}), "utf-8")  # fmt: skip
+    report, _ = replay_gate(copy, servers.replica, artifacts=tmp_path / "art")
+    assert report.verdict == "PASS WITHIN DECLARED SCOPE", report.markdown()
+    cats = report.categories
+    assert (cats["capture"].status, cats["replay"].status) == ("PASS", "PASS")
+    assert cats["capture"].required_passed == cats["capture"].required_total == len(tf.EXPECTED)
+    assert (cats["behaviour"].required_passed, cats["data"].required_passed) == (3, 3)
+    fp = report.fingerprint
+    assert fp["recording"]["digest"] and fp["files"]["acceptance"]["digest"]
+    assert fp["files"]["bindings"]["digest"] and fp["browser"]["name"] == "chromium"
+
+
 def test_filter_links_are_targeted_although_their_selector_is_a_bare_a(gate, replayed):
     rec = load(gate.path)
     links = [s for s in rec.steps if s.action == "click" and s.selector in ("a", "a.selected")]

@@ -71,9 +71,31 @@ def fidelity(
     app_id: str | None = typer.Option(
         None, "--app", help="keep the report for this app (portal, and the readiness gate)"
     ),
+    acceptance: Path | None = typer.Option(
+        None,
+        "--acceptance",
+        help="acceptance cases (default: acceptance.yaml beside the recording)",
+    ),
+    baseline: Path | None = typer.Option(
+        None, "--baseline", help="browser-data baseline (default: baseline.yaml beside it)"
+    ),
+    visual: Path | None = typer.Option(
+        None, "--visual", help="visual baselines (default: visual.yaml beside it)"
+    ),
+    viewport: str | None = typer.Option(None, "--viewport", help="desktop or mobile"),
+    artifacts: Path | None = typer.Option(
+        None, "--artifacts", help="folder for the replica's pictures and diff images"
+    ),
+    outcome_session: str | None = typer.Option(
+        None, "--outcome-session", help="with --app: the lab session to judge `outcome` cases on"
+    ),
+    strict: bool = typer.Option(
+        False, "--strict", help="exit 1 unless the status is PASS WITHIN DECLARED SCOPE"
+    ),
 ) -> None:
-    """Replay a recording against a running app and compare each step's DOM. Exit 1 unless the
-    replay passed (a failed or BLOCKED replay exits 1)."""
+    """Replay a recording against a running app and compare each step's DOM, then evaluate the
+    declared acceptance cases and visual states. Exit 1 unless the replay passed (a failed or
+    BLOCKED replay exits 1); with --strict, unless the scoped status passed."""
     if recording.is_file():
         if actual is None:
             raise typer.BadParameter("comparing DOM files needs two files")
@@ -88,9 +110,30 @@ def fidelity(
         import yaml
 
         expected = [str(a) for a in yaml.safe_load(expect.read_text(encoding="utf-8")) or []]
+    judge = None
+    if app_id and artifacts is None:
+        from datetime import UTC, datetime
+
+        from labctl.cli import _root
+
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        artifacts = (fidelity_mod.reports_dir(_root(), app_id) / "artifacts"
+                     / f"{recording.name}--{stamp}")  # fmt: skip
+    if outcome_session:
+        if not app_id:
+            raise typer.BadParameter("--outcome-session needs --app (the lab it ran on)")
+        from labctl import outcome as outcome_mod
+        from labctl.cli import _root
+
+        def judge(automation, case):
+            result, _ = outcome_mod.for_session(_root(), app_id, outcome_session, automation, case)
+            return result
+
     report = fidelity_mod.replay(recording, base_url, values, headless=not headed,
                                  bindings=bindings, expected=expected,
-                                 storage_state=storage_state)  # fmt: skip
+                                 storage_state=storage_state, acceptance=acceptance,
+                                 baseline=baseline, visual=visual, viewport=viewport,
+                                 artifacts=artifacts, outcome_judge=judge)  # fmt: skip
     if json_out:
         json_out.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
     if md_out:
@@ -100,8 +143,55 @@ def fidelity(
 
         typer.echo(f"kept as {fidelity_mod.save(_root(), app_id, report)}")
     typer.echo(report.markdown())
-    if report.status != "pass":
+    if report.status != "pass" or (strict and report.verdict != "PASS WITHIN DECLARED SCOPE"):
         raise typer.Exit(1)
+
+
+def _template(kind: str, recording: Path, out: Path | None) -> None:
+    from labctl.botlog.recording import load as load_recording
+
+    mod = __import__(f"labctl.behaviour.{kind}", fromlist=["write_template"])
+    rec = load_recording(recording)
+    try:
+        path = mod.write_template(rec, out)
+    except FileExistsError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    import yaml
+
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    n = len(doc.get("cases") or doc.get("states") or [])
+    typer.echo(f"wrote {path}" + (f": {n} candidate(s)" if n else ""))
+
+
+@app.command("acceptance")
+def acceptance_cmd(
+    recording: Path = typer.Argument(..., exists=True, file_okay=False, help="recording folder"),
+    out: Path | None = typer.Option(None, "--out", help="default: acceptance.yaml beside it"),
+) -> None:
+    """Write a template of acceptance cases from the recording's structure (counts, list order,
+    messages, boxes, URL, storage keys), each value TODO for a person to fill with synthetic
+    values or {binding: <step>}. An existing file is never overwritten."""
+    _template("acceptance", recording, out)
+
+
+@app.command("baseline")
+def baseline_cmd(
+    recording: Path = typer.Argument(..., exists=True, file_okay=False, help="recording folder"),
+    out: Path | None = typer.Option(None, "--out", help="default: baseline.yaml beside it"),
+) -> None:
+    """Write the browser-data baseline template: the source origin and the storage keys the
+    recording saw, values TODO (synthetic fixtures only)."""
+    _template("baseline", recording, out)
+
+
+@app.command("visual")
+def visual_cmd(
+    recording: Path = typer.Argument(..., exists=True, file_okay=False, help="recording folder"),
+    out: Path | None = typer.Option(None, "--out", help="default: visual.yaml beside it"),
+) -> None:
+    """Write the visual baseline template: one state per picture the recorder kept."""
+    _template("visual", recording, out)
 
 
 @app.command("bindings")

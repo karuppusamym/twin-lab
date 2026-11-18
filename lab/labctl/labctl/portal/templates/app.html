@@ -50,6 +50,14 @@
 <section class="card" id="evidence">
   <h2>1 · Evidence</h2>
   <p class="small muted">Everything here stays on this machine (<code>evidence/{{ app_id }}/</code>, never committed). Recordings may contain customer data; only value-free shapes go into the brief.</p>
+  {% if lineage %}
+  <div id="lineage" style="overflow-wrap:anywhere">
+    <h3>Part of a flow across applications</h3>
+    <ul class="small">{% for l in lineage %}
+      <li>From recording <a href="/recordings/{{ l.recording }}">{{ l.recording }}</a>{% if l.siblings %}, with {% for s in l.siblings %}<a href="/apps/{{ s }}">{{ s }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if l.handovers %} ({{ l.handovers }} hand-over(s)){% endif %}. Sequence: <code>{{ l.sequence }}</code></li>
+    {% endfor %}</ul>
+  </div>
+  {% endif %}
   <div class="scroll"><table class="small">
     <thead><tr><th>Kind</th><th>Item</th><th></th></tr></thead><tbody>
     {% for kind, items in [("recording", evidence.recordings), ("DDL", evidence.ddl), ("API description", evidence.openapi), ("screenshot", evidence.screenshots)] %}

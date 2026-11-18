@@ -29,10 +29,11 @@ from pydantic import ValidationError
 from labctl import bindings as bnd
 from labctl import conformance as conf
 from labctl import copies as copies_mod
-from labctl import factory, repo
+from labctl import factory, multiapp, repo
 from labctl import lab as lab_mod
 from labctl import outcome as outcome_mod
 from labctl import packs as packs_mod
+from labctl import split as split_mod
 from labctl import verdict as verdict_mod
 from labctl.analyse import run as analysis
 from labctl.analyse import uipath
@@ -760,6 +761,137 @@ def create_app(root: Path) -> FastAPI:
         path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
         return back("/flows", f"Flow {model.id} saved")
 
+    # --- recordings across applications ----------------------------------------------------------
+
+    def find_recording(name: str) -> dict:
+        name = slug(name, "recording name")
+        for info in multiapp.recordings(root):
+            if info["name"] == name:
+                return info
+        raise HTTPException(404, f"No recording {name} across applications")
+
+    def recording_proposal(info: dict) -> tuple[split_mod.Proposal | None, str | None]:
+        path = multiapp.proposal_file(info["path"])
+        try:
+            if path.is_file():
+                return split_mod.load(path), None
+            prop = split_mod.propose(info["path"])
+            split_mod.save(prop, path)
+            return prop, None
+        except split_mod.ProposalError as exc:
+            return None, str(exc)
+
+    @portal.get("/recordings", response_class=HTMLResponse)
+    def recordings_page(request: Request):
+        return page(request, "recordings.html", recordings=multiapp.recordings(root),
+                    folder=multiapp.recordings_dir(root).relative_to(root).as_posix())  # fmt: skip
+
+    @portal.get("/recordings/{name}", response_class=HTMLResponse)
+    def recording_page(request: Request, name: str):
+        info = find_recording(name)
+        prop, problem = recording_proposal(info)
+        seq_path = split_mod.sequence_path(info["path"], root)
+        sequence = None
+        if seq_path.is_file():
+            try:
+                sequence = yaml.safe_load(seq_path.read_text(encoding="utf-8"))
+            except yaml.YAMLError:
+                sequence = None
+        built = {a["id"]: a for a in (info["summary"] or {}).get("apps", [])}
+        return page(request, "recording.html", rec=info, proposal=prop, problem=problem,
+                    sequence=sequence, built=built,
+                    jobs=jobs.list("build-all", info["name"], 5))  # fmt: skip
+
+    @portal.post("/recordings/{name}/proposal")
+    async def recording_proposal_save(request: Request, name: str):
+        info = find_recording(name)
+        prop, problem = recording_proposal(info)
+        url = f"/recordings/{info['name']}"
+        if prop is None:
+            return back(url, problem or "No proposal", "error")
+        form = await request.form()
+        apps = []
+        for n, e in enumerate(prop.apps):
+            entry = e.to_dict()
+            entry["id"] = str(form.get(f"id_{n}", e.id)).strip().lower()
+            entry["include"] = form.get(f"include_{n}") == "1"
+            prefix = str(form.get(f"prefix_{n}", "")).strip()
+            entry.pop("path_prefix", None)
+            if prefix:
+                entry["path_prefix"] = prefix
+            if form.get(f"remove_{n}") == "1" and e.path_prefix:
+                continue  # a part split off by path, taken back
+            apps.append(entry)
+        # An embedded site made its own application.
+        for origin in form.getlist("separate"):
+            if origin and not any(a["origin"] == origin for a in apps):
+                apps.append({"id": split_mod.suggest_id(str(origin)), "origin": str(origin),
+                             "kind": "app", "include": True})  # fmt: skip
+        # One site split by path: a new entry with the same origin and a path prefix.
+        origin = str(form.get("split_origin", "")).strip()
+        if origin:
+            apps.append({"id": str(form.get("split_id", "")).strip().lower(), "origin": origin,
+                         "kind": "app", "include": True,
+                         "path_prefix": str(form.get("split_prefix", "")).strip()})  # fmt: skip
+        try:
+            checked = split_mod.from_dict({"recording": prop.recording, "apps": apps})
+        except split_mod.ProposalError as exc:
+            return back(url, f"Not saved: {exc}", "error")
+        split_mod.save(checked, multiapp.proposal_file(info["path"]))
+        return back(url, "Proposal saved. Check it, then create the applications.")
+
+    @portal.post("/recordings/{name}/proposal/reset")
+    def recording_proposal_reset(name: str):
+        info = find_recording(name)
+        multiapp.proposal_file(info["path"]).unlink(missing_ok=True)
+        return back(f"/recordings/{info['name']}", "Proposal made again from the recording")
+
+    @portal.post("/recordings/{name}/create")
+    def recording_create(name: str):
+        info = find_recording(name)
+        prop, problem = recording_proposal(info)
+        if prop is None:
+            return back(f"/recordings/{info['name']}", problem or "No proposal", "error")
+        path = multiapp.proposal_file(info["path"])
+
+        def job(log):
+            done = multiapp.build_all(root, info["path"], proposal=path, say=print)
+            failed = [f"{a.id}: {e}" for a in done.apps for e in a.errors]
+            if failed:
+                raise RuntimeError("; ".join(failed))
+            return {"apps": [a.id for a in done.apps], "summary": done.to_dict()["apps"]}
+
+        job_id = jobs.submit("build-all", f"Create applications from {info['name']}", job,
+                             info["name"])  # fmt: skip
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @portal.post("/recordings/record")
+    def recording_record(request: Request, name: str = Form(...), url: str = Form(...),
+                         minutes: float = Form(30)):  # fmt: skip
+        target = multiapp.recordings_dir(root) / slug(name, "recording name")
+        client = request.client.host if request.client else ""
+        if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
+            return back("/recordings", "Recording opens a browser window on the Twin Lab machine "
+                        "itself, where you cannot see it. Record there.", "error")  # fmt: skip
+        if not url.strip().startswith(("http://", "https://")):
+            return back("/recordings", "Give the address where the flow starts", "error")
+        if target.exists():
+            return back("/recordings", f"{target.name} already exists", "error")
+
+        def job(log):
+            from labctl import recorder
+
+            print(f"A browser window opens on this machine at {url}. Go through the flow, in as "
+                  "many applications and tabs as it takes, then close the last window.")  # fmt: skip
+            recorder.record(url.strip(), target, headless=False,
+                            max_seconds=max(1.0, min(minutes, 240.0)) * 60)  # fmt: skip
+            print(f"Saved to {target.relative_to(root).as_posix()}")
+            return {"recording": target.name}
+
+        job_id = jobs.submit("record", f"Record a flow across applications: {target.name}", job,
+                             target.name)  # fmt: skip
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
     # --- apps ------------------------------------------------------------------------------------
 
     @portal.get("/apps", response_class=HTMLResponse)
@@ -879,6 +1011,7 @@ def create_app(root: Path) -> FastAPI:
             devin_jobs=devin_list,
             repo_name=(cfg.github_repo if cfg else None),
             jobs=jobs.list(subject=app_id, limit=10),
+            lineage=multiapp.lineage(root, app_id),
         )
 
     @portal.post("/apps/{app_id}/evidence")

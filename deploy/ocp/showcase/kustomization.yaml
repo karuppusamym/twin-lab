@@ -1,0 +1,21 @@
+# `oc apply -k .` applies the same files, in this order. The Secret is not here: the
+# README says how to create it by hand.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 01-imagestream-twinlab-showcase-agent.yaml
+  - 02-imagestream-twinlab-showcase-app.yaml
+  - 03-buildconfig-twinlab-showcase-agent.yaml
+  - 04-buildconfig-twinlab-showcase-app.yaml
+  - 05-configmap-twinlab-showcase-schema.yaml
+  - 06-configmap-twinlab-showcase-db-setup.yaml
+  - 07-persistentvolumeclaim-twinlab-showcase-db.yaml
+  - 08-service-twinlab-showcase-db.yaml
+  - 09-deployment-twinlab-showcase-db.yaml
+  - 10-job-twinlab-showcase-db-setup.yaml
+  - 11-persistentvolumeclaim-twinlab-showcase-agent-state.yaml
+  - 12-service-twinlab-showcase-agent.yaml
+  - 13-deployment-twinlab-showcase-agent.yaml
+  - 14-service-twinlab-showcase-app.yaml
+  - 15-deployment-twinlab-showcase-app.yaml
+  - 16-route-twinlab-showcase-web.yaml

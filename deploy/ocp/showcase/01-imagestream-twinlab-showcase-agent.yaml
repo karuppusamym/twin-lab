@@ -1,0 +1,14 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: twinlab-showcase-agent
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: showcase
+    app.kubernetes.io/component: agent-image
+    app.kubernetes.io/name: twinlab-showcase-agent-image
+    app.kubernetes.io/managed-by: labctl
+spec:
+  lookupPolicy:
+    local: false

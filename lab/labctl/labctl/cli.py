@@ -183,9 +183,22 @@ def brief(
         "--data",
         help="Where the business data lives, if the recording cannot show it: browser or server.",
     ),
+    draft_flow: bool = typer.Option(
+        False,
+        "--draft-flow",
+        help="No automation or flow says what the app needs: first write a draft requested "
+        "flow from each of its recordings (flows/<app>-<recording>.yaml), to review.",
+    ),
 ) -> None:
     """Write apps/<app>/model.yaml, BRIEF.md, db/schema.sql and a first app.yaml from the evidence."""
     root = _root()
+    if draft_flow:
+        from labctl import multiapp
+
+        for rec in factory.discover(root, app_id).recordings:
+            if rec.is_dir() and (rec / "steps.jsonl").is_file():
+                path, note = multiapp.write_draft_flow(root, app_id, rec, rec.name)
+                typer.echo(f"flow: {path.relative_to(root) if path else '-'} ({note})")
     if source is not None and not source.is_dir():
         typer.echo(f"source folder not found: {source}", err=True)
         raise typer.Exit(2)
@@ -210,6 +223,10 @@ def brief(
         )
     except factory.FactoryError as exc:
         typer.echo(str(exc), err=True)
+        if "nothing to build" in str(exc) and found.recordings:
+            typer.echo(f"  the evidence has {len(found.recordings)} recording(s): run again with "
+                       "--draft-flow to draft the requested flow from them, or write "
+                       f"flows/{app_id}-....yaml yourself", err=True)  # fmt: skip
         raise typer.Exit(1) from exc
     except UnsupportedStack as exc:
         typer.echo(f"UNSUPPORTED  {exc}", err=True)

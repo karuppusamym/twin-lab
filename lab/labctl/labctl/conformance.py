@@ -426,11 +426,15 @@ def _check_fidelity(root: Path, automation: Automation, report: Report, require:
     - it failed on an element this bot uses: BLOCKED (the demo app differs where the bot looks);
     - it failed only on other elements: noted, not blocking;
     - it passed: ok;
-    - none, or made before the app last changed: not checked (BLOCKED with `require`).
+    - none, or out of date: not checked (BLOCKED with `require`). A report with a fingerprint
+      (R11) is out of date when the recording, its bindings, acceptance, baseline or visual file,
+      or the app (description, brief, schema, build, image, database choice) changed since; an
+      older report, when the app's files changed after it ("checked before this was tracked");
+    - with acceptance cases declared, its scoped status must be PASS WITHIN DECLARED SCOPE.
     """
     from datetime import UTC, datetime
 
-    from labctl.behaviour import fidelity
+    from labctl.behaviour import durable, fidelity
 
     used: dict[str, set[str]] = {}
     for touch in automation.touches:
@@ -449,17 +453,35 @@ def _check_fidelity(root: Path, automation: Automation, report: Report, require:
         stamp = name.rsplit("--", 1)[-1]
         when = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
         what = f"replay of {rep.recording} ({when:%Y-%m-%d %H:%M} UTC)"
-        if when.timestamp() + 2 < _app_changed_at(root, app_id):  # the stamp is whole seconds
-            report.items.append(Item("fidelity", app_id, what, missing,
-                                     "the app changed after this replay: replay again"))  # fmt: skip
-            continue
+        legacy = not isinstance(rep.fingerprint, dict)
+        if legacy:
+            if when.timestamp() + 2 < _app_changed_at(root, app_id):  # the stamp is whole seconds
+                report.items.append(Item("fidelity", app_id, what, missing,
+                                         "the app changed after this replay: replay again"))  # fmt: skip
+                continue
+        else:
+            saved_image = (rep.fingerprint.get("app") or {}).get("image")
+            fresh = durable.assess(root, app_id, rep, image=image_id(app_id) if saved_image
+                                   else None)  # fmt: skip
+            if fresh.state == "stale":
+                report.items.append(Item("fidelity", app_id, what, missing,
+                                         f"out of date: {_join(fresh.reasons)} — replay again"))  # fmt: skip
+                continue
+        if rep.cases or rep.visual:
+            if rep.verdict != "PASS WITHIN DECLARED SCOPE":
+                why = (rep.verdict_reasons or rep.problems or ["see the report"])[0]
+                report.items.append(Item("fidelity", app_id, what, "failed",
+                                         f"acceptance {rep.verdict}: {why}"))  # fmt: skip
+                continue
         if rep.status == "blocked":  # a step could not run: nothing is known about the rest
             why = (rep.problems or ["see the report"])[0]
             report.items.append(Item("fidelity", app_id, what, "failed", f"replay BLOCKED: {why}"))
             continue
         failed = [s for s in rep.steps if s.status == "fail"]
         if not failed:
-            report.items.append(Item("fidelity", app_id, what, "ok"))
+            report.items.append(Item("fidelity", app_id, what, "ok",
+                                     "checked before this was tracked (no fingerprint): only the "
+                                     "app's file times were compared" if legacy else ""))  # fmt: skip
             continue
         elements = {s.selector for s in failed if s.selector} | {
             d.element for s in failed for d in s.differences

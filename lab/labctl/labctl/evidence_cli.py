@@ -219,3 +219,73 @@ def split(
     except sp.ProposalError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
+
+
+@app.command("record-across")
+def record_across(
+    name: str = typer.Argument(..., help="Recording name (lower case, digits, dashes)."),
+    url: str = typer.Argument(..., help="Where the flow starts, in the first application."),
+    no_screenshots: bool = typer.Option(False, "--no-screenshots"),
+) -> None:
+    """Record one flow that goes through several applications (every tab and popup it opens),
+    into evidence/_recordings/<name>/. Then `labctl evidence build-all` makes one evidence set,
+    brief and build package per application."""
+    import re as _re
+
+    from labctl import multiapp, recorder
+
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+        typer.echo("the name is lower-case letters, digits and dashes", err=True)
+        raise typer.Exit(2)
+    try:
+        root = repo.find_root()
+    except repo.NotARepo:
+        root = Path.cwd()
+    out = multiapp.recordings_dir(root) / name
+    if out.exists():
+        typer.echo(f"{out} already exists", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"recording into {out}; close the last browser window to finish")
+    recorder.record(url, out, screenshots=not no_screenshots)
+    typer.echo(f"done: labctl evidence build-all {out}")
+
+
+@app.command("build-all")
+def build_all(
+    recording: Path = typer.Argument(..., help="A recording folder (one or several applications)."),
+    proposal: Path | None = typer.Option(
+        None, "--proposal", help="The reviewed split proposal (default: propose, then stop)."
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Accept the proposal as it is (the one beside the recording, if any)."
+    ),
+    db_engine: str | None = typer.Option(None, "--db-engine", help="For every app's brief."),
+    out: Path | None = typer.Option(None, "--out", help="Folder for the packages."),
+) -> None:
+    """From one recording to a brief and a build package per application: propose the split
+    (and stop for review), split, draft each app's requested flow, write each brief, build each
+    package, and say what still needs a person. Safe to run again: every stage repeats or skips."""
+    from labctl import multiapp
+
+    try:
+        root = repo.find_root()
+    except repo.NotARepo:
+        root = Path.cwd()
+    if not recording.is_dir():
+        typer.echo(f"{recording} is not a recording folder", err=True)
+        raise typer.Exit(2)
+    if proposal is not None and not proposal.is_file():
+        typer.echo(f"{proposal} not found", err=True)
+        raise typer.Exit(2)
+    from labctl import split as sp
+
+    try:
+        done = multiapp.build_all(root, recording, proposal=proposal, yes=yes, db_engine=db_engine,
+                                  package_dir=out, say=typer.echo)  # fmt: skip
+    except (sp.ProposalError, multiapp.BuildAllError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    if done.stopped:
+        return
+    if any(a.errors for a in done.apps):
+        raise typer.Exit(1)

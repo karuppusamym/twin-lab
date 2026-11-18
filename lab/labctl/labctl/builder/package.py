@@ -457,6 +457,20 @@ def _stack_text(repo_root: Path, app_id: str) -> str:
     return "\n".join(f"   > {line}" if line else "   >" for line in body.splitlines()[:14])
 
 
+CROSS_APP = "Part of a flow across applications"
+
+
+def _cross_app_text(repo_root: Path, app_id: str) -> str:
+    """The brief's section on the flow across applications this app is part of, for the task
+    ("" for an app recorded on its own)."""
+    text = _content(repo_root / "apps" / app_id / "BRIEF.md").decode("utf-8", "replace")
+    body = _section(text, CROSS_APP)
+    if not body:
+        return ""
+    return (f"## {CROSS_APP}\n\n{body}\n\nThe other applications are built from their own "
+            "packages: do not build them here, and do not stub them inside this app.\n\n")  # fmt: skip
+
+
 def _engine_text(engine: str, db_var: str) -> str:
     e = (engine or "postgres").lower()
     if e in ("postgres", "postgresql"):
@@ -675,6 +689,7 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         )
     stack = _stack_text(repo_root, app_id)
     stack_block = f"\n{stack}\n" if stack.strip() else ""
+    cross_section = _cross_app_text(repo_root, app_id)
     return f"""# Twin Lab build task: `{app_id}`
 
 You are a coding agent. Build the demo app `{app_id}` for Twin Lab from its build brief and hand
@@ -709,7 +724,7 @@ elements by these, and a changed id breaks them silently.
 
 {database_section}
 
-{new_section}## 1. Repository and branch
+{cross_section}{new_section}## 1. Repository and branch
 
 {repo_line}
 2. Work on a branch named `{branch}`, created from the default branch (if you are already on a

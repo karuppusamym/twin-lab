@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: twinlab-showcase-db-setup
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: showcase
+    app.kubernetes.io/component: db-setup
+    app.kubernetes.io/name: twinlab-showcase-db-setup
+    app.kubernetes.io/managed-by: labctl
+data:
+  setup.sql: |
+    ALTER ROLE lab PASSWORD :'owner_pw';
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'bot') THEN
+        CREATE ROLE bot LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+      END IF;
+    END $$;
+    ALTER ROLE bot PASSWORD :'bot_pw';
+    GRANT CONNECT ON DATABASE "showcase" TO bot;
+    GRANT USAGE ON SCHEMA public TO bot;
+    ALTER DEFAULT PRIVILEGES FOR ROLE lab IN SCHEMA public
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO bot;
+    ALTER DEFAULT PRIVILEGES FOR ROLE lab IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO bot;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bot;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bot;
+  setup.sh: |
+    set -eu
+    for i in $(seq 1 90); do
+      pg_isready -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" && break
+      echo "waiting for the database ($i)"; sleep 2
+    done
+    psql -v ON_ERROR_STOP=1 -q -v owner_pw="$PGPASSWORD" -v bot_pw="$BOT_PASSWORD" -f /setup/setup.sql
+    echo "database logins set up"

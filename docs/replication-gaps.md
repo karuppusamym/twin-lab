@@ -108,6 +108,17 @@ is a dated snapshot and should be read with this update.
   (R06). Evidence: `lab/labctl/tests/test_browser_only_apps.py`.
 - R05, R06, R08–R12: open.
 
+Status on 18 November 2026:
+
+- R05, R06, R08, R11: implemented. Evidence: `test_acceptance_cases.py`,
+  `test_browser_baseline.py`, `test_visual_fidelity.py`, `test_fidelity_fingerprint.py`. Mobile
+  pictures need approved images; database outcome cases were tested with a stand-in.
+- R06 capture: the recorder now keeps storage keys with masked shapes.
+- R10: partly. `labctl evidence build-all` and the portal's Recordings page; acceptance,
+  baseline and picture files are not yet editable in the portal.
+- R09, R12: open. The findings of the multi-application trial are being checked against the
+  multi-tab recorder and are not marked fixed here.
+
 The section below is the status when this document was first written.
 
 ## Current status
@@ -115,3 +126,10 @@ The section below is the status when this document was first written.
 No replication gap above is marked fixed by this document update. The demonstrated result remains
 13 passing explicit paired checkpoints for a browser-only sample, with the capture/replay gaps
 listed above. Next implementation task: R01-R04, with an independent complete-flow acceptance test.
+
+## Multi-application follow-up
+
+See [the two-application, five-page trial](multi-app-recording-trial.md): 23 paired business
+checks passed, but strict replay did not. New concrete fixes are split reference renumbering,
+submit/navigation snapshot boundaries and per-origin replica routing. Source-against-source
+replay reproduced the two submission failures. These findings are not marked fixed.

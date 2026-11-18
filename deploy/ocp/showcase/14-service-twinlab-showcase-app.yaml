@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: twinlab-showcase-app
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: showcase
+    app.kubernetes.io/component: app
+    app.kubernetes.io/name: twinlab-showcase-app
+    app.kubernetes.io/managed-by: labctl
+spec:
+  selector:
+    app.kubernetes.io/instance: showcase
+    app.kubernetes.io/component: app
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+    protocol: TCP

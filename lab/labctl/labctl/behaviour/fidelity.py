@@ -33,6 +33,9 @@ from pydantic import BaseModel
 
 from labctl.behaviour import bindings as bindings_mod
 from labctl.behaviour import dom as domlib
+from labctl.behaviour.acceptance import CaseResult
+from labctl.behaviour.judging import Category, Divergence, Requirements
+from labctl.behaviour.visual import VisualResult
 from labctl.botlog.recording import Recording, RecStep
 from labctl.botlog.recording import load as load_recording
 
@@ -101,10 +104,24 @@ class Coverage(BaseModel):
 class FidelityReport(BaseModel):
     recording: str
     base_url: str | None = None
+    # The replay's result, as current readers (portal, conformance, e2e) know it. With acceptance
+    # cases declared it is also `fail` when a required case failed, `blocked` when one was blocked.
     status: Literal["pass", "fail", "blocked"]
     steps: list[StepReport] = []
     coverage: Coverage | None = None
     problems: list[str] = []  # why the result is not pass, first one first
+    # Added for R05/R06/R08/R11; all default, so older reports still load.
+    verdict: str | None = None  # PASS WITHIN DECLARED SCOPE | FAIL | BLOCKED (None: older report)
+    verdict_reasons: list[str] = []
+    categories: dict[str, Category] = {}  # capture, replay, behaviour, data, appearance
+    cases: list[CaseResult] = []
+    visual: list[VisualResult] = []
+    visual_setup: dict | None = None
+    baseline: dict | None = None  # what was declared and applied (names only, no values)
+    requirements: Requirements | None = None
+    first_divergence: Divergence | None = None
+    fingerprint: dict | None = None  # what was compared (labctl.behaviour.durable)
+    artifacts: str | None = None  # the folder with the replica's pictures and diff images
 
     def first_failure(self) -> Difference | None:
         for s in self.steps:
@@ -114,6 +131,55 @@ class FidelityReport(BaseModel):
 
     def markdown(self) -> str:
         lines = [f"# Fidelity: {self.recording}", "", f"**Result: {self.status}**", ""]
+        if self.verdict:
+            lines += [f"**Status: {self.verdict}**", ""]
+            lines += [f"- {r}" for r in self.verdict_reasons] + (
+                [""] if self.verdict_reasons else []
+            )
+        if self.categories:
+            lines += ["| Category | Result | Required passed / total | Optional passed / total "
+                      "| Note |", "|---|---|---|---|---|"]  # fmt: skip
+            for name, c in self.categories.items():
+                lines.append(f"| {name} | {c.status} | {c.required_passed} / {c.required_total} "
+                             f"| {c.optional_passed} / {c.optional_total} | {c.note or ''} |")  # fmt: skip
+            lines.append("")
+        if self.fingerprint:
+            from labctl.behaviour.durable import describe
+
+            lines += [describe(self.fingerprint), ""]
+        if self.first_divergence:
+            d = self.first_divergence
+            lines += ["## First divergence", "", f"- {d.kind} {d.what} at step {d.step}"
+                      + (f", locator {d.locator}" if d.locator else ""), f"- {d.state}"]  # fmt: skip
+            for label, p in (("source", d.before), ("replica", d.after), ("diff", d.diff)):
+                if p:
+                    lines.append(f"- {label} picture: {p}")
+            if d.requests:
+                lines.append("- source requests: " + ", ".join(d.requests))
+            lines.append("")
+        if self.cases:
+            lines += ["## Acceptance cases", "", "| Case | Category | Required | When | Check "
+                      "| Result | Note |", "|---|---|---|---|---|---|---|"]  # fmt: skip
+            for c in self.cases:
+                note = (c.note or "").replace("|", "/")
+                lines.append(f"| {c.id} | {c.category} | {'yes' if c.required else 'no'} "
+                             f"| {c.after} | {c.check} | {c.status} | {note} |")  # fmt: skip
+            lines.append("")
+        if self.visual:
+            lines += ["## Visual states", "", "| State | Viewport | Mode | Compared | Differing "
+                      "| Ratio | Excluded | Masked | Result |",
+                      "|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
+            for v in self.visual:
+                lines.append(f"| {v.id} | {v.viewport} | {v.mode} | {v.compared} | {v.differing} "
+                             f"| {v.ratio:.4%} | {v.excluded} | {v.masked} | {v.status} |")  # fmt: skip
+            lines.append("")
+        if self.requirements:
+            r = self.requirements
+            for label, items in (("Scope", r.scope), ("Excluded", r.excluded),
+                                 ("Evidence-backed", r.evidence_backed), ("Assumed", r.assumed),
+                                 ("Unobserved", r.unobserved), ("Unsupported", r.unsupported)):  # fmt: skip
+                if items:
+                    lines += [f"**{label}:**", ""] + [f"- {i}" for i in items] + [""]
         c = self.coverage
         if c is not None:
             expected = "not declared" if c.expected is None else str(c.expected)
@@ -182,6 +248,13 @@ def save(root: Path, app_id: str, report: FidelityReport) -> str:
 
     out = reports_dir(root, app_id)
     out.mkdir(parents=True, exist_ok=True)
+    if isinstance(report.fingerprint, dict) and "app" not in report.fingerprint:
+        from labctl import conformance
+        from labctl.behaviour import durable
+
+        # the replica it ran against: what freshness compares later (R11)
+        report.fingerprint = durable.add_app(report.fingerprint, root, app_id,
+                                             conformance.image_id(app_id))  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     name = f"{Path(report.recording).name}--{stamp}"
     (out / f"{name}.md").write_text(report.markdown(), encoding="utf-8", newline="\n")
@@ -282,6 +355,8 @@ def _rebase(url: str, base_url: str | None) -> str:
     if not base_url:
         return url
     b, u = urlsplit(base_url), urlsplit(url)
+    if u.scheme not in ("http", "https"):  # about:blank (a new tab) is no address of the app
+        return url
     return urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment))
 
 
@@ -353,6 +428,54 @@ def _values(rec: Recording, bnd: bindings_mod.Bindings) -> dict[int, str]:
     return out
 
 
+def _declared(mod, given, rec: Recording):
+    """(the declared object, its file) for an acceptance, baseline or visual declaration: given
+    as an object, a file, False (none), or None (the file beside the recording, if any)."""
+    if given is False:
+        return None, None
+    if given is None:
+        path = rec.path / mod.FILE
+        return (mod.load(path), path) if path.exists() else (None, None)
+    if isinstance(given, (str, Path)):
+        path = Path(given)
+        if not path.exists():
+            raise FileNotFoundError(f"{path}: no such file")
+        return mod.load(path), path
+    return given, getattr(given, "path", None)
+
+
+def _viewport(viewport, vspec) -> tuple[dict, str]:
+    from labctl.behaviour.visual import VIEWPORTS
+
+    if isinstance(viewport, str):
+        if viewport not in VIEWPORTS:
+            raise ValueError(f"viewport {viewport!r}: one of {', '.join(VIEWPORTS)}")
+        return dict(VIEWPORTS[viewport]), viewport
+    if isinstance(viewport, dict):
+        name = next((k for k, v in VIEWPORTS.items() if v == viewport), "custom")
+        return dict(viewport), name
+    if vspec is not None:
+        return vspec.size(), vspec.viewport
+    return {"width": 1280, "height": 900}, "replay-default"
+
+
+def _no_cookies(state, notes: dict):
+    """The given browser data without its cookies: a replay sends only the cookies its declared
+    baseline makes up, never one taken from the source (R06)."""
+    if state is None:
+        return None
+    if isinstance(state, (str, Path)):
+        import json
+
+        state = json.loads(Path(state).read_text(encoding="utf-8"))
+    state = dict(state)
+    dropped = state.get("cookies") or []
+    if dropped:
+        notes["cookies_not_sent"] = len(dropped)
+    state["cookies"] = []
+    return state
+
+
 def replay(
     recording: Recording | Path,
     base_url: str | None = None,
@@ -367,6 +490,12 @@ def replay(
     setup: Callable | None = None,
     after: Callable | None = None,
     resolve_timeout_ms: int = 5000,
+    acceptance=None,
+    baseline=None,
+    visual=None,
+    artifacts: Path | None = None,
+    outcome_judge: Callable | None = None,
+    viewport: str | dict | None = None,
 ) -> FidelityReport:
     """Replay the recording's steps with Playwright and compare each step's after-snapshot.
 
@@ -374,11 +503,23 @@ def replay(
     beside the recording). `values` are the older per-selector values (`"#loanQuery"`, or
     `"6:#loanQuery"` for step 6 only), used for steps the bindings do not bind. `expected` lists
     the semantic actions the flow should have (see `action_label`): one the recording lacks fails
-    the replay. `storage_state` is the browser data the replay starts from (the replica's declared
-    baseline); `setup(context)` runs before the first step and `after(page)` after the last.
+    the replay. `storage_state` is browser data to start from (its cookies are never sent);
+    `setup(context)` runs before the first step and `after(page)` after the last.
+
+    `acceptance`, `baseline` and `visual` are the declarations beside the recording by default
+    (`acceptance.yaml`, `baseline.yaml`, `visual.yaml`; False for none): acceptance cases and
+    visual states are evaluated where they are declared, the baseline is applied to the fresh
+    context before the first step. `outcome_judge(automation, case)` judges `outcome` cases on
+    the lab database. Pictures (the replica's, diff images) go to `artifacts`. `viewport` is
+    desktop, mobile or a size (default: the visual file's, else 1280x900).
     """
     from playwright.sync_api import sync_playwright
 
+    from labctl.behaviour import acceptance as acc_mod
+    from labctl.behaviour import baseline as base_mod
+    from labctl.behaviour import durable
+    from labctl.behaviour import judging as judge_mod
+    from labctl.behaviour import visual as vis_mod
     from labctl.locate import Unresolved
 
     rec = recording if isinstance(recording, Recording) else load_recording(Path(recording))
@@ -387,20 +528,95 @@ def replay(
     vals = _values(rec, bnd)
     supplied = {k for k in (domlib.key_of(_selector_of(name)) for name in values or {}) if k}
     supplied |= bindings_mod.supplied_keys(rec, bnd)
+    spec, spec_path = _declared(acc_mod, acceptance, rec)
+    base, base_path = _declared(base_mod, baseline, rec)
+    vspec, vspec_path = _declared(vis_mod, visual, rec)
+    if isinstance(bindings, (str, Path)):
+        bnd_path = Path(bindings)
+    elif bindings is None and (rec.path / bindings_mod.FILE).exists():
+        bnd_path = rec.path / bindings_mod.FILE
+    else:
+        bnd_path = None
+    size, run_viewport = _viewport(viewport, vspec)
     reports: list[StepReport] = []
     problems: list[str] = []
     stopped = False
+    notes: dict = {}
+    state = _no_cookies(storage_state, notes)
+    source_origin = next((o for o in (base_mod.origin_of(s.url) for s in rec.steps) if o), None)
+    replica_origin = base_mod.origin_of(base_url) or source_origin
+    if base is not None and base.problems:
+        problems += [f"baseline: {p}" for p in base.problems]
+        stopped = True  # nothing runs on a baseline that cannot be applied
+    step_by_seq = {s.seq: s for s in rec.steps}
+
+    def record_title(seq: int) -> str | None:
+        step = step_by_seq.get(seq)
+        return _record_title(step, vals, bnd) if step is not None else None
+
+    judging = None
+    if (spec and spec.cases) or (vspec and vspec.states):
+        if artifacts is None:
+            import tempfile
+
+            artifacts = Path(tempfile.mkdtemp(prefix="twinlab-replay-"))
+    if artifacts is not None:
+        artifacts = Path(artifacts)
+        artifacts.mkdir(parents=True, exist_ok=True)
+    blocked_requests: list[str] = []
+    step_shots: dict[int, str] = {}
+    browser_info = visual_setup = None
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
+        browser_info = {"name": browser.browser_type.name, "version": browser.version}
+        options: dict = {"viewport": size}
+        if vspec is not None:
+            options.update(vis_mod.context_options(vspec))
+            options["viewport"] = size
+
+        def new_context():
+            ctx = browser.new_context(storage_state=state, **options)
+            ctx.add_init_script(domlib.SHADOW_HOOK_JS)  # closed shadow roots, as recorded
+            if source_origin and replica_origin and source_origin != replica_origin:
+                # Nothing of the replay goes to the source: no cookie, no request.
+                def refuse(route):
+                    blocked_requests.append(route.request.method + " " + route.request.url[:200])
+                    route.abort()
+
+                ctx.route(source_origin + "/**", refuse)
+            return ctx
+
+        def fresh(url: str):
+            ctx = new_context()
+            p = ctx.new_page()
+            if vspec is not None:
+                vis_mod.prepare(p, vspec)
+            base_mod.apply(ctx, p, base, replica_origin)
+            p.goto(url)
+            _settle(p, settle_ms)
+            return ctx, p
+
         try:
-            state = str(storage_state) if isinstance(storage_state, Path) else storage_state
-            context = browser.new_context(viewport={"width": 1280, "height": 900},
-                                          storage_state=state)  # fmt: skip
-            context.add_init_script(domlib.SHADOW_HOOK_JS)  # closed shadow roots, as recorded
+            context = new_context()
             if setup is not None:
                 setup(context)
             page = context.new_page()
             _track(page)
+            if vspec is not None:
+                vis_mod.prepare(page, vspec)
+            if spec is not None or vspec is not None or base is not None:
+                judging = judge_mod.Judging(
+                    rec, spec, vspec, binding=vals.get, record=record_title, artifacts=artifacts,
+                    outcome_judge=outcome_judge, fresh=fresh, run_viewport=run_viewport,
+                    settle=lambda p: _settle(p, settle_ms))  # fmt: skip
+            if not stopped and base is not None:
+                try:
+                    notes.update(base_mod.apply(context, page, base, replica_origin))
+                except Exception as exc:  # noqa: BLE001 - reported: nothing runs without it
+                    problems.append(f"baseline: could not be applied: {exc}"[:300])
+                    stopped = True
+            reached: set[int] = set()
+            stopped_at = None
             for step in rec.steps:
                 report = StepReport(seq=step.seq, action=step.action, selector=step.selector,
                                     url=step.url, status="pass")  # fmt: skip
@@ -408,6 +624,8 @@ def replay(
                 if stopped:
                     report.status, report.outcome = "skipped", "not_run"
                     report.note = "not run: the replay stopped at an earlier step"
+                    if stopped_at is None:
+                        stopped_at = step.seq
                     continue
                 expected_html = rec.dom(step)
                 where = step.selector or step.url or "?"
@@ -423,6 +641,7 @@ def replay(
                                                          actual=str(exc)[:500]))  # fmt: skip
                     problems.append(f"step {step.seq} ({step.action}) BLOCKED: {exc}")
                     stopped = True
+                    _shoot(page, artifacts, step.seq, step_shots)
                     continue
                 except MissingValue as exc:
                     report.status, report.outcome, report.note = (
@@ -435,6 +654,7 @@ def replay(
                                                          actual=str(exc)))  # fmt: skip
                     problems.append(f"step {step.seq} ({step.action}) BLOCKED: {exc}")
                     stopped = True
+                    _shoot(page, artifacts, step.seq, step_shots)
                     continue
                 except Unsupported as exc:
                     report.status, report.outcome, report.note = "blocked", "unsupported", str(exc)
@@ -443,6 +663,7 @@ def replay(
                                                          actual=str(exc)))  # fmt: skip
                     problems.append(f"step {step.seq} ({step.action}) BLOCKED: {exc}")
                     stopped = True
+                    _shoot(page, artifacts, step.seq, step_shots)
                     continue
                 except Exception as exc:  # noqa: BLE001 - reported as the step's failure
                     report.status, report.outcome = "fail", "failed"
@@ -455,27 +676,99 @@ def replay(
                             actual=f"{type(exc).__name__}: {str(exc).splitlines()[0][:200]}",
                         )
                     )
+                    _shoot(page, artifacts, step.seq, step_shots)
                     if stop_on_fail:
                         stopped = True
                     continue
                 report.outcome = "implied" if implied else "replayed"
                 _settle(page, settle_ms)
+                reached.add(step.seq)
                 if expected_html is None:
                     report.note = "ran; no snapshot was recorded after this step to compare"
-                    continue
-                report.compared = True
-                report.differences = compare_dom(
-                    expected_html, domlib.page_html(page), step.seq, supplied
-                )
-                if report.differences:  # ran, and the page differs
-                    report.status = "fail"
-                    if stop_on_fail:
-                        stopped = True
+                else:
+                    report.compared = True
+                    report.differences = compare_dom(
+                        expected_html, domlib.page_html(page), step.seq, supplied
+                    )
+                    if report.differences:  # ran, and the page differs
+                        report.status = "fail"
+                        _shoot(page, artifacts, step.seq, step_shots)
+                        if stop_on_fail:
+                            stopped = True
+                if judging is not None:
+                    judging.at(page, step.seq, step.seq)
             if after is not None:
                 after(page)
+            if judging is not None:
+                if not stopped:
+                    judging.at(page, "end", rec.steps[-1].seq if rec.steps else None)
+                judging.finish(reached, stopped_at)
+            if vspec is not None:
+                visual_setup = vis_mod.setup_report(browser, page, vspec)
         finally:
             browser.close()
-    return _result(rec, base_url, reports, problems, expected)
+    report = _result(rec, base_url, reports, problems, expected)
+    used = {"bindings": bnd_path, "acceptance": spec_path, "baseline": base_path,
+            "visual": vspec_path}  # fmt: skip
+    report.fingerprint = durable.for_run(rec, used, browser_info, size)
+    report.visual_setup = visual_setup
+    report.artifacts = str(artifacts) if artifacts is not None else None
+    report.baseline = {**(base.summary() if base is not None else {"file": None, "empty": True}),
+                       **notes, "source_requests_blocked": len(blocked_requests)}  # fmt: skip
+    if blocked_requests:
+        report.problems.append(f"{len(blocked_requests)} request(s) to the source "
+                               f"({source_origin}) were refused")  # fmt: skip
+    _scope(report, judging, spec, rec, step_shots)
+    return report
+
+
+def _shoot(page, artifacts: Path | None, seq: int, shots: dict[int, str]) -> None:
+    """The replica at the first step that diverged."""
+    if artifacts is None or shots:
+        return
+    try:
+        path = Path(artifacts) / f"step-{seq:04d}.after.png"
+        page.screenshot(path=str(path), animations="disabled", caret="hide")
+        shots[seq] = str(path)
+    except Exception:  # noqa: BLE001 - a missing picture never loses the result
+        pass
+
+
+def _scope(report: FidelityReport, judging, spec, rec: Recording, step_shots) -> None:
+    """The scoped result beside the replay's: categories, overall status, requirements, first
+    divergence. A failed or blocked required case also makes the replay's own status fail or
+    blocked, so current readers of `status` see it."""
+    from labctl.behaviour import judging as judge_mod
+
+    cases = list(judging.cases.values()) if judging else []
+    visual = list(judging.visual.values()) if judging else []
+    report.cases, report.visual = cases, visual
+    required = [r for r in [*cases, *visual] if r.required]
+    failed = [r.id for r in required if r.status == "FAIL"]
+    blocked = [r.id for r in required if r.status == "BLOCKED"]
+    if failed:
+        report.problems.append("required acceptance case(s) failed: " + ", ".join(failed[:10]))
+        if report.status == "pass":
+            report.status = "fail"
+    if blocked:
+        report.problems.append("required acceptance case(s) blocked: " + ", ".join(blocked[:10]))
+        if report.status == "pass":
+            report.status = "blocked"
+    report.categories = judge_mod.categories(report.coverage, report.status, cases, visual)
+    # the replay category is the structure alone: not the cases folded into `status`
+    structural = "pass"
+    if report.coverage is not None:
+        c = report.coverage
+        if c.unresolved or c.missing_value or c.unsupported or c.replayed == 0:
+            structural = "blocked"
+        elif c.failed or c.skipped:
+            structural = "fail"
+    report.categories["replay"].status = {"pass": "PASS", "fail": "FAIL"}.get(structural,
+                                                                              "BLOCKED")  # fmt: skip
+    report.verdict, report.verdict_reasons = judge_mod.scoped(report.categories, cases, visual)
+    report.requirements = judge_mod.requirements(spec, cases, visual, report.steps,
+                                                 report.coverage)  # fmt: skip
+    report.first_divergence = judge_mod.first_divergence(judging, report.steps, rec, step_shots)
 
 
 def _result(rec, base_url, reports, problems, expected) -> FidelityReport:

@@ -1,0 +1,15 @@
+# `oc apply -k .` applies the same files, in this order. The Secret is not here: the
+# README says how to create it by hand.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 01-imagestream-twinlab-loandesk-agent.yaml
+  - 02-imagestream-twinlab-loandesk-app.yaml
+  - 03-buildconfig-twinlab-loandesk-agent.yaml
+  - 04-buildconfig-twinlab-loandesk-app.yaml
+  - 05-configmap-twinlab-loandesk-schema.yaml
+  - 06-persistentvolumeclaim-twinlab-loandesk-agent-state.yaml
+  - 07-persistentvolumeclaim-twinlab-loandesk-sqlite.yaml
+  - 08-deployment-twinlab-loandesk-lab.yaml
+  - 09-service-twinlab-loandesk-agent.yaml
+  - 10-route-twinlab-loandesk-web.yaml
