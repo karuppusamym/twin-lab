@@ -18,6 +18,13 @@ expected to have, which of them the recording lacks. Its status is:
 - `fail`: a step's action failed or its page differs, or an expected action was not captured;
 - `blocked`: a step could not be run as recorded (and the steps after it were not run).
 
+The first step that did not pass decides between `fail` and `blocked` (a step blocked because an
+earlier one failed is its consequence). A recording across applications and tabs replays in one
+browser context through an origin map (`OriginMap`): tabs are opened, switched and closed as
+recorded, Back/Forward go back and forward, and no request goes to a source or to an origin with
+no replica. Setup events are kept and not counted. Differences a reviewed `scope.yaml` excludes
+are reported in their own section and never counted as passed.
+
 `compare_dom` works on two snapshots alone, so a replay result can be checked without a live app.
 """
 
@@ -54,6 +61,9 @@ SUPPORTED = {
     "check",
     "uncheck",
 }
+# Performed too, with what they need (labctl.behaviour.capabilities lists each with its proof):
+# an upload (a bound synthetic file), and dialogs, downloads and tab steps as recorded.
+ALSO_PERFORMED = {"upload", "dialog", "download", "tab-open", "tab-switch", "tab-close"}
 
 
 class Difference(BaseModel):
@@ -79,14 +89,34 @@ class StepReport(BaseModel):
     differences: list[Difference] = []
     note: str | None = None
     target: str | None = None  # the candidate that found the target
-    # replayed | implied | failed | not_run | unresolved | missing_value | unsupported
+    # replayed | implied | failed | not_run | unresolved | missing_value | unsupported | unmapped
+    # | setup
     outcome: str | None = None
     compared: bool = False
+    # Added for the replay across applications (optional, so older reports still load):
+    app: str | None = None  # the application the step belongs to (its id, else source origin)
+    replica_origin: str | None = None  # where the step's page was in the replay
+    excluded: list[Difference] = []  # differences a declared exclusion covers (scope.yaml)
+    excluded_by: list[str] = []  # the ids of those declarations, in the same order
+
+
+class Excluded(BaseModel):
+    """What the declared scope excluded: reported in its own section, never counted as passed."""
+
+    declaration: str | None = None
+    approved_by: str | None = None
+    differences: int = 0
+    steps: int = 0  # steps that differ only by excluded differences
+    requests: int = 0  # requests refused to a declared-excluded origin
+    by_id: dict[str, int] = {}
+    reasons: dict[str, str] = {}
+    problems: list[str] = []  # declarations not used, and why
 
 
 class Coverage(BaseModel):
     """What happened to the recording's steps, and which expected actions it lacks."""
 
+    setup: int = 0  # setup events (a blank page): kept, not counted as steps
     steps: int = 0
     replayed: int = 0  # ran (implied ones included)
     implied: int = 0  # a submit or navigation the step before caused: checked, not repeated
@@ -96,6 +126,7 @@ class Coverage(BaseModel):
     unresolved: int = 0
     missing_value: int = 0
     unsupported: int = 0
+    unmapped: int = 0  # on an origin the origin map gives no replica (blocked)
     expected: int | None = None  # actions the flow is declared to have (None: not declared)
     captured: int = 0  # semantic actions in the recording
     missing_expected: list[str] = []
@@ -122,6 +153,9 @@ class FidelityReport(BaseModel):
     first_divergence: Divergence | None = None
     fingerprint: dict | None = None  # what was compared (labctl.behaviour.durable)
     artifacts: str | None = None  # the folder with the replica's pictures and diff images
+    origins: dict[str, str] = {}  # source origin -> replica origin, as the replay used them
+    blocked_requests: list[str] = []  # refused: to a source, or to an origin with no replica
+    excluded: Excluded | None = None
 
     def first_failure(self) -> Difference | None:
         for s in self.steps:
@@ -150,6 +184,7 @@ class FidelityReport(BaseModel):
         if self.first_divergence:
             d = self.first_divergence
             lines += ["## First divergence", "", f"- {d.kind} {d.what} at step {d.step}"
+                      + (f" of {d.app}" if d.app else "")
                       + (f", locator {d.locator}" if d.locator else ""), f"- {d.state}"]  # fmt: skip
             for label, p in (("source", d.before), ("replica", d.after), ("diff", d.diff)):
                 if p:
@@ -194,10 +229,24 @@ class FidelityReport(BaseModel):
             ]
         if self.problems:
             lines += ["## Why not pass", ""] + [f"- {p}" for p in self.problems] + [""]
-        lines += ["| Step | Action | Selector | Target | Result |", "|---|---|---|---|---|"]
+        if self.origins:
+            lines += ["## Replicas", "", "| Source origin | Replica origin |", "|---|---|"]
+            lines += [f"| {s} | {r} |" for s, r in self.origins.items()] + [""]
+        x = self.excluded
+        if x is not None and (x.differences or x.requests or x.problems or x.by_id):
+            lines += ["## Excluded by declared scope", "",
+                      f"{x.differences} difference(s) on {x.steps} step(s) and {x.requests} "
+                      f"request(s) excluded under {x.declaration} (approved by "
+                      f"{x.approved_by or 'nobody'}); not counted as passed.", ""]  # fmt: skip
+            lines += [f"- {k}: {n} ({x.reasons.get(k, '')})" for k, n in x.by_id.items()]
+            lines += [f"- not used: {p}" for p in x.problems] + [""]
+        apps = any(s.app for s in self.steps)
+        lines += ["| Step | Action | Selector | Target | Result |" + (" App |" if apps else ""),
+                  "|---|---|---|---|---|" + ("---|" if apps else "")]  # fmt: skip
         for s in self.steps:
             target = (s.target or "").replace("|", "/")
-            lines.append(f"| {s.seq} | {s.action} | {s.selector or ''} | {target} | {s.status} |")
+            lines.append(f"| {s.seq} | {s.action} | {s.selector or ''} | {target} | {s.status} |"
+                         + (f" {s.app or ''} |" if apps else ""))  # fmt: skip
         diffs = [d for s in self.steps for d in s.differences]
         if diffs:
             lines += ["", "## Differences", ""] + [f"- {d.text()}" for d in diffs]
@@ -215,7 +264,7 @@ def action_label(step: RecStep) -> str:
 
 
 def captured_actions(rec: Recording) -> list[str]:
-    return [action_label(s) for s in rec.steps]
+    return [action_label(s) for s in rec.steps if not s.setup]  # a setup event is no action
 
 
 def missing_actions(expected: list[str], captured: list[str]) -> list[str]:
@@ -418,7 +467,9 @@ def _values(rec: Recording, bnd: bindings_mod.Bindings) -> dict[int, str]:
     """The value each step types or selects: bound, or held by the recording itself."""
     out: dict[int, str] = {}
     for step in rec.steps:
-        if step.action not in bindings_mod.VALUED:
+        if step.action not in bindings_mod.VALUED and not (
+            step.action == "dialog" and bindings_mod.needs_value(step)
+        ):
             continue
         value = bnd.values.get(step.seq)
         if value is None:
@@ -476,6 +527,458 @@ def _no_cookies(state, notes: dict):
     return state
 
 
+REPLICAS = "replicas.yaml"
+
+
+class OriginMap:
+    """Where each source origin's steps and requests go in the replay.
+
+    Given explicitly (`origins`: {source: replica}, or the CLI's `--map source=replica`), or by a
+    `replicas.yaml` beside the recording (`apps: [{id, source, replica}]`; ids name the
+    applications in the report). With one `base_url` (a single-application recording) the
+    recording's first origin goes there. With none of these, every origin stays as recorded.
+
+    Strict (an explicit map or replicas.yaml): a request to a source origin, or to an origin with
+    no replica, is refused and reported; an origin the declared scope excludes is refused and
+    counted as excluded. With a base URL only, requests to the source are refused (as before)."""
+
+    def __init__(self, mapping: dict[str, str], names: dict[str, str] | None = None,
+                 strict: bool = False, as_recorded: bool = False) -> None:  # fmt: skip
+        from labctl.split import normalise_origin
+
+        self.mapping = {normalise_origin(s): normalise_origin(r) for s, r in mapping.items()
+                        if normalise_origin(s) and normalise_origin(r)}  # fmt: skip
+        self.names = {normalise_origin(s): n for s, n in (names or {}).items()}
+        self.strict, self.as_recorded = strict, as_recorded
+        self.excluded: set[str] = set()
+
+    def replica(self, origin: str) -> str | None:
+        if self.as_recorded:
+            return origin
+        return self.mapping.get(origin)
+
+    def rebase(self, url: str | None) -> str | None:
+        """The step's address on its replica; None when its origin has no replica."""
+        from labctl.split import normalise_origin
+
+        u = urlsplit(url or "")
+        if u.scheme not in ("http", "https"):  # about:blank and the like: no application's
+            return url
+        target = self.replica(normalise_origin(url))
+        if target is None:
+            return None
+        b = urlsplit(target)
+        return urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment))
+
+    def name(self, origin: str | None) -> str | None:
+        return self.names.get(origin or "") or origin or None
+
+    def allowed(self) -> set[str]:
+        return set(self.mapping.values())
+
+
+def origin_map(rec: Recording, base_url: str | None = None, origins=None,
+               replicas=None) -> OriginMap:  # fmt: skip
+    """The OriginMap for a replay (see OriginMap). `origins` is a dict or a list of
+    `source=replica`; `replicas` a replicas.yaml (default: beside the recording; False: none)."""
+    from labctl.split import normalise_origin
+
+    if isinstance(origins, (list, tuple)):
+        pairs = {}
+        for text in origins:
+            src, sep, dst = str(text).partition("=")
+            if not sep or not normalise_origin(src) or not normalise_origin(dst):
+                raise ValueError(f"--map {text!r}: give source=replica, both like http://host:port")
+            pairs[src] = dst
+        origins = pairs
+    names: dict[str, str] = {}
+    from_file: dict[str, str] = {}
+    path = Path(replicas) if replicas not in (None, False) else rec.path / REPLICAS
+    if replicas is not False and path.is_file():
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for app in data.get("apps") or []:
+            if isinstance(app, dict) and app.get("source"):
+                if app.get("id"):
+                    names[str(app["source"])] = str(app["id"])
+                if app.get("replica"):
+                    from_file[str(app["source"])] = str(app["replica"])
+        for src, dst in (data.get("origins") or {}).items():
+            from_file[str(src)] = str(dst)
+    if origins:
+        return OriginMap(dict(origins), names, strict=True)
+    if from_file:
+        return OriginMap(from_file, names, strict=True)
+    first = next((normalise_origin(s.url) for s in rec.steps
+                  if normalise_origin(s.url or "")), None)  # fmt: skip
+    if base_url and first:
+        return OriginMap({first: base_url}, names)
+    return OriginMap({}, names, as_recorded=True)
+
+
+def _origin(url: str | None) -> str:
+    from labctl.split import normalise_origin
+
+    return normalise_origin(url or "")
+
+
+def _observed_at_navigation(rec: Recording) -> dict[int, int]:
+    """Steps whose after-state is the page a new document load they caused shows: step ->
+    that load. Such a step (a click, key press or submit that loaded another page) is compared
+    at that load, never by a snapshot taken before it (a page slower than the recorder's settle
+    time left one; a newer recorder says `after: navigation` and keeps none)."""
+    out: dict[int, int] = {}
+    order = [s.seq for s in rec.steps]
+    for g in rec.steps:
+        if g.action != "goto" or g.caused_by is None or g.nav not in (None, "navigate"):
+            continue
+        for s in rec.steps:
+            if (
+                g.caused_by <= s.seq < g.seq
+                and s.action != "goto"
+                and (s.tab == g.tab)
+                and not s.action.startswith("tab-")
+            ):
+                out[s.seq] = g.seq
+    for s in rec.steps:
+        if s.after == "navigation" and s.seq not in out:
+            nxt = next((x for x in rec.steps if x.seq > s.seq and x.action == "goto"), None)
+            out[s.seq] = nxt.seq if nxt else s.seq
+    del order
+    return out
+
+
+class Unmapped(Exception):  # noqa: N818 - reported as BLOCKED
+    pass
+
+
+UNSUPPORTED_ACTIONS = {
+    "drag": "drag and drop is not replayed by DOM replay (unsupported surface): no element state "
+            "describes the gesture; check the result with an acceptance case after a step the "
+            "replay can perform, or exclude this flow from the declared scope",
+}  # fmt: skip
+
+
+class _Run:
+    """One replay: the browser context, its tabs, and how each step is performed."""
+
+    def __init__(self, context, rec: Recording, omap: OriginMap, values: dict[int, str],
+                 bnd: bindings_mod.Bindings, timeout_ms: int, settle_ms: int) -> None:  # fmt: skip
+        self.context, self.rec, self.omap = context, rec, omap
+        self.values, self.bnd, self.timeout_ms, self.settle_ms = values, bnd, timeout_ms, settle_ms
+        self.tabs: dict[str, object] = {}
+        self.current: str | None = None
+        self.ours: set[int] = set()  # pages the replay opened itself
+        self.popups: list = []  # pages the replica opened (popups), oldest first
+        self.history: dict[str, tuple[list[str], int]] = {}
+        self.opened_by: dict[str, int] = {}  # tab -> the step that opened it (a popup)
+        self.first_goto: set[str] = set()  # tabs whose first page load is still to come
+        self.downloads: list = []
+        self.dialogs: list[dict] = []  # dialogs the replica showed: {kind, step}
+        self.armed: dict[int, dict] = {}  # page id -> the dialog the next action expects
+        self.by_seq = {s.seq: s for s in rec.steps}
+        self.next_of = {a.seq: b for a, b in zip(rec.steps, rec.steps[1:], strict=False)}
+        context.on("page", self._on_page)
+
+    # --- pages ----------------------------------------------------------------------------------
+
+    def _on_page(self, page) -> None:
+        if id(page) not in self.ours:
+            self.popups.append(page)
+        self._watch(page)
+
+    def _watch(self, page) -> None:
+        if getattr(page, "_tl_watched", False):
+            return
+        page._tl_watched = True
+        _track(page)
+        page.on("download", lambda d: self.downloads.append(d))
+        page.on("dialog", lambda d, page=page: self._on_dialog(page, d))
+
+    def new_page(self):
+        page = self.context.new_page()
+        self.ours.add(id(page))
+        if page in self.popups:
+            self.popups.remove(page)
+        self._watch(page)
+        return page
+
+    def adopt(self, tab: str | None, page) -> None:
+        self.tabs[tab or "t1"] = page
+        self.current = tab or "t1"
+
+    def page_for(self, step: RecStep):
+        tab = step.tab or self.current
+        if tab in self.tabs:
+            return self.tabs[tab]
+        if len(self.tabs) == 1 and not any(s.action == "tab-open" and s.tab == tab
+                                           for s in self.rec.steps):  # fmt: skip
+            # the recording's first tab is the page the replay started with, whatever its name
+            (only,) = self.tabs.values()
+            self.tabs[tab] = only
+            return only
+        raise _TabMissing(f"tab {tab} is not open in the replica")
+
+    # --- dialogs -------------------------------------------------------------------------------
+
+    def _on_dialog(self, page, dialog) -> None:
+        want = self.armed.pop(id(page), None)
+        self.dialogs.append({"kind": dialog.type, "step": want["step"] if want else None})
+        try:
+            if want is None or want["choice"] != "accept":
+                dialog.dismiss()
+            elif dialog.type == "prompt":
+                dialog.accept(want.get("value") or "")
+            else:
+                dialog.accept()
+        except Exception:  # noqa: BLE001 - a dialog the page closed itself
+            pass
+
+    def _arm(self, page, step: RecStep) -> None:
+        """Before an action that showed a dialog in the source: answer it as recorded."""
+        nxt = self.next_of.get(step.seq)
+        if nxt is None or nxt.action != "dialog" or nxt.caused_by != step.seq:
+            return
+        d = nxt.dialog or {}
+        value = self.values.get(nxt.seq)
+        if d.get("kind") == "prompt" and d.get("choice") == "accept" and value is None:
+            raise MissingValue(f"the dialog at step {nxt.seq} is a prompt answered with typed "
+                               f"text (shape {nxt.typed_shape!r}): give its value in bindings.yaml")  # fmt: skip
+        self.armed[id(page)] = {"step": nxt.seq, "choice": d.get("choice", "dismiss"),
+                                "value": value}  # fmt: skip
+
+    # --- history -------------------------------------------------------------------------------
+
+    def _visit(self, tab: str, url: str | None, nav: str | None, caused: bool) -> str | None:
+        """Keep the tab's history as the source's (recorded addresses) and say how a history
+        step is made: back, forward, or None (load the address)."""
+        urls, idx = self.history.get(tab, ([], -1))
+        how = None
+        if nav in ("back_forward", "pop") and not caused:
+            if idx > 0 and urls[idx - 1] == url:
+                idx, how = idx - 1, "back"
+            elif idx + 1 < len(urls) and urls[idx + 1] == url:
+                idx, how = idx + 1, "forward"
+        elif nav == "replace" and urls:
+            urls[idx] = url
+        elif nav == "reload":
+            pass
+        else:
+            urls = urls[: idx + 1] + [url]
+            idx = len(urls) - 1
+        self.history[tab] = (urls, idx)
+        return how
+
+    # --- steps ---------------------------------------------------------------------------------
+
+    def act(self, step: RecStep) -> tuple[str | None, bool]:
+        """Perform one step. (what found the target or how it was done, whether it was implied
+        by an earlier step rather than performed)."""
+        from labctl.locate import Unresolved, resolve
+
+        if step.action == "tab-open":
+            return self._tab_open(step)
+        if step.action == "tab-switch":
+            page = self.tabs.get(step.tab)
+            if page is None or page.is_closed():
+                raise _TabMissing(f"tab {step.tab} is not open in the replica")
+            self.current = step.tab
+            page.bring_to_front()
+            return f"switched to tab {step.tab}", False
+        if step.action == "tab-close":
+            page = self.tabs.pop(step.tab, None)
+            if page is not None and not page.is_closed():
+                page.close()
+            if self.current == step.tab:
+                self.current = next(iter(self.tabs), None)
+            return f"closed tab {step.tab}", False
+        page = self.page_for(step)
+        if step.action == "goto":
+            return self._goto(page, step)
+        if step.action == "submit" and step.caused_by is not None:
+            return f"submitted by step {step.caused_by}", True
+        if step.action == "dialog":
+            return self._dialog_seen(step)
+        if step.action == "download":
+            return self._download_seen(step)
+        if step.action in UNSUPPORTED_ACTIONS:
+            raise Unsupported(UNSUPPORTED_ACTIONS[step.action])
+        if step.shadow == "closed":
+            raise Unsupported("the target is inside a closed shadow root: no selector can reach it "
+                              "(unsupported surface); the snapshot shows it, the replay cannot act "
+                              "on it")  # fmt: skip
+        if step.surface == "canvas":
+            raise Unsupported("a canvas-only interaction (unsupported surface): what it changes is "
+                              "drawn, not in the DOM; it is never claimed as replayed")  # fmt: skip
+        if step.action not in SUPPORTED and step.action not in ALSO_PERFORMED:
+            raise Unsupported(f"this replay cannot perform {step.action!r}")
+        value = None
+        if step.action == "upload":
+            path = self.bnd.files.get(step.seq)
+            if not path or not Path(path).is_file():
+                shapes = ", ".join(f.get("name_shape") or "?" for f in step.files)
+                raise MissingValue(f"no synthetic file for the upload at step {step.seq} "
+                                   f"({shapes}): add file: <path> to bindings.yaml")  # fmt: skip
+        elif step.action in bindings_mod.VALUED:
+            value = self.values.get(step.seq)
+            if value is None and not (step.action == "select" and step.seq in self.bnd.indexes):
+                shape = f" (recorded shape {step.typed_shape!r})" if step.typed_shape else ""
+                raise MissingValue(f"no binding gives the value for step {step.seq} "
+                                   f"({step.selector}){shape}: add it to bindings.yaml")  # fmt: skip
+        loc, found = resolve(page, step, _record_title(step, self.values, self.bnd),
+                             self.timeout_ms)  # fmt: skip
+        if loc is None and step.action != "keypress":
+            raise Unresolved("the step names no element", [])
+        self._arm(page, step)
+        if step.action in ("click", "dblclick") and not loc.is_visible():
+            # A control shown only while its record is under the pointer (a list item's delete
+            # button): a person points at the record first; so does the replay.
+            row = loc.locator("xpath=ancestor::*[self::li or self::tr or @role='row'][1]")
+            if row.count() == 1:
+                row.hover(timeout=10000)
+        if step.action == "type":
+            loc.fill(value, timeout=10000)
+        elif step.action == "select":
+            if step.seq in self.bnd.indexes:
+                loc.select_option(index=self.bnd.indexes[step.seq], timeout=10000)
+            else:
+                try:
+                    loc.select_option(label=value, timeout=10000)
+                except Exception:  # noqa: BLE001 - recorded as text; fall back to the option value
+                    loc.select_option(value=value, timeout=10000)
+        elif step.action == "upload":
+            loc.set_input_files(self.bnd.files[step.seq], timeout=10000)
+        elif step.action == "click":
+            loc.click(timeout=10000)
+        elif step.action == "dblclick":
+            loc.dblclick(timeout=10000)
+        elif step.action in ("check", "uncheck"):
+            if loc.is_checked(timeout=10000) != (step.action == "check"):
+                loc.click(timeout=10000)
+        elif step.action == "keypress":
+            combo = "+".join([*step.modifiers, step.key or ""])
+            if not step.key:
+                raise Unsupported("a key press without its key")
+            if loc is None:
+                page.keyboard.press(combo)
+            else:
+                loc.press(combo, timeout=10000)
+        elif step.action == "submit":
+            loc.evaluate(
+                "el => (el.form || el).requestSubmit ? (el.form || el).requestSubmit() : el.click()"
+            )
+        return found, False
+
+    def _goto(self, page, step: RecStep) -> tuple[str | None, bool]:
+        if step.setup:
+            return f"setup ({step.setup})", True
+        url = self.omap.rebase(step.url)
+        if url is None:
+            origin = _origin(step.url)
+            raise Unmapped(f"step {step.seq} is on {origin}, which has no replica: give one with "
+                           f"--map {origin}=http://127.0.0.1:<port> (or in replicas.yaml beside "
+                           "the recording), or declare it out of scope")  # fmt: skip
+        tab = step.tab or self.current or "t1"
+        first = tab in self.first_goto
+        self.first_goto.discard(tab)
+        caused = step.caused_by is not None or step.nav in ("push", "replace") or first
+        how = self._visit(tab, step.url, step.nav, caused)
+        if first:  # a popup's first page: the replica must have opened it there by itself
+            _wait_address(page, url, self.timeout_ms)
+            return f"the page the popup of step {self.opened_by.get(tab)} opened", True
+        if caused:
+            _wait_address(page, url, self.timeout_ms)
+            why = f"step {step.caused_by}" if step.caused_by is not None else "the page itself"
+            return f"navigation caused by {why}", True
+        if step.caused_by_outside:
+            o = step.caused_by_outside
+            note = f" (supplied from outside: caused by step {o.get('step')} of {o.get('app')})"
+        else:
+            note = ""
+        if how == "back":
+            page.go_back()
+            _wait_address(page, url, self.timeout_ms)
+            return "history back", False
+        if how == "forward":
+            page.go_forward()
+            _wait_address(page, url, self.timeout_ms)
+            return "history forward", False
+        if step.nav == "reload" and page.url not in ("", "about:blank"):
+            page.reload()
+            _wait_address(page, url, self.timeout_ms)
+            return "reload", False
+        page.goto(url)
+        return (f"opened{note}" if note else None), False
+
+    def _tab_open(self, step: RecStep) -> tuple[str, bool]:
+        tab = step.tab or f"t{len(self.tabs) + 1}"
+        cause = next((s.seq for s in reversed(self.rec.steps)
+                      if s.seq < step.seq and not s.action.startswith("tab-")), None)  # fmt: skip
+        if step.opener:
+            import time
+
+            deadline = time.monotonic() + self.timeout_ms / 1000
+            while not self.popups and time.monotonic() < deadline:
+                (self.tabs.get(self.current) or next(iter(self.tabs.values()))).wait_for_timeout(50)
+            if not self.popups:
+                raise _NoTab(f"the source opened tab {tab} here (from tab {step.opener}); the "
+                             "replica opened no tab")  # fmt: skip
+            page = self.popups.pop(0)
+            self.first_goto.add(tab)
+            self.opened_by[tab] = cause
+            how = f"popup opened by step {cause}"
+        else:
+            page = self.new_page()
+            how = "a new tab opened by the replay"
+        self.tabs[tab] = page
+        self.current = tab
+        return how, bool(step.opener)
+
+    def _dialog_seen(self, step: RecStep) -> tuple[str, bool]:
+        d = step.dialog or {}
+        seen = next((x for x in self.dialogs if x["step"] == step.seq), None)
+        if seen is None:
+            raise _NotShown(f"the source showed a {d.get('kind', 'dialog')} here (answered "
+                            f"{d.get('choice')}); the replica showed none")  # fmt: skip
+        if d.get("kind") and seen["kind"] != d["kind"]:
+            raise _NotShown(f"the source showed a {d['kind']}, the replica a {seen['kind']}")
+        return f"{seen['kind']} answered {d.get('choice', 'dismiss')}", True
+
+    def _download_seen(self, step: RecStep) -> tuple[str, bool]:
+        import time
+
+        want = step.download or {}
+        deadline = time.monotonic() + self.timeout_ms / 1000
+        page = self.tabs.get(self.current)
+        while not self.downloads and time.monotonic() < deadline and page is not None:
+            page.wait_for_timeout(50)
+        if not self.downloads:
+            raise _NotShown("the source downloaded a file here; the replica downloaded nothing")
+        got = self.downloads.pop(0)
+        name = got.suggested_filename or ""
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if want.get("ext") and ext != want["ext"]:
+            raise _NotShown(f"the source downloaded a .{want['ext']} file, the replica a .{ext}")
+        try:
+            got.cancel()
+        except Exception:  # noqa: BLE001
+            pass
+        return f"a download ({domlib.shape(name)})", True
+
+
+class _TabMissing(AssertionError):
+    pass
+
+
+class _NoTab(AssertionError):
+    pass
+
+
+class _NotShown(AssertionError):
+    pass
+
+
 def replay(
     recording: Recording | Path,
     base_url: str | None = None,
@@ -496,22 +999,37 @@ def replay(
     artifacts: Path | None = None,
     outcome_judge: Callable | None = None,
     viewport: str | dict | None = None,
+    origins: dict[str, str] | list[str] | None = None,
+    replicas: Path | bool | None = None,
+    scope=None,
+    browser: str = "chromium",
 ) -> FidelityReport:
     """Replay the recording's steps with Playwright and compare each step's after-snapshot.
 
-    Values come from `bindings` (a Bindings, or a bindings file; by default `bindings.yaml`
-    beside the recording). `values` are the older per-selector values (`"#loanQuery"`, or
-    `"6:#loanQuery"` for step 6 only), used for steps the bindings do not bind. `expected` lists
-    the semantic actions the flow should have (see `action_label`): one the recording lacks fails
-    the replay. `storage_state` is browser data to start from (its cookies are never sent);
-    `setup(context)` runs before the first step and `after(page)` after the last.
+    The steps run in one browser context, in the recorded order, across every tab: a tab the
+    source opened (a popup, target=_blank) must open in the replica, and is matched to the
+    recorded tab; switches and closes are performed; Back and Forward go back and forward. Each
+    step goes to its application's replica by the origin map (`origins`: {source: replica}, a
+    `replicas.yaml` beside the recording, or `base_url` for a single application; see
+    OriginMap). A step on an origin with no replica BLOCKS with what to add; a request to a
+    source origin, or to an origin with no replica, is refused and reported.
 
-    `acceptance`, `baseline` and `visual` are the declarations beside the recording by default
-    (`acceptance.yaml`, `baseline.yaml`, `visual.yaml`; False for none): acceptance cases and
-    visual states are evaluated where they are declared, the baseline is applied to the fresh
-    context before the first step. `outcome_judge(automation, case)` judges `outcome` cases on
-    the lab database. Pictures (the replica's, diff images) go to `artifacts`. `viewport` is
-    desktop, mobile or a size (default: the visual file's, else 1280x900).
+    A click (key press, submit) that loaded another page is compared at that page, the moment the
+    source's snapshot describes (`_observed_at_navigation`). Values come from `bindings` (a
+    Bindings, or a bindings file; by default `bindings.yaml` beside the recording). `values`
+    are the older per-selector values (`"#loanQuery"`, or `"6:#loanQuery"` for step 6 only),
+    used for steps the bindings do not bind. `expected` lists the semantic actions the flow
+    should have (see `action_label`): one the recording lacks fails the replay. `storage_state`
+    is browser data to start from (its cookies are never sent); `setup(context)` runs before the
+    first step and `after(page)` after the last.
+
+    `acceptance`, `baseline`, `visual` and `scope` are the declarations beside the recording by
+    default (`acceptance.yaml`, `baseline.yaml`, `visual.yaml`, `scope.yaml`; False for none):
+    acceptance cases and visual states are evaluated where they are declared, the baseline is
+    applied to the fresh context before the first step, and differences a reviewed exclusion
+    covers are reported apart (never passed). `outcome_judge(automation, case)` judges
+    `outcome` cases on the lab database. Pictures go to `artifacts`. `viewport` is desktop,
+    mobile or a size. `browser` is chromium, firefox or webkit.
     """
     from playwright.sync_api import sync_playwright
 
@@ -519,6 +1037,7 @@ def replay(
     from labctl.behaviour import baseline as base_mod
     from labctl.behaviour import durable
     from labctl.behaviour import judging as judge_mod
+    from labctl.behaviour import scope as scope_mod
     from labctl.behaviour import visual as vis_mod
     from labctl.locate import Unresolved
 
@@ -531,6 +1050,10 @@ def replay(
     spec, spec_path = _declared(acc_mod, acceptance, rec)
     base, base_path = _declared(base_mod, baseline, rec)
     vspec, vspec_path = _declared(vis_mod, visual, rec)
+    sc, sc_path = _declared(scope_mod, scope, rec)
+    omap = origin_map(rec, base_url, origins, replicas)
+    if sc is not None:
+        omap.excluded = sc.origins()
     if isinstance(bindings, (str, Path)):
         bnd_path = Path(bindings)
     elif bindings is None and (rec.path / bindings_mod.FILE).exists():
@@ -544,15 +1067,21 @@ def replay(
     notes: dict = {}
     state = _no_cookies(storage_state, notes)
     source_origin = next((o for o in (base_mod.origin_of(s.url) for s in rec.steps) if o), None)
-    replica_origin = base_mod.origin_of(base_url) or source_origin
+    replica_origin = omap.replica(_origin(source_origin)) or source_origin
     if base is not None and base.problems:
         problems += [f"baseline: {p}" for p in base.problems]
         stopped = True  # nothing runs on a baseline that cannot be applied
     step_by_seq = {s.seq: s for s in rec.steps}
+    deferred = _observed_at_navigation(rec)
 
-    def record_title(seq: int) -> str | None:
+    def record_title(seq) -> str | None:
+        if isinstance(seq, dict):
+            return bnd.from_outside(seq)
         step = step_by_seq.get(seq)
         return _record_title(step, vals, bnd) if step is not None else None
+
+    def binding(seq) -> str | None:
+        return bnd.from_outside(seq) if isinstance(seq, dict) else vals.get(seq)
 
     judging = None
     if (spec and spec.cases) or (vspec and vspec.states):
@@ -564,26 +1093,47 @@ def replay(
         artifacts = Path(artifacts)
         artifacts.mkdir(parents=True, exist_ok=True)
     blocked_requests: list[str] = []
+    excluded_requests: list[str] = []
     step_shots: dict[int, str] = {}
     browser_info = visual_setup = None
+    service_worker = any(s.service_worker for s in rec.steps)
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=headless)
-        browser_info = {"name": browser.browser_type.name, "version": browser.version}
-        options: dict = {"viewport": size}
+        engine = getattr(pw, browser)
+        launched = engine.launch(headless=headless)
+        browser_info = {"name": launched.browser_type.name, "version": launched.version}
+        options: dict = {"viewport": size, "service_workers": "block", "accept_downloads": True}
         if vspec is not None:
             options.update(vis_mod.context_options(vspec))
             options["viewport"] = size
 
-        def new_context():
-            ctx = browser.new_context(storage_state=state, **options)
-            ctx.add_init_script(domlib.SHADOW_HOOK_JS)  # closed shadow roots, as recorded
-            if source_origin and replica_origin and source_origin != replica_origin:
-                # Nothing of the replay goes to the source: no cookie, no request.
-                def refuse(route):
-                    blocked_requests.append(route.request.method + " " + route.request.url[:200])
-                    route.abort()
+        def guard(ctx):
+            """Nothing of the replay goes to a source, or anywhere the map gives no replica."""
+            if omap.as_recorded:
+                return
+            allowed = omap.allowed()
+            sources = set(omap.mapping) - allowed
 
-                ctx.route(source_origin + "/**", refuse)
+            def route(r):
+                url = r.request.url
+                o = _origin(url)
+                if not o or o in allowed or (not omap.strict and o not in sources):
+                    r.continue_()
+                    return
+                if o in omap.excluded:  # declared out of scope: answered with nothing, counted
+                    excluded_requests.append(r.request.method + " " + url[:200])
+                    r.fulfill(status=200, content_type="text/html", body="")
+                    return
+                else:
+                    why = "a source origin" if o in omap.mapping else "an origin with no replica"
+                    blocked_requests.append(f"{r.request.method} {url[:200]} ({why})")
+                r.abort()
+
+            ctx.route("**/*", route)
+
+        def new_context():
+            ctx = launched.new_context(storage_state=state, **options)
+            ctx.add_init_script(domlib.SHADOW_HOOK_JS)  # closed shadow roots, as recorded
+            guard(ctx)
             return ctx
 
         def fresh(url: str):
@@ -600,13 +1150,15 @@ def replay(
             context = new_context()
             if setup is not None:
                 setup(context)
-            page = context.new_page()
-            _track(page)
+            run = _Run(context, rec, omap, vals, bnd, resolve_timeout_ms, settle_ms)
+            page = run.new_page()
+            first_tab = next((s.tab for s in rec.steps if s.tab), None)
+            run.adopt(first_tab, page)
             if vspec is not None:
                 vis_mod.prepare(page, vspec)
             if spec is not None or vspec is not None or base is not None:
                 judging = judge_mod.Judging(
-                    rec, spec, vspec, binding=vals.get, record=record_title, artifacts=artifacts,
+                    rec, spec, vspec, binding=binding, record=record_title, artifacts=artifacts,
                     outcome_judge=outcome_judge, fresh=fresh, run_viewport=run_viewport,
                     settle=lambda p: _settle(p, settle_ms))  # fmt: skip
             if not stopped and base is not None:
@@ -619,7 +1171,9 @@ def replay(
             stopped_at = None
             for step in rec.steps:
                 report = StepReport(seq=step.seq, action=step.action, selector=step.selector,
-                                    url=step.url, status="pass")  # fmt: skip
+                                    url=step.url, status="pass",
+                                    app=omap.name(_origin(step.url)) if _origin(step.url)
+                                    else None)  # fmt: skip
                 reports.append(report)
                 if stopped:
                     report.status, report.outcome = "skipped", "not_run"
@@ -627,69 +1181,71 @@ def replay(
                     if stopped_at is None:
                         stopped_at = step.seq
                     continue
+                if step.setup:
+                    report.outcome, report.note = (
+                        "setup",
+                        f"setup event ({step.setup}): kept, not run",
+                    )
+                    continue
                 expected_html = rec.dom(step)
                 where = step.selector or step.url or "?"
+                current = run.tabs.get(run.current)
                 try:
-                    report.target, implied = _act(page, step, base_url, vals, bnd,
-                                                  resolve_timeout_ms)  # fmt: skip
-                except Unresolved as exc:
+                    report.target, implied = run.act(step)
+                except (Unresolved, MissingValue, Unsupported, Unmapped) as exc:
                     report.status = "blocked"
-                    report.outcome = "missing_value" if exc.missing_binding else "unresolved"
+                    if isinstance(exc, Unresolved):
+                        report.outcome = "missing_value" if exc.missing_binding else "unresolved"
+                        check = "target"
+                    elif isinstance(exc, MissingValue):
+                        report.outcome, check = "missing_value", "value"
+                    elif isinstance(exc, Unmapped):
+                        report.outcome, check = "unmapped", "url"
+                    else:
+                        report.outcome, check = "unsupported", "unsupported"
                     report.note = str(exc)
-                    report.differences.append(Difference(step=step.seq, element=where,
-                                                         check="target", expected=step.action,
+                    report.differences.append(Difference(step=step.seq, element=where, check=check,
+                                                         expected=step.action,
                                                          actual=str(exc)[:500]))  # fmt: skip
                     problems.append(f"step {step.seq} ({step.action}) BLOCKED: {exc}")
                     stopped = True
-                    _shoot(page, artifacts, step.seq, step_shots)
-                    continue
-                except MissingValue as exc:
-                    report.status, report.outcome, report.note = (
-                        "blocked",
-                        "missing_value",
-                        str(exc),
-                    )
-                    report.differences.append(Difference(step=step.seq, element=where,
-                                                         check="value", expected=step.action,
-                                                         actual=str(exc)))  # fmt: skip
-                    problems.append(f"step {step.seq} ({step.action}) BLOCKED: {exc}")
-                    stopped = True
-                    _shoot(page, artifacts, step.seq, step_shots)
-                    continue
-                except Unsupported as exc:
-                    report.status, report.outcome, report.note = "blocked", "unsupported", str(exc)
-                    report.differences.append(Difference(step=step.seq, element=where,
-                                                         check="unsupported", expected=step.action,
-                                                         actual=str(exc)))  # fmt: skip
-                    problems.append(f"step {step.seq} ({step.action}) BLOCKED: {exc}")
-                    stopped = True
-                    _shoot(page, artifacts, step.seq, step_shots)
+                    _shoot(run.tabs.get(run.current) or current, artifacts, step.seq, step_shots)
                     continue
                 except Exception as exc:  # noqa: BLE001 - reported as the step's failure
                     report.status, report.outcome = "fail", "failed"
+                    check = "url" if isinstance(exc, _WrongAddress) else "action"
                     report.differences.append(
-                        Difference(
-                            step=step.seq,
-                            element=where,
-                            check="url" if isinstance(exc, _WrongAddress) else "action",
-                            expected=step.action,
-                            actual=f"{type(exc).__name__}: {str(exc).splitlines()[0][:200]}",
-                        )
-                    )
-                    _shoot(page, artifacts, step.seq, step_shots)
-                    if stop_on_fail:
+                        Difference(step=step.seq, element=where, check=check,
+                                   expected=step.action,
+                                   actual=f"{type(exc).__name__}: {str(exc).splitlines()[0][:200]}")
+                    )  # fmt: skip
+                    _shoot(run.tabs.get(run.current) or current, artifacts, step.seq, step_shots)
+                    if stop_on_fail or isinstance(exc, (_NoTab, _TabMissing)):
                         stopped = True
                     continue
                 report.outcome = "implied" if implied else "replayed"
+                page = run.tabs.get(step.tab) or run.tabs.get(run.current)
+                if step.action == "tab-close" or page is None or page.is_closed():
+                    reached.add(step.seq)
+                    continue
                 _settle(page, settle_ms)
                 reached.add(step.seq)
-                if expected_html is None:
+                report.replica_origin = _origin(page.url) or None
+                if step.seq in deferred:
+                    report.note = (f"observed at the page it loaded (step {deferred[step.seq]}), "
+                                   "the moment the source's snapshot describes")  # fmt: skip
+                elif expected_html is None:
                     report.note = "ran; no snapshot was recorded after this step to compare"
                 else:
                     report.compared = True
-                    report.differences = compare_dom(
-                        expected_html, domlib.page_html(page), step.seq, supplied
-                    )
+                    diffs = compare_dom(expected_html, domlib.page_html(page), step.seq, supplied)
+                    for d in diffs:
+                        ex = scope_mod.which(sc, d.element, step.url)
+                        if ex is None:
+                            report.differences.append(d)
+                        else:
+                            report.excluded.append(d)
+                            report.excluded_by.append(ex.id)
                     if report.differences:  # ran, and the page differs
                         report.status = "fail"
                         _shoot(page, artifacts, step.seq, step_shots)
@@ -697,34 +1253,77 @@ def replay(
                             stopped = True
                 if judging is not None:
                     judging.at(page, step.seq, step.seq)
-            if after is not None:
+            page = run.tabs.get(run.current) or next(iter(run.tabs.values()), None)
+            if after is not None and page is not None:
                 after(page)
             if judging is not None:
-                if not stopped:
+                if not stopped and page is not None:
                     judging.at(page, "end", rec.steps[-1].seq if rec.steps else None)
                 judging.finish(reached, stopped_at)
-            if vspec is not None:
-                visual_setup = vis_mod.setup_report(browser, page, vspec)
+            if vspec is not None and page is not None:
+                visual_setup = vis_mod.setup_report(launched, page, vspec)
         finally:
-            browser.close()
+            launched.close()
     report = _result(rec, base_url, reports, problems, expected)
     used = {"bindings": bnd_path, "acceptance": spec_path, "baseline": base_path,
-            "visual": vspec_path}  # fmt: skip
-    report.fingerprint = durable.for_run(rec, used, browser_info, size)
+            "visual": vspec_path, "scope": sc_path}  # fmt: skip
+    report.fingerprint = durable.for_run(
+        rec, {k: v for k, v in used.items() if k != "scope"}, browser_info, size
+    )
+    if sc_path is not None:  # the reviewed exclusions this run was compared under
+        report.fingerprint["scope"] = {
+            "path": str(Path(sc_path).resolve()),
+            "digest": durable.file_digest(sc_path),
+        }
     report.visual_setup = visual_setup
     report.artifacts = str(artifacts) if artifacts is not None else None
+    report.origins = dict(omap.mapping) if not omap.as_recorded else {}
+    report.blocked_requests = blocked_requests[:200]
     report.baseline = {**(base.summary() if base is not None else {"file": None, "empty": True}),
                        **notes, "source_requests_blocked": len(blocked_requests)}  # fmt: skip
     if blocked_requests:
-        report.problems.append(f"{len(blocked_requests)} request(s) to the source "
-                               f"({source_origin}) were refused")  # fmt: skip
+        where = sorted({_origin(r.rsplit(" (", 1)[0].split(" ", 1)[1]) for r in blocked_requests})
+        report.problems.append(
+            f"{len(blocked_requests)} request(s) to the source or to an origin with no replica "
+            f"were refused ({', '.join(where)}): map each one (--map) or declare it out of scope"
+        )
+        if omap.strict and report.status == "pass":
+            report.status = "fail"  # the replica depends on something outside the lab
+    if sc is not None:
+        report.excluded = _excluded(sc, reports, excluded_requests)
     _scope(report, judging, spec, rec, step_shots)
+    if service_worker and report.requirements is not None:
+        report.requirements.unsupported.append(
+            "service worker behaviour (offline cache, push, background sync): the page registered "
+            "one; the replay blocks service workers, so it is not compared")  # fmt: skip
+    for r in reports:
+        if r.outcome == "unsupported" and report.requirements is not None:
+            line = f"step {r.seq}: {r.action} ({r.note})"
+            if line not in report.requirements.unsupported:
+                report.requirements.unsupported.append(line)
     return report
+
+
+def _excluded(sc, reports: list[StepReport], requests: list[str]) -> Excluded:
+    by_id: dict[str, int] = {}
+    for r in reports:
+        for ex_id in r.excluded_by:
+            by_id[ex_id] = by_id.get(ex_id, 0) + 1
+    for req in requests:
+        o = _origin(req.split(" ", 1)[-1])
+        ex = next((e for e in sc.usable if e.origin and _origin(e.origin) == o), None)
+        if ex is not None:
+            by_id[ex.id] = by_id.get(ex.id, 0) + 1
+    return Excluded(declaration=sc.name(), approved_by=sc.approved_by,
+                    differences=sum(len(r.excluded) for r in reports),
+                    steps=sum(1 for r in reports if r.excluded and not r.differences),
+                    requests=len(requests), by_id=by_id,
+                    reasons={e.id: e.reason for e in sc.usable}, problems=list(sc.problems))  # fmt: skip
 
 
 def _shoot(page, artifacts: Path | None, seq: int, shots: dict[int, str]) -> None:
     """The replica at the first step that diverged."""
-    if artifacts is None or shots:
+    if artifacts is None or shots or page is None:
         return
     try:
         path = Path(artifacts) / f"step-{seq:04d}.after.png"
@@ -756,34 +1355,60 @@ def _scope(report: FidelityReport, judging, spec, rec: Recording, step_shots) ->
             report.status = "blocked"
     report.categories = judge_mod.categories(report.coverage, report.status, cases, visual)
     # the replay category is the structure alone: not the cases folded into `status`
-    structural = "pass"
-    if report.coverage is not None:
-        c = report.coverage
-        if c.unresolved or c.missing_value or c.unsupported or c.replayed == 0:
-            structural = "blocked"
-        elif c.failed or c.skipped:
-            structural = "fail"
-    report.categories["replay"].status = {"pass": "PASS", "fail": "FAIL"}.get(structural,
-                                                                              "BLOCKED")  # fmt: skip
+    structural = _structural(report.steps, report.coverage)
+    if structural == "pass" and report.blocked_requests and report.origins:
+        structural = "fail"
+    rep = report.categories["replay"]
+    rep.status = {"pass": "PASS", "fail": "FAIL"}.get(structural, "BLOCKED")
+    x = report.excluded
+    if x is not None and x.steps:
+        # passed only within the declared scope: not counted as passed
+        rep.required_passed = max(0, rep.required_passed - x.steps)
+        rep.required_total = max(0, rep.required_total - x.steps)
+        rep.note = (f"{x.steps} step(s) differ only by {x.differences} difference(s) excluded "
+                    f"under {x.declaration}: not counted as passed")  # fmt: skip
     report.verdict, report.verdict_reasons = judge_mod.scoped(report.categories, cases, visual)
+    if x is not None and (x.differences or x.requests):
+        report.verdict_reasons.append(
+            f"{x.differences} difference(s) and {x.requests} request(s) excluded under "
+            f"{x.declaration} (approved by {x.approved_by}); "
+            + ", ".join(f"{k}: {n}" for k, n in x.by_id.items()))  # fmt: skip
     report.requirements = judge_mod.requirements(spec, cases, visual, report.steps,
                                                  report.coverage)  # fmt: skip
+    if x is not None:
+        report.requirements.excluded += [f"{k} ({x.reasons.get(k, '')}): {n} excluded"
+                                         for k, n in x.by_id.items()]  # fmt: skip
     report.first_divergence = judge_mod.first_divergence(judging, report.steps, rec, step_shots)
+
+
+def _structural(steps: list[StepReport], cov: Coverage | None) -> str:
+    """The replay's structural result: BLOCKED when a step could not be run as recorded (or
+    nothing ran), FAIL when a step failed or was not run, else PASS."""
+    if cov is not None and cov.replayed == 0:
+        return "blocked"
+    if any(s.status == "blocked" for s in steps):
+        return "blocked"
+    if any(s.status == "fail" for s in steps) or (cov is not None and (cov.skipped or cov.failed)):
+        return "fail"
+    return "pass"
 
 
 def _result(rec, base_url, reports, problems, expected) -> FidelityReport:
     count = Counter(r.outcome for r in reports)
     captured = captured_actions(rec)
+    run = [r for r in reports if r.outcome != "setup"]
     cov = Coverage(
-        steps=len(reports),
+        setup=count["setup"],
+        steps=len(run),
         replayed=count["replayed"] + count["implied"],
         implied=count["implied"],
-        compared=sum(1 for r in reports if r.compared),
-        failed=sum(1 for r in reports if r.status == "fail"),
+        compared=sum(1 for r in run if r.compared),
+        failed=sum(1 for r in run if r.status == "fail"),
         skipped=count["not_run"],
         unresolved=count["unresolved"],
         missing_value=count["missing_value"],
         unsupported=count["unsupported"],
+        unmapped=count["unmapped"],
         expected=None if expected is None else len(expected),
         captured=len(captured),
         missing_expected=missing_actions(list(expected), captured) if expected else [],
@@ -792,16 +1417,13 @@ def _result(rec, base_url, reports, problems, expected) -> FidelityReport:
     if cov.missing_expected:
         problems.append("expected actions not in the recording: " + ", ".join(cov.missing_expected))
     if cov.failed:
-        first = next(r for r in reports if r.status == "fail")
+        first = next(r for r in run if r.status == "fail")
         problems.append(f"{cov.failed} step(s) failed, first step {first.seq} ({first.action})")
     if cov.replayed == 0:
         problems.append("no step was replayed: a replay of nothing never passes")
-    if cov.unresolved or cov.missing_value or cov.unsupported or cov.replayed == 0:
-        status = "blocked"
-    elif cov.failed or cov.skipped or cov.missing_expected:
+    status = _structural(run, cov)
+    if status == "pass" and cov.missing_expected:
         status = "fail"
-    else:
-        status = "pass"
     return FidelityReport(recording=rec.id, base_url=base_url, status=status, steps=reports,
                           coverage=cov, problems=problems)  # fmt: skip
 
@@ -857,7 +1479,7 @@ def _wait_address(page, url: str, timeout_ms: int = 5000) -> None:
     replica must arrive at the same address on its own."""
     import time
 
-    deadline = time.monotonic() + timeout_ms / 1000
+    deadline = time.monotonic() + max(timeout_ms, 5000) / 1000
     while page.url != url:
         if time.monotonic() >= deadline:
             raise _WrongAddress(f"expected {url}, the page is at {page.url}")
@@ -865,8 +1487,9 @@ def _wait_address(page, url: str, timeout_ms: int = 5000) -> None:
 
 
 def _record_title(step: RecStep, values: dict[int, str], bnd: bindings_mod.Bindings) -> str | None:
-    """The title of the record a step acts on: named in the bindings, or the value bound to the
-    step that typed it."""
+    """The title of the record a step acts on: named in the bindings, the value bound to the
+    step that typed it, or (in a split part) the value of another application's step, supplied
+    from outside."""
     from labctl.locate import record_of
 
     if step.seq in bnd.records:
@@ -874,71 +1497,16 @@ def _record_title(step: RecStep, values: dict[int, str], bnd: bindings_mod.Bindi
     cand = record_of(step)
     if cand is not None and cand.get("text_from") is not None:
         return values.get(int(cand["text_from"]))
+    if cand is not None and isinstance(cand.get("text_from_outside"), dict):
+        return bnd.from_outside(cand["text_from_outside"])
     return None
 
 
 def _act(page, step: RecStep, base_url: str | None, values: dict[int, str],
          bnd: bindings_mod.Bindings, timeout_ms: int = 5000) -> tuple[str | None, bool]:  # fmt: skip
-    """Perform one step. Returns (what found the target, whether the step was implied by the one
-    before it rather than performed)."""
-    from labctl.locate import Unresolved, resolve
-
-    if step.action == "goto":
-        url = _rebase(step.url, base_url)
-        if step.caused_by is not None or step.nav in ("push", "replace"):
-            _wait_address(page, url)
-            why = f"step {step.caused_by}" if step.caused_by is not None else "the page itself"
-            return f"navigation caused by {why}", True
-        if step.nav == "reload" and page.url not in ("", "about:blank"):
-            page.reload()
-            _wait_address(page, url)
-        else:
-            page.goto(url)
-        return None, False
-    if step.action == "submit" and step.caused_by is not None:
-        return f"submitted by step {step.caused_by}", True
-    if step.action not in SUPPORTED:
-        raise Unsupported(f"this replay cannot perform {step.action!r}")
-    value = None
-    if step.action in bindings_mod.VALUED:
-        value = values.get(step.seq)
-        if value is None:
-            shape = f" (recorded shape {step.typed_shape!r})" if step.typed_shape else ""
-            raise MissingValue(f"no binding gives the value for step {step.seq} "
-                               f"({step.selector}){shape}: add it to bindings.yaml")  # fmt: skip
-    loc, found = resolve(page, step, _record_title(step, values, bnd), timeout_ms)
-    if loc is None and step.action != "keypress":
-        raise Unresolved("the step names no element", [])
-    if step.action in ("click", "dblclick") and not loc.is_visible():
-        # A control shown only while its record is under the pointer (a list item's delete
-        # button): a person points at the record first; so does the replay.
-        row = loc.locator("xpath=ancestor::*[self::li or self::tr or @role='row'][1]")
-        if row.count() == 1:
-            row.hover(timeout=10000)
-    if step.action == "type":
-        loc.fill(value, timeout=10000)
-    elif step.action == "select":
-        try:
-            loc.select_option(label=value, timeout=10000)
-        except Exception:  # noqa: BLE001 - recorded as text; fall back to the option value
-            loc.select_option(value=value, timeout=10000)
-    elif step.action == "click":
-        loc.click(timeout=10000)
-    elif step.action == "dblclick":
-        loc.dblclick(timeout=10000)
-    elif step.action in ("check", "uncheck"):
-        if loc.is_checked(timeout=10000) != (step.action == "check"):
-            loc.click(timeout=10000)
-    elif step.action == "keypress":
-        combo = "+".join([*step.modifiers, step.key or ""])
-        if not step.key:
-            raise Unsupported("a key press without its key")
-        if loc is None:
-            page.keyboard.press(combo)
-        else:
-            loc.press(combo, timeout=10000)
-    elif step.action == "submit":
-        loc.evaluate(
-            "el => (el.form || el).requestSubmit ? (el.form || el).requestSubmit() : el.click()"
-        )
-    return found, False
+    """One step on one page (kept for callers of the older single-page replay)."""
+    rec = Recording(id="-", path=Path("."), app=None, steps=[step])
+    run = _Run(page.context, rec, origin_map(rec, base_url, None, False), values, bnd,
+               timeout_ms, 0)  # fmt: skip
+    run.adopt(step.tab, page)
+    return run.act(step)

@@ -147,3 +147,18 @@ details.more { margin: 14px 0 4px; border: 1px dashed var(--line); border-radius
 details.more > summary { color: var(--muted); }
 details.more[open] > summary { margin-bottom: 8px; }
 .guided { border-left: 4px solid var(--accent); background: var(--surface); padding: 8px 12px; margin: 0 0 14px; border-radius: 0 8px 8px 0; }
+
+/* replication: declarations, replay report, coverage */
+.verdict { border-left: 5px solid var(--warn); }
+.verdict.ok { border-left-color: var(--ok); }
+.verdict.err { border-left-color: var(--err); }
+.verdict-text .pill { font-size: 16px; padding: 4px 14px; white-space: normal; }
+ul.problems { margin: 4px 0 8px; padding-left: 20px; overflow-wrap: anywhere; }
+.pics { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.pics figure { margin: 0; min-width: 0; }
+.pics figcaption { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.pics img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; display: block; }
+.scroll > table { min-width: 560px; }
+.scroll > table.rows { min-width: 760px; }
+.card { min-width: 0; overflow-wrap: break-word; }
+nav.sectionnav a .pill { margin-left: 4px; }

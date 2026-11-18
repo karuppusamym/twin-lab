@@ -2,6 +2,39 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — One replay across applications and tabs; trial findings; R09, R10, R12
+- **The recorder sends each action the moment it happens** and numbers it on arrival. Before, a
+  step ended by a navigation was sent while the page unloaded, and newer Chromium drops that
+  call: clicks, checks and Enter steps were lost (this failed CI on Linux). The blank first page
+  and a `window.open` popup are also handled by the recorder itself.
+- **One replay across applications and tabs.** `labctl behaviour fidelity <recording> --map
+  source=replica` (repeat per application), or a `replicas.yaml` beside the recording; a single
+  `--base-url` still works for one application. Tabs are opened, matched, switched and closed as
+  recorded. A request to a source or unmapped origin is refused and reported; a step on an
+  unmapped origin is BLOCKED and names the `--map` to add.
+- **Splitting keeps references.** Steps are renumbered per application with a map, a reference
+  to a step in another application is kept as `{app, step}`, and its value travels in the part's
+  `bindings.yaml` under `outside:`. Acceptance and picture files are split too.
+- **Observation boundaries.** A click or submit that loads a page is compared at that page, also
+  when the page is slow or redirects; Back and Forward are replayed as such.
+- **Setup events** (blank and browser pages) are counted the same way in the proposal, the parts,
+  the sequence file and replay coverage.
+- **Reviewed scope** (`scope.yaml`): elements, screens or origins left out, each with a reason and
+  who approved. Excluded differences get their own report section and never count as passed.
+  `labctl behaviour scope <recording> --from-brief` drafts one, unapproved.
+- **R12 capability table** (`labctl/behaviour/capabilities.py`), each row proved by a fixture
+  test. Supported: same- and cross-origin iframe, open shadow DOM, upload, download, popup,
+  dialogs, late content, select by index, slow POST-redirect with history, multi-app replay.
+  Partial: service worker (blocked during replay and reported), second engine. Unsupported with
+  a message: closed shadow DOM, drag and drop, canvas, desktop.
+- **R09 coverage matrix**: `labctl coverage <app>` and a portal page give each requirement one of
+  VERIFIED, EVIDENCED, ASSUMED, UNOBSERVED, UNSUPPORTED, EXCLUDED or BLOCKED. **R10**: portal
+  pages for a recording, a replay report, coverage and the declaration files.
+- Left open: a popup that misses its start script is hooked only before the next action; element
+  exclusions match tag, id and class, not ancestry; recording waits up to 15 s on a page that
+  polls the network; the portal's replay button uses `replicas.yaml` or one base URL, it has no
+  form for the map.
+
 ## 2026-11-18 — Several applications in one recording, end to end; gaps R05, R06, R08, R11; OpenShift by hand
 - **The recorder follows every tab and popup** on one numbered sequence; each step names its
   tab, opener and origin, and opening, switching and closing a tab are steps. One HAR covers all

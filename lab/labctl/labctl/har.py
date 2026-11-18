@@ -2146,12 +2146,19 @@ def data_location(
 ) -> dict:
     """Where the application's business data lives, with the evidence for it (R07).
 
+    Five findings, in `persistence`; `kind` stays browser | server | unknown for the callers that
+    decide on a database. The absence of server writes is NOT evidence of localStorage:
+
     - `server`: a state-changing request to the app's own origin was seen, or a response carries
       records (JSON items, or a data grid in a served page).
-    - `browser`: no request for data at all, and a click or typing changed the page with no
-      request to explain it, and/or browser storage was recorded with data. Which storage is `not observed` unless the recorder wrote
-      it; scripts that mention localStorage/sessionStorage are listed as `referenced`.
-    - `unknown`: neither can be shown.
+    - `storage` (kind browser): browser storage keys were observed in the recording, so they
+      changed with the steps (or were still there after a reload).
+    - `navigation` (kind browser): values travel in URLs (a query string on a page request) with
+      no server write; nothing shows they are kept anywhere.
+    - `transient` (kind browser): a click or typing changed the page with no request and no
+      storage was observed. Labelled "browser (transient or unknown persistence)"; scripts that
+      mention localStorage/sessionStorage are listed as `referenced`, which proves nothing.
+    - `unknown`: none of this can be shown.
     """
     calls = [e for e in entries if _is_data_call(e)]
     writes = [e for e in calls if e.method in STATE_METHODS]
@@ -2168,12 +2175,15 @@ def data_location(
         if text and INDEXED_DB.search(text):
             referenced["indexedDB"] = None
     changed = not served_grids and _unexplained_changes(steps, entries)
-    out: dict[str, Any] = {"kind": "unknown", "storage": seen["kinds"],
+    navigation = _query_fields(entries)
+    reloaded = _kept_after_reload(steps)
+    out: dict[str, Any] = {"kind": "unknown", "persistence": "unknown", "storage": seen["kinds"],
                            "referenced": list(referenced), "keys": list(seen["keys"]),
                            "shape": seen["shape"], "evidence": []}  # fmt: skip
     ev: list[str] = out["evidence"]
     if writes or records or served_grids:
         out["kind"] = "server"
+        out["persistence"] = "server"
         if writes:
             where = sorted({f"{e.method} {sanitize.route_pattern(e.path)}" for e in writes})
             ev.append(f"{len(writes)} state-changing request(s) to the app's own origin: "
@@ -2185,19 +2195,29 @@ def data_location(
             ev.append("the served pages already hold data grids: records came from the server")
         if seen["kinds"]:
             ev.append("browser storage was also recorded: " + ", ".join(seen["kinds"]))
-    elif not calls and (seen["kinds"] or changed):
+    elif not calls and (seen["kinds"] or changed or navigation):
         out["kind"] = "browser"
         ev.append("no state-changing request and no data request to the app's own origin in the "
                   "whole recording")  # fmt: skip
-        if changed:
-            n = sum(1 for s in steps if s.action in INTERACTIONS)
-            ev.append(f"the page changed after interaction ({n} click/typing step(s) recorded) "
-                      "with no request")  # fmt: skip
         if seen["kinds"]:
-            ev.append("browser storage recorded with data: " + ", ".join(seen["kinds"]))
+            out["persistence"] = "storage"
+            n = sum(1 for s in steps if s.storage)
+            ev.append("browser storage observed with data: " + ", ".join(seen["kinds"])
+                      + f" (keys changed at {n} step(s))")  # fmt: skip
+            if reloaded:
+                ev.append("the keys were still present at a step after a reload")
         else:
-            ev.append("storage kind: not observed (the recorder does not capture browser "
-                      "storage); it is inferred from the absence of requests")  # fmt: skip
+            out["persistence"] = "transient" if changed else "navigation"
+            if changed:
+                n = sum(1 for s in steps if s.action in INTERACTIONS)
+                ev.append(f"the page changed after interaction ({n} click/typing step(s) "
+                          "recorded) with no request")  # fmt: skip
+            if navigation:
+                ev.append("values travel in the address (query fields: " + ", ".join(navigation[:8])
+                          + "); that is navigation state, not stored data")  # fmt: skip
+            ev.append("browser storage: not observed changing or surviving a reload, so "
+                      "persistence is not shown: absence of server writes is not evidence of "
+                      "localStorage")  # fmt: skip
         if referenced:
             ev.append("scripts reference " + ", ".join(referenced)
                       + " (a script mention is not proof of what is stored)")  # fmt: skip
@@ -2211,7 +2231,44 @@ def data_location(
         ev.append(f"not shown: {why}")
         if referenced:
             ev.append("scripts reference " + ", ".join(referenced))
+    out["label"] = DATA_LABELS[out["persistence"]].format(
+        storage=", ".join(seen["kinds"]) or "storage"
+    )
     return out
+
+
+DATA_LABELS = {
+    "server": "server (observed writes or served records)",
+    "storage": "browser storage (observed: {storage})",
+    "navigation": "browser (navigation or form state in URLs; persistence not shown)",
+    "transient": "browser (transient or unknown persistence)",
+    "unknown": "unknown persistence",
+}
+
+
+def _query_fields(entries: list[Exchange]) -> list[str]:
+    """Query field names the app's own pages were requested with: values carried in URLs."""
+    names: dict[str, None] = {}
+    for e in entries:
+        if e.kind == "document" and e.query:
+            for q in e.query:
+                names[q] = None
+    return list(names)
+
+
+def _kept_after_reload(steps: list[Step]) -> bool:
+    """A storage key recorded at a step after a reload/goto step that followed its first sight."""
+    seen_keys = False
+    reload_after = False
+    for step in steps:
+        has = any((step.storage or {}).get(k) for k in ("localStorage", "sessionStorage"))
+        if has and reload_after:
+            return True
+        if has:
+            seen_keys = True
+        elif seen_keys and step.action in ("reload", "goto", "navigate"):
+            reload_after = True
+    return False
 
 
 # --- tables from HTML grids and forms ------------------------------------------------------------

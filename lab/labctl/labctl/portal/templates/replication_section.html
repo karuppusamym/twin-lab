@@ -1,0 +1,44 @@
+<section class="card" id="replication">
+  <h2>Replication: values, checks, replay and coverage</h2>
+  {% if not replication.recordings %}
+  <p class="small muted">Record the real application's flow (under Evidence) to replay it here. A replay needs a recording; the declared values and checks are written beside it.</p>
+  {% else %}
+  <div class="scroll"><table class="small" id="rec-files">
+    <thead><tr><th>Recording</th><th>Files</th><th>Blocking a run</th><th></th></tr></thead><tbody>
+    {% for r in replication.recordings %}
+      <tr><td><code>{{ r.name }}</code></td>
+        <td>{% for f in r.files %}<span class="pill {{ 'ok' if f.state == 'ok' else 'err' if f.state in ('invalid', 'blocks') else '' }}" title="{{ f.name }}">{{ f.kind }}: {{ {'ok': 'ready', 'missing': 'none', 'blocks': 'blocks', 'invalid': 'invalid'}[f.state] }}</span> {% endfor %}</td>
+        <td>{% if r.blocked %}{{ r.blocked | length }}{% if r.todo %} · {{ r.todo }} TODO{% endif %}{% else %}nothing{% endif %}</td>
+        <td><a class="button secondary" href="/apps/{{ app_id }}/recordings/{{ r.name }}">Values, checks and replay</a></td></tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% endif %}
+
+  {% if replication.latest %}
+  {% set rn, rr, rf = replication.latest %}
+  {% set verdict = rr.verdict or (rr.status | upper) %}
+  <h3>Latest replay</h3>
+  <p class="small" id="latest-replay"><span class="pill {{ 'ok' if verdict == 'PASS WITHIN DECLARED SCOPE' else 'err' if verdict == 'FAIL' else 'warn' }}">{{ verdict }}</span>
+    <span class="pill sentence {{ 'ok' if rf.state == 'current' else 'warn' }}">{% if rf.state == 'current' %}still current{% elif rf.state == 'stale' %}out of date: {{ rf.reasons | join('; ') }}{% else %}checked before freshness was tracked{% endif %}</span>
+    <a href="/apps/{{ app_id }}/reports/{{ rn }}">Open the report</a></p>
+  {% for name, c in rr.categories.items() %}{% if c.status == 'FAIL' %}<p class="small"><span class="pill err">{{ name }} failed</span> {{ c.required_passed }} / {{ c.required_total }} required passed</p>{% endif %}{% endfor %}
+  {% else %}
+  <p class="small muted">No replay has been kept for this app yet.</p>
+  {% endif %}
+
+  <h3>Coverage matrix</h3>
+  {% if replication.coverage %}
+  {% set cv = replication.coverage.report %}
+  <p class="small" id="coverage-summary"><span class="pill {{ 'ok' if cv.claim else 'warn' }}">{{ 'claim can be made' if cv.claim else 'not claimable' }}</span>
+    <span class="pill sentence {{ 'ok' if replication.coverage.state == 'current' else 'warn' }}">{% if replication.coverage.state == 'current' %}current{% else %}out of date: {{ replication.coverage.reasons | join('; ') }}{% endif %}</span><br>
+    {% for s in ['VERIFIED', 'EVIDENCED', 'ASSUMED', 'UNOBSERVED', 'UNSUPPORTED', 'EXCLUDED', 'BLOCKED'] %}{% if cv.counts[s] %}{{ s | lower }} {{ cv.counts[s] }} · {% endif %}{% endfor %}of {{ cv.required }} required.
+    {{ cv.requests | length }} evidence request(s). <a href="/apps/{{ app_id }}/coverage">Open the matrix</a></p>
+  {% else %}
+  <p class="small muted">Not built yet.</p>
+  {% endif %}
+  <form method="post" action="/apps/{{ app_id }}/coverage" class="inline"><button type="submit" class="secondary" data-busy="Building…">Build the matrix</button></form>
+
+  <details class="more" id="judging-apart"><summary>Why the builder cannot change what judges it</summary>
+    <p class="small">{{ guard_note }}</p>
+  </details>
+</section>

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Replay {{ v.report.recording }} · Twin Lab{% endblock %}
+{% block content %}
+{% set r = v.report %}
+{% set cov = r.coverage %}
+{% set vc = 'ok' if v.verdict == 'PASS WITHIN DECLARED SCOPE' else 'err' if v.verdict == 'FAIL' else 'warn' %}
+<p class="small"><a href="{{ back }}">← {{ app_id }}</a> · <a href="/apps/{{ app_id }}/coverage">Coverage matrix</a></p>
+<h1>Replay of {{ r.recording }}</h1>
+<p class="lead">Against {{ r.base_url or "an unnamed base address" }}.</p>
+
+<div class="card verdict {{ vc }}" id="verdict">
+  <div class="nexthead">Verdict</div>
+  <p class="verdict-text"><span class="pill {{ vc }}">{{ v.verdict }}</span></p>
+  {% if v.legacy %}<p class="small muted">An older report: it has no scoped verdict, only the replay's own result ({{ r.status }}).</p>{% endif %}
+  {% if r.verdict_reasons %}<ul class="small">{% for x in r.verdict_reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+  <p class="small" id="freshness"><span class="pill sentence {{ 'ok' if v.fresh.state == 'current' else 'warn' }}">{% if v.fresh.state == 'current' %}Still current: nothing it compared has changed since.{% elif v.fresh.state == 'stale' %}Out of date: {{ v.fresh.reasons | join("; ") }}. Replay again.{% else %}Freshness unknown: this report predates fingerprints. Replay again.{% endif %}</span></p>
+</div>
+
+<section class="card" id="categories">
+  <h2>Categories</h2>
+  <p class="small muted">Each required category is judged on its own. A failed category stays failed whatever the others did; nothing here is averaged.</p>
+  {% if r.categories %}
+  <div class="scroll"><table class="small">
+    <thead><tr><th>Category</th><th>Result</th><th>Required passed / total</th><th>Optional passed / total</th><th>Note</th></tr></thead><tbody>
+    {% for name, c in r.categories.items() %}
+      <tr><td>{{ name }}</td><td><span class="pill {{ 'ok' if c.status == 'PASS' else 'err' if c.status == 'FAIL' else 'warn' if c.status == 'BLOCKED' else '' }}">{{ c.status | replace("_", " ") | lower }}</span></td><td>{{ c.required_passed }} / {{ c.required_total }}</td><td>{{ c.optional_passed }} / {{ c.optional_total }}</td><td>{{ c.note or "" }}</td></tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="small muted">This report has no categories (an older report).</p>{% endif %}
+</section>
+
+{% if r.first_divergence %}
+{% set d = r.first_divergence %}
+<section class="card" id="divergence">
+  <h2>First divergence</h2>
+  <p>{{ d.kind }} <b>{{ d.what }}</b>{% if d.step is not none %} at step <b>{{ d.step }}</b>{% endif %}{% if d.locator %}, locator <code>{{ d.locator }}</code>{% endif %}</p>
+  {% if d.state %}<p class="small">{{ d.state }}</p>{% endif %}
+  {% if d.requests %}<p class="small muted">The source's requests around that step: {% for q in d.requests %}<code>{{ q }}</code> {% endfor %}</p>{% endif %}
+  <div class="pics">
+    {% for p in v.pictures %}
+      <figure>
+        <figcaption>{{ p.label }}</figcaption>
+        {% if p.url %}<a href="{{ p.url }}"><img src="{{ p.url }}" alt="{{ p.label }} picture at step {{ d.step }}" loading="lazy"></a>
+        {% else %}<p class="small muted">{{ "No picture was kept." if not p.given else "The picture is not in the portal's artifact folder, so it is not shown." }}</p>{% endif %}
+      </figure>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if cov %}
+<section class="card" id="counters">
+  <h2>Coverage of the recording</h2>
+  <div class="scroll"><table class="small">
+    <thead><tr><th>Expected actions</th><th>Captured</th><th>Not captured</th><th>Steps</th><th>Replayed</th><th>Failed</th><th>Skipped</th><th>Unresolved</th><th>Missing value</th><th>Unsupported</th></tr></thead>
+    <tbody><tr><td>{{ "not declared" if cov.expected is none else cov.expected }}</td><td>{{ cov.captured }}</td><td>{{ cov.missing_expected | length }}</td><td>{{ cov.steps }}</td><td>{{ cov.replayed }}</td><td>{{ cov.failed }}</td><td>{{ cov.skipped }}</td><td>{{ cov.unresolved }}</td><td>{{ cov.missing_value }}</td><td>{{ cov.unsupported }}</td></tr></tbody></table></div>
+  {% if cov.missing_expected %}<p class="small">Expected but not captured: {{ cov.missing_expected | join(", ") }}</p>{% endif %}
+</section>
+{% endif %}
+
+{% if r.cases %}
+<section class="card" id="cases">
+  <h2>Acceptance cases</h2>
+  <div class="scroll"><table class="small">
+    <thead><tr><th>Case</th><th>Category</th><th>Required</th><th>When</th><th>Check</th><th>Result</th><th>Note</th></tr></thead><tbody>
+    {% for c in r.cases %}
+      <tr><td>{{ c.id }}</td><td>{{ c.category }}</td><td>{{ 'yes' if c.required else 'no' }}</td><td>{{ c.after }}</td><td>{{ c.check }}</td><td><span class="pill {{ 'ok' if c.status == 'PASS' else 'err' if c.status == 'FAIL' else 'warn' }}">{{ c.status }}</span></td><td>{{ c.note or "" }}{% if v.case_pics.get(c.id) %} <a href="{{ v.case_pics[c.id] }}">replica picture</a>{% endif %}</td></tr>
+    {% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
+{% if r.visual %}
+<section class="card" id="visual">
+  <h2>Pictures compared</h2>
+  <div class="scroll"><table class="small">
+    <thead><tr><th>State</th><th>Viewport</th><th>Mode</th><th>Differing</th><th>Excluded</th><th>Masked</th><th>Result</th><th>Pictures</th></tr></thead><tbody>
+    {% for s in r.visual %}
+      <tr><td>{{ s.id }}</td><td>{{ s.viewport }}</td><td>{{ s.mode }}</td><td>{{ s.differing }} of {{ s.compared }}</td><td>{{ s.excluded }}</td><td>{{ s.masked }}</td><td><span class="pill {{ 'ok' if s.status == 'PASS' else 'err' if s.status == 'FAIL' else 'warn' }}">{{ s.status }}</span></td>
+        <td>{% for u in v.visual_pics[s.id] %}{% if u %}<a href="{{ u }}">{{ ["source", "replica", "diff"][loop.index0] }}</a> {% endif %}{% endfor %}</td></tr>
+    {% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
+<section class="card" id="scope">
+  <h2>Scope of this result</h2>
+  {% set q = r.requirements %}
+  {% if q %}
+    {% for label, items in [("Scope claimed", q.scope), ("Exclusions applied (declared before the run)", q.excluded), ("Evidence-backed", q.evidence_backed), ("Assumed", q.assumed), ("Unobserved", q.unobserved), ("Unsupported", q.unsupported)] %}
+      {% if items %}<h3>{{ label }}</h3><ul class="small">{% for i in items %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}
+    {% endfor %}
+    {% if not (q.scope or q.excluded) %}<p class="small muted">No scope or exclusion was declared: nothing is excluded.</p>{% endif %}
+  {% else %}<p class="small muted">This report lists no requirements.</p>{% endif %}
+  {% if r.problems %}<h3>Why not a pass</h3><ul class="small">{% for p in r.problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+</section>
+
+<section class="card" id="fingerprint">
+  <h2>What was compared</h2>
+  <p class="small" style="overflow-wrap:anywhere">{{ v.fingerprint_text }}</p>
+  <p class="small muted">Replica build, stack versions, browser and viewport, data baseline and the recording's hash are part of the result: a change to any of them makes it out of date.</p>
+</section>
+
+<section class="card" id="steps">
+  <details><summary>All {{ r.steps | length }} step(s)</summary>
+  <div class="scroll"><table class="small">
+    <thead><tr><th>Step</th><th>Action</th><th>Selector</th><th>Target</th><th>Result</th></tr></thead><tbody>
+    {% for s in r.steps %}<tr><td>{{ s.seq }}</td><td>{{ s.action }}</td><td>{{ s.selector or "" }}</td><td>{{ s.target or "" }}</td><td>{{ s.status }}{% if s.differences %}: {{ s.differences[0].text() }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div></details>
+</section>
+{% endblock %}

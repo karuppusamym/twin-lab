@@ -318,7 +318,8 @@ def test_factory_package_validate_and_lab_work_without_a_table(todo_repo):
     text = bpkg.prompt(todo_repo, "todo", None)
     assert package.is_file()
     assert "There is no server database" in text
-    assert "`localStorage` (referenced by the page's scripts; not observed)" in text
+    assert "`localStorage` is referenced by the page's scripts but not observed" in text
+    assert "the absence of server writes is not evidence of browser storage" in text
     assert "hosting health, not business-data health" in text
     assert "Database objects: none" in text
     assert "docker run -d --name twinlab-todo-app" in text and "POSTGRES" not in text
@@ -365,8 +366,9 @@ def test_portal_says_not_applicable_for_a_browser_only_app(repo, monkeypatch):  
     client = TestClient(create_app(repo))
     page = client.get("/apps/showcase").text
     assert 'id="data-na"' in page and "not applicable" in page.lower()
-    assert "in the browser" in page and "Business data:" in page
-    assert "hosting: ok" in page and "business data: in the browser" in page
+    assert "browser (transient or unknown persistence)" in page or "no browser storage" in page
+    assert "Business data:" in page and "not evidence of localStorage" in page
+    assert "hosting: ok" in page and "business data: no server database" in page
     assert "db ok" not in page
     for offered in ("Generate and load", "Reset to baseline", "Named data packs", "Your own data",
                     "Use this database", "reset data first"):  # fmt: skip
@@ -460,3 +462,71 @@ def test_the_fingerprint_names_the_browser_not_a_database(repo, monkeypatch):  #
     _browser_app(repo)
     after = conformance.app_facts(repo, "showcase")["database"]
     assert before == "postgres" and after == "browser storage (no database)"
+
+
+# --- where the data lives: the five findings (trial P1) --------------------------------------------
+
+
+def _persistence(data: dict) -> str:
+    return data["persistence"]
+
+
+def test_five_data_location_findings_are_told_apart(tmp_path):
+    # 1. transient DOM state: the page changed, nothing shows it persists.
+    transient = _data(_recording(tmp_path, _shell_entries(), STEPS, PAGES, name="t"))
+    assert transient["kind"] == "browser" and _persistence(transient) == "transient"
+    assert transient["label"] == "browser (transient or unknown persistence)"
+    assert "not evidence of localStorage" in " ".join(transient["evidence"])
+    # 2. navigation / form state: values travel in the address.
+    nav_entries = [_entry("GET", "https://todo.example.test/form", text=SHELL),
+                   _entry("GET", "https://todo.example.test/result?q=1&name=x", text=SHELL, t=1)]  # fmt: skip
+    nav = _data(_recording(tmp_path, nav_entries,
+                           [{"action": "goto", "page": "a"}, {"action": "click", "page": "a"}],
+                           PAGES, name="n"))  # fmt: skip
+    assert nav["kind"] == "browser" and _persistence(nav) == "navigation"
+    assert "query fields: q, name" in " ".join(nav["evidence"])
+    assert "navigation" in nav["label"]
+    # 3. observed browser storage: keys seen changing.
+    stored = _data(_recording(tmp_path, _shell_entries(), [
+        {"action": "goto", "page": "a"},
+        {"action": "click", "page": "b", "storage": {"localStorage": {"todo-list": "[]"}}},
+    ], PAGES, name="s"))  # fmt: skip
+    assert _persistence(stored) == "storage" and stored["label"].startswith("browser storage")
+    # 4. observed server writes.
+    entries = _shell_entries() + [
+        _entry("POST", "https://todo.example.test/api/tasks", mime="application/json",
+               text='{"id": 1}', post={"mimeType": "application/json", "text": '{"t": "x"}'}, t=2)]  # fmt: skip
+    server = _data(_recording(tmp_path, entries, STEPS, PAGES, name="w"))
+    assert server["kind"] == "server" and _persistence(server) == "server"
+    # 5. unknown persistence.
+    bare = _data(_har(tmp_path, [_entry("GET", "https://todo.example.test/", text=SHELL)]))
+    assert bare["kind"] == "unknown" and _persistence(bare) == "unknown"
+    assert bare["label"] == "unknown persistence"
+
+
+def test_a_script_mention_is_never_storage_evidence(tmp_path):
+    data = _data(_recording(tmp_path, _shell_entries(), STEPS, PAGES))
+    assert data["referenced"] == ["localStorage"] and data["storage"] == []
+    assert _persistence(data) == "transient"  # not "storage"
+
+
+def test_the_brief_and_task_do_not_claim_local_storage_without_observation(browser_model):
+    brief = _scoped(browser_model)
+    text = brief_mod.render(brief, ROOT)
+    assert "does not show that the data persists" in text
+    assert "absence of server writes is not evidence of browser storage" in text
+    assert "keeps its business data **in browser storage**" not in text
+    assert any("persistence is not shown" in g for g in brief.gaps)
+    conf = brief_mod.app_yaml(brief, ROOT)
+    assert conf["stack"]["data"]["persistence"] == "transient"
+    task = bpkg._browser_database_text(conf, "apps/todo")
+    assert "nothing shows that the data persists" in task and "not observed" in task
+
+
+def test_the_brief_says_storage_was_observed_only_when_it_was(tmp_path):
+    steps = [{"action": "goto", "page": "a"},
+             {"action": "click", "page": "b", "storage": {"localStorage": {"todo-list": "[]"}}}]  # fmt: skip
+    model = mb.merge("todo", [mb.from_recording(
+        "todo", _recording(tmp_path, _shell_entries(), steps, PAGES), tmp_path, None)])  # fmt: skip
+    text = brief_mod.render(_scoped(model), ROOT)
+    assert "keeps its business data **in browser storage**, observed in the recording" in text

@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -40,7 +41,8 @@ from labctl.analyse import uipath
 from labctl.appmodel import Flow
 from labctl.botlog import runs as botruns
 from labctl.models import App, Automation, Condition
-from labctl.portal import guide
+from labctl.portal import guide, replication_routes
+from labctl.portal import replication as replication_mod
 from labctl.portal.jobs import JobRunner
 from labctl.portal.labreads import AGENT_TIMEOUT_S, LabReads, Reading
 
@@ -230,7 +232,7 @@ def create_app(root: Path) -> FastAPI:
         return model
 
     NA_TEXT = (
-        "Not applicable: this app keeps its data in the browser, so it has no database to load, "
+        "Not applicable: no server write was observed for this app, so it has no database to load, "
         "reset, baseline or save as a pack."
     )
 
@@ -761,6 +763,12 @@ def create_app(root: Path) -> FastAPI:
         path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
         return back("/flows", f"Flow {model.id} saved")
 
+    replication_routes.register(
+        portal,
+        SimpleNamespace(root=root, state=state, jobs=jobs, slug=slug, page=page, back=back,
+                        app_model=app_model),
+    )  # fmt: skip
+
     # --- recordings across applications ----------------------------------------------------------
 
     def find_recording(name: str) -> dict:
@@ -937,6 +945,7 @@ def create_app(root: Path) -> FastAPI:
         fresh = freshness_for(users, {app_id: conf.baseline_of(lab_info)} if lab_read else None)
         listed = sessions if isinstance(sessions, list) else (sessions or {}).get("sessions", [])
         ready_now = [a.id for a in users if fresh[a.id].ready]
+        replication = replication_mod.app_summary(root, state, app_id)
         steps = guide.app_steps(
             app_id,
             has_evidence=bool(ev.kinds() or users or factory.flows(root, app_id)),
@@ -947,6 +956,7 @@ def create_app(root: Path) -> FastAPI:
             recorded_automations=guide.completed_automations(listed or []),
             declared=[a.id for a in users if a.expects is not None],
             recheck=recheck_reasons(users, fresh),
+            replication=_replication_facts(replication, bool(users or factory.flows(root, app_id))),
         )  # fmt: skip
         # Guided until a named session has completed for a bot whose readiness is current.
         first_done = bool(set(guide.completed_automations(listed or [])) & set(ready_now))
@@ -1012,6 +1022,8 @@ def create_app(root: Path) -> FastAPI:
             repo_name=(cfg.github_repo if cfg else None),
             jobs=jobs.list(subject=app_id, limit=10),
             lineage=multiapp.lineage(root, app_id),
+            replication=replication,
+            guard_note=replication_mod.GUARD_NOTE,
         )
 
     @portal.post("/apps/{app_id}/evidence")
@@ -1633,8 +1645,8 @@ def create_app(root: Path) -> FastAPI:
             if browser_only(app_id) and body["db"] and not body["http"] and not body["faults"]:
                 return back(
                     f"/apps/{app_id}#conditions",
-                    f"Not applicable: {condition_id} only slows the database, and this app keeps "
-                    "its data in the browser",
+                    f"Not applicable: {condition_id} only slows the database, and this app has no "
+                    "server database",
                     "error",
                 )
             agent.set_condition(body)
@@ -1891,6 +1903,27 @@ def create_app(root: Path) -> FastAPI:
     portal.state.reads = reads
     portal.state.root = root
     return portal
+
+
+def _replication_facts(summary: dict, has_flow: bool) -> dict | None:
+    """What the next-step logic needs from an app's recordings, declarations, reports and matrix."""
+    recs = summary["recordings"]
+    if not recs:
+        return None
+    latest, cov = summary["latest"], summary["coverage"]
+    return {
+        "recordings": [r["name"] for r in recs],
+        "blocked": [b for r in recs for b in r["blocked"]],
+        "todo": sum(r["todo"] for r in recs),
+        "declared_acceptance": any(f["kind"] == "acceptance" and f["exists"]
+                                   for r in recs for f in r["files"]),
+        "flow": has_flow,
+        "verdict": (latest[1].verdict or latest[1].status.upper()) if latest else None,
+        "report_state": latest[2].state if latest else "none",
+        "coverage_state": cov["state"] if cov else "none",
+        "claim": bool(cov and cov["report"].claim),
+        "shortfall": "; ".join(cov["report"].shortfall) if cov else "",
+    }  # fmt: skip
 
 
 def _counts(reply) -> str:

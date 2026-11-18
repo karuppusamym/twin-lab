@@ -40,6 +40,7 @@ class Category(BaseModel):
 
 class Divergence(BaseModel):
     step: int | None = None
+    app: str | None = None  # the application the step belongs to (id, else source origin)
     kind: str = "step"  # step | case | visual
     what: str | None = None  # the case or state id, or the step's action
     locator: str | None = None
@@ -272,16 +273,23 @@ def first_divergence(judging: Judging | None, steps, rec, step_shots: dict[int, 
     for s in steps:
         if s.status in ("fail", "blocked"):
             d = s.differences[0] if s.differences else None
+            # the element that differs; for an action that failed, what found its target
+            element = d.element if d is not None and d.check not in ("action", "target", "value",
+                                                                     "url", "unsupported") else None  # fmt: skip
             found.append((order.get(s.seq, 0), Divergence(
-                step=s.seq, kind="step", what=s.action, locator=s.target or s.selector,
+                step=s.seq, kind="step", what=s.action,
+                locator=element or s.target or s.selector,
                 state=d.text() if d else s.note, after=step_shots.get(s.seq))))  # fmt: skip
             break
     if judging is not None:
+        spec_cases = {c.id: c for c in (judging.spec.cases if judging.spec else [])}
         for c in judging.cases.values():
             if c.required and c.status in (acc.FAIL, acc.BLOCKED):
                 seq = c.step if c.step is not None else last
+                loc = spec_cases[c.id].locator if c.id in spec_cases else None
                 found.append((order.get(seq, len(order)) + 0.5, Divergence(
-                    step=seq, kind="case", what=c.id, locator=None,
+                    step=seq, kind="case", what=c.id,
+                    locator=acc.describe_locator(loc) if loc not in (None, "") else None,
                     state=f"{c.status}: expected {c.expected!r}, saw {c.actual!r}"
                     + (f" ({c.note})" if c.note else ""), after=c.screenshot)))  # fmt: skip
         for v in judging.visual.values():
@@ -295,6 +303,7 @@ def first_divergence(judging: Judging | None, steps, rec, step_shots: dict[int, 
         return None
     found.sort(key=lambda x: x[0])
     div = found[0][1]
+    div.app = next((s.app for s in steps if s.seq == div.step and getattr(s, "app", None)), None)
     if div.before is None and judging is not None:
         div.before = judging.picture_of(div.step)
     div.requests = requests_near(rec, div.step)

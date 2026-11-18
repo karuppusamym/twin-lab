@@ -114,10 +114,16 @@ Status on 18 November 2026:
   `test_browser_baseline.py`, `test_visual_fidelity.py`, `test_fidelity_fingerprint.py`. Mobile
   pictures need approved images; database outcome cases were tested with a stand-in.
 - R06 capture: the recorder now keeps storage keys with masked shapes.
-- R10: partly. `labctl evidence build-all` and the portal's Recordings page; acceptance,
-  baseline and picture files are not yet editable in the portal.
-- R09, R12: open. The findings of the multi-application trial are being checked against the
-  multi-tab recorder and are not marked fixed here.
+- R09: implemented. `labctl coverage <app>` and the portal's coverage page;
+  `test_coverage_matrix.py`.
+- R10: implemented for reading (recording, replay report, coverage and declaration pages;
+  `test_portal_replication.py`). The declaration files are still edited as files.
+- R12: implemented. The table is `labctl/behaviour/capabilities.py`; `test_capability_fixtures.py`.
+- Multi-application trial (`docs/multi-app-recording-trial.md`): split references, observation
+  boundaries, the origin-to-replica map, setup events and scope exclusions are fixed;
+  `test_replay_across_apps.py`. A 108-step recording over two applications replays in one run;
+  a replica with a wrong value or a missing page fails at the step concerned.
+- Not yet done: the trial's second round against an application with a real API and database.
 
 The section below is the status when this document was first written.
 

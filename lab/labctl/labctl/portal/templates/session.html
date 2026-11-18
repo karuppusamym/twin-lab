@@ -12,14 +12,14 @@
   <div class="step"><b>{{ sm.wall_s }} s</b><span>start to stop</span></div>
   <div class="step"><b>{{ sm.waiting_on_app_s }} s</b><span>waiting on the app (incl. added delay)</span></div>
   <div class="step"><b>{{ sm.errors }}</b><span>errors (5xx or injected faults)</span></div>
-  {% if browser_only %}<div class="step"><b>n/a</b><span>rows changed: this app keeps its data in the browser</span></div>
+  {% if browser_only %}<div class="step"><b>n/a</b><span>rows changed: this app has no server database</span></div>
   {% else %}<div class="step"><b>{{ s.changes | length }}</b><span>rows changed</span></div>{% endif %}
 </div>
 
 {% if browser_only %}
 <div class="card" id="verdict">
   <h2>Database change check: <span class="pill">not applicable</span></h2>
-  <p class="muted">This app keeps its data in the browser. There is no database, so there are no row changes to check, and this session says nothing about them. The requests above and the outcome check still apply.</p>
+  <p class="muted">This app has no server database (no server write was observed). There is no database, so there are no row changes to check, and this session says nothing about them. The requests above and the outcome check still apply.</p>
 </div>
 {% elif verdict %}
 <div class="card" id="verdict">

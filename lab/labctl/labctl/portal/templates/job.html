@@ -7,8 +7,10 @@
   <pre id="job-log" style="max-height:520px">{{ job.log }}</pre>
 </div>
 <p id="job-done" hidden>
-  {% if job.subject and job.kind in ("brief", "lab", "record") %}<a class="button" href="/apps/{{ job.subject }}">Back to {{ job.subject }}</a>
+  {% if job.kind == "replay" %}<a class="button" href="/apps/{{ job.subject }}#replication">Back to {{ job.subject }}</a>
+  {% elif job.subject and job.kind in ("brief", "lab", "record") %}<a class="button" href="/apps/{{ job.subject }}">Back to {{ job.subject }}</a>
   {% elif job.kind == "conformance" %}<a class="button" href="/automations/{{ job.subject }}">Back to {{ job.subject }}</a> <a class="button secondary" href="/mapping">Readiness</a>
   {% else %}<a class="button" href="/">Back</a>{% endif %}
 </p>
+<ul id="job-links" class="small" hidden></ul>
 {% endblock %}

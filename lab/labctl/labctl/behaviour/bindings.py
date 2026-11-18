@@ -22,6 +22,11 @@ row) a step acts on when the recording cannot: the record was already there when
 started, or its id is masked and several records share its shape. A step on a record created in
 the recording needs nothing: its title is the value bound to the step that typed it.
 
+A `select` step can be bound by position instead (`index: 2`), an `upload` step needs a synthetic
+file (`file: synthetic.pdf`, relative to the bindings file; never the original), and a prompt
+dialog answered with text needs its `value`. A split part's bindings may also have `outside:`,
+the values of other applications' steps it refers to (`<app>#<step>`), supplied from outside.
+
 `labctl behaviour bindings <recording>` writes the template, listing every step that needs one.
 The older `--value selector=value` and `--value 6:selector=value` still work: they are turned into
 bindings for the steps they match. A step that needs a value with no binding blocks the replay.
@@ -45,10 +50,22 @@ VALUED = ("type", "select")
 class Bindings:
     values: dict[int, str] = field(default_factory=dict)  # seq -> value typed or selected
     records: dict[int, str] = field(default_factory=dict)  # seq -> title of the record acted on
+    # Added for split parts and R12 (all optional):
+    outside: dict[str, str] = field(default_factory=dict)  # "<app>#<step>" -> value from outside
+    indexes: dict[int, int] = field(default_factory=dict)  # select: seq -> option index
+    files: dict[int, str] = field(default_factory=dict)  # upload: seq -> synthetic file path
 
     def merged(self, other: Bindings) -> Bindings:
         """These bindings, with `other` filling the steps these do not bind."""
-        return Bindings({**other.values, **self.values}, {**other.records, **self.records})
+        return Bindings({**other.values, **self.values}, {**other.records, **self.records},
+                        {**other.outside, **self.outside}, {**other.indexes, **self.indexes},
+                        {**other.files, **self.files})  # fmt: skip
+
+    def from_outside(self, ref) -> str | None:
+        """The value of another application's step (`{app, step}`), supplied from outside."""
+        if isinstance(ref, dict):
+            return self.outside.get(f"{ref.get('app')}#{ref.get('step')}")
+        return None
 
 
 @dataclass
@@ -70,11 +87,16 @@ def record_candidate(step: RecStep) -> dict | None:
 
 
 def needs_value(step: RecStep) -> bool:
+    if step.action == "dialog":  # a prompt answered: its text was typed
+        d = step.dialog or {}
+        return d.get("kind") == "prompt" and d.get("choice") == "accept" and step.blank is None
     return step.action in VALUED and step.blank is None and step.value is None
 
 
 def needs(rec: Recording) -> list[Need]:
-    """Every step that needs a binding, in order."""
+    """Every step that needs a binding, in order. A record titled with a value typed in another
+    application (`text_from_outside`) needs none here: a split part's bindings carry it under
+    `outside:`."""
     out: list[Need] = []
     for step in rec.steps:
         if needs_value(step) and recorded_value(rec, step) is None:
@@ -89,7 +111,7 @@ def needs(rec: Recording) -> list[Need]:
                 )  # fmt: skip
             )
         cand = record_candidate(step)
-        if cand is not None and cand.get("text_from") is None:
+        if cand is not None and cand.get("text_from") is None and not cand.get("text_from_outside"):
             out.append(
                 Need(
                     step.seq,
@@ -103,15 +125,34 @@ def needs(rec: Recording) -> list[Need]:
     return out
 
 
+def file_needs(rec: Recording) -> list[Need]:
+    """The upload steps: each needs a synthetic file (`file:`), never the original. Kept apart
+    from `needs` (values and records), whose two kinds its readers know."""
+    return [Need(s.seq, "file", s.action, s.selector,
+                 ", ".join(f.get("name_shape") or "?" for f in s.files) or None,
+                 "a synthetic file to upload (file: path), never the original")
+            for s in rec.steps if s.action == "upload"]  # fmt: skip
+
+
 def template(rec: Recording, existing: Bindings | None = None) -> str:
     """The bindings file for a recording: every step that needs a value, with its shape."""
     existing = existing or Bindings()
     steps: dict[int, dict] = {}
-    for n in needs(rec):
+    by_seq = {s.seq: s for s in rec.steps}
+    for n in sorted([*needs(rec), *file_needs(rec)], key=lambda n: n.seq):
         entry = steps.setdefault(n.seq, {"action": n.action, "field": n.field})
         if n.kind == "value":
             entry["shape"] = n.shape
             entry["value"] = existing.values.get(n.seq)
+            step = by_seq.get(n.seq)
+            if step is not None and step.action == "select":
+                if existing.indexes.get(n.seq) is not None:
+                    entry["index"] = existing.indexes[n.seq]
+                elif step.option_index is not None:
+                    entry["recorded_index"] = step.option_index  # a position, not a value
+        elif n.kind == "file":
+            entry["file_shape"] = n.shape
+            entry["file"] = existing.files.get(n.seq)
         else:
             entry["record_shape"] = n.shape
             entry["record"] = existing.records.get(n.seq)
@@ -119,10 +160,13 @@ def template(rec: Recording, existing: Bindings | None = None) -> str:
             entry["note"] = n.note
     head = (
         "# Synthetic values for replaying this recording, one per step. Never a real value.\n"
-        "# value: what the step types or selects. record: the title of the record the step\n"
-        "# acts on. shape is what was recorded (letters A, digits 9), for reference only.\n"
+        "# value: what the step types or selects (or index: the option's position). record: the\n"
+        "# title of the record the step acts on. file: a synthetic file to upload. shape is what\n"
+        "# was recorded (letters A, digits 9), for reference only.\n"
     )
-    body = {"version": 1, "recording": rec.id, "steps": steps}
+    body: dict = {"version": 1, "recording": rec.id, "steps": steps}
+    if existing.outside:
+        body["outside"] = dict(existing.outside)
     return head + yaml.safe_dump(body, sort_keys=False, allow_unicode=True)
 
 
@@ -156,6 +200,14 @@ def load(path: Path | None) -> Bindings:
             out.values[seq] = str(entry["value"])
         if entry.get("record") is not None:
             out.records[seq] = str(entry["record"])
+        if isinstance(entry.get("index"), int) and not isinstance(entry["index"], bool):
+            out.indexes[seq] = entry["index"]
+        if entry.get("file"):
+            f = Path(str(entry["file"]))
+            out.files[seq] = str(f if f.is_absolute() else Path(path).parent / f)
+    for key, value in (data.get("outside") or {}).items():
+        if value is not None:
+            out.outside[str(key)] = str(value)
     return out
 
 

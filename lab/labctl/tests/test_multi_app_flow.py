@@ -104,41 +104,78 @@ def _fake_steps(tmp_path: Path) -> recorder._Steps:
     return steps
 
 
-def test_tabs_are_merged_by_time_keeping_each_tabs_order(tmp_path):
-    steps = _fake_steps(tmp_path)
+def _fake_page(guid: str, opener=None):
+    impl = SimpleNamespace(_guid=guid, _opener=getattr(opener, "_impl_obj", None))
+    return SimpleNamespace(_impl_obj=impl, url="http://x/", on=lambda *a, **k: None)
+
+
+def test_steps_keep_the_order_they_arrived_in_whatever_comes_late(tmp_path):
+    """Each action is numbered when it reaches the recorder (one sequence for every tab); a
+    snapshot that arrives after the next tab's actions, or never (the page left), changes
+    neither the number nor the order."""
+    (tmp_path / "dom").mkdir()
     (tmp_path / "screens").mkdir()
+    steps = recorder._Steps(tmp_path, screenshots=False)
+    a = _fake_page("page@a")
+    b = _fake_page("page@b", opener=a)
+    src_a, src_b = {"page": a}, {"page": b}
 
-    def add(seq, tab, ts, action="click", **kw):
-        dom = f"dom/{seq:04d}.html"
-        (tmp_path / dom).write_text(f"<p>{seq}</p><img src='screens/{seq:04d}.c1.png'>", "utf-8")
-        (tmp_path / "screens" / f"{seq:04d}.c1.png").write_bytes(str(seq).encode())
-        steps.written.append({"seq": seq, "ts": f"2026-11-17T10:00:{ts:06.3f}Z", "url": "http://x/",
-                              "action": action, "selector": f"#s{seq}", "dom": dom,
-                              "dom_before": None, "screenshot": None, "tab": tab, **kw})  # fmt: skip
+    def event(src, doc, n, action="click", **kw):
+        steps.on_event(src, {"eid": f"{doc}:{n}", "doc": doc, "url": "http://x/", "action": action,
+                             "selector": f"#{doc}{n}", "at": f"2026-11-17T10:00:0{n}.000Z", **kw})  # fmt: skip
 
-    # arrival order: tab 2's steps reached the recorder before tab 1's click that opened it
-    add(1, "t1", 1.0)
-    steps.written.append({"seq": 4, "ts": "2026-11-17T10:00:02.500Z", "url": "", "dom": None,
-                          "action": "tab-open", "selector": None, "dom_before": None,
-                          "screenshot": None, "tab": "t2", "opener": "t1"})  # fmt: skip
-    add(2, "t2", 3.0, action="goto")
-    add(3, "t1", 2.0)  # the click that opened tab 2 (its batch arrived late)
-    add(5, "t2", 4.0, caused_by=2)
-    add(6, "t1", 5.0)
+    event(src_a, "a1", 1, "goto", nav="navigate")
+    steps.on_flush(src_a, {"eids": ["a1:1"], "url": "http://x/", "html": "<p>a1</p>"})
+    event(src_a, "a1", 2)  # the click that opens tab 2: its snapshot comes late
+    event(src_b, "b1", 3, "goto", nav="navigate")  # the new tab's first page: tab-open first
+    steps.on_flush(src_b, {"eids": ["b1:3"], "url": "http://x/",
+                           "html": "<p>b1</p><img src='screens/0004.c1.png'>"})  # fmt: skip
+    (tmp_path / "screens" / "0004.c1.png").write_bytes(b"b1")
+    steps.on_flush(src_a, {"eids": ["a1:2"], "url": "http://x/", "html": "<p>late</p>"})
+    event(src_b, "b1", 4)
+    event(src_b, "b1", 5, "submit", caused=True)  # caused by the click before it
+    event(src_a, "a1", 6)  # back in tab 1: never flushed (the recording ended)
+    steps.drain(pictures=False)
     steps.close()
     got = steps_of(tmp_path)
     assert [(s["seq"], s["action"], s["tab"]) for s in got] == [
-        (1, "click", "t1"), (2, "click", "t1"), (3, "tab-open", "t2"), (4, "goto", "t2"),
-        (5, "click", "t2"), (6, "tab-switch", "t1"), (7, "click", "t1")]  # fmt: skip
-    assert [s.get("selector") for s in got] == ["#s1", "#s3", None, "#s2", "#s5", None, "#s6"]
-    assert got[4]["caused_by"] == 4  # renumbered with the step it points at
-    assert got[5]["from_tab"] == "t2"
-    # files follow their step, and the canvas picture a snapshot names too
-    assert (tmp_path / "dom" / "0002.html").read_text("utf-8").startswith("<p>3</p>")
-    assert "screens/0002.c1.png" in (tmp_path / "dom" / "0002.html").read_text("utf-8")
-    assert (tmp_path / "screens" / "0002.c1.png").read_bytes() == b"3"
+        (1, "goto", "t1"), (2, "click", "t1"), (3, "tab-open", "t2"), (4, "goto", "t2"),
+        (5, "click", "t2"), (6, "submit", "t2"), (7, "tab-switch", "t1"), (8, "click", "t1")]  # fmt: skip
+    assert [s.get("selector") for s in got] == ["#a11", "#a12", None, "#b13", "#b14", "#b15", None,
+                                                "#a16"]  # fmt: skip
+    assert got[5]["caused_by"] == 5 and got[6]["from_tab"] == "t2" and got[2]["opener"] == "t1"
+    # the late snapshot is its own step's, files follow their step, a step never flushed has none
+    assert (tmp_path / got[1]["dom"]).read_text("utf-8") == "<p>late</p>"
+    assert "screens/0004.c1.png" in (tmp_path / "dom" / "0004.html").read_text("utf-8")
+    assert got[7]["dom"] is None and got[5]["dom"] is None
     rows = json.loads((tmp_path / "tabs.json").read_text("utf-8"))
     assert [(r["tab"], r["opener"]) for r in rows] == [("t1", None), ("t2", "t1")]
+
+
+def test_a_tab_switch_renumbers_files_and_references(tmp_path):
+    steps = _fake_steps(tmp_path)
+    (tmp_path / "screens").mkdir()
+
+    def add(seq, tab, action="click", **kw):
+        dom = f"dom/{seq:04d}.html"
+        (tmp_path / dom).write_text(f"<p>{seq}</p><img src='screens/{seq:04d}.c1.png'>", "utf-8")
+        (tmp_path / "screens" / f"{seq:04d}.c1.png").write_bytes(str(seq).encode())
+        steps.written.append({"seq": seq, "ts": f"2026-11-17T10:00:{seq:06.3f}Z", "url": "http://x/",
+                              "action": action, "selector": f"#s{seq}", "dom": dom,
+                              "dom_before": None, "screenshot": None, "tab": tab, **kw})  # fmt: skip
+
+    add(1, "t1")
+    add(2, "t2")
+    add(3, "t1")  # a switch back to t1 comes before it
+    add(4, "t1", caused_by=3, locators=[{"kind": "record", "text_from": 3}])
+    steps.close()
+    got = steps_of(tmp_path)
+    assert [(s["seq"], s["action"]) for s in got] == [(1, "click"), (2, "click"),
+                                                      (3, "tab-switch"), (4, "click"), (5, "click")]  # fmt: skip
+    assert got[4]["caused_by"] == 4 and got[4]["locators"][0]["text_from"] == 4
+    assert (tmp_path / "dom" / "0004.html").read_text("utf-8").startswith("<p>3</p>")
+    assert "screens/0004.c1.png" in (tmp_path / "dom" / "0004.html").read_text("utf-8")
+    assert (tmp_path / "screens" / "0004.c1.png").read_bytes() == b"3"
 
 
 def test_one_tab_recordings_keep_their_shape(tmp_path):

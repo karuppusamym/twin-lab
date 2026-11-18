@@ -14,13 +14,26 @@ entries the same id to merge them, add entries with a `path_prefix` to split one
 `labctl.model_build.from_recording` read each part unchanged, and one cross-app sequence file,
 `root/evidence/_sequences/<recording>.flow.yaml`. The original recording is never changed.
 
+Every reference to a step is renumbered with an explicit map from the whole recording's numbers
+to the part's (`global_seq` keeps the original): `caused_by`, a record locator's `text_from`,
+the bindings' step keys, and the `after:` steps and `{binding: n}` / `{record: n}` values of an
+`acceptance.yaml` or `visual.yaml` beside the recording (each case or state goes to the part it
+is evaluated in). A reference to a step that went to ANOTHER application is kept as a cross-app
+one, `{app, step}` (`caused_by_outside`, `text_from_outside`, `{binding: {app, step}}`), and the
+value the whole recording's bindings give that step is copied under the part's bindings
+`outside:`, so a replay of the part takes it as supplied from outside. Setup events (the blank
+page a browser starts on: labctl.botlog.recording.setup_reason) are in no application: the
+proposal (`setup_steps`), the parts and the sequence file (`setup`, `counts`) leave them out the
+same way, and the sequence file keeps them for provenance.
+
 A recording that used several tabs (`tabs.json` beside it) is split the same way: each step
 belongs to the application of the page it happened on, whatever tab that was, and the proposal
 lists the tabs each application was seen in (the same application in two tabs is one entry).
 Requests go to the application of the tab that made them (the HAR's `pageref`), by the page that
 tab showed at the time; without that, by their Referer and time. The tab steps themselves
-(`tab-open`, `tab-switch`, `tab-close`) are not part of any application's recording: they are in
-the sequence file, which also says where the flow hands over from one application to another and
+(`tab-open`, `tab-switch`, `tab-close`) are in an application's recording only when it was used in
+more than one tab (so the part replays on its own: the tabs it opened, closed and switched to);
+all of them are in the sequence file, which also says where the flow hands over from one application to another and
 which values appear to travel between them (by shape only, a guess). A `bindings.yaml` beside the
 recording is split with it, its step numbers changed to each part's own.
 
@@ -94,9 +107,14 @@ class Entry:
 class Proposal:
     recording: str
     apps: list[Entry] = field(default_factory=list)
+    setup: int = 0  # informational: setup events (blank pages), in no application
 
     def to_dict(self) -> dict:
-        return {"recording": self.recording, "apps": [e.to_dict() for e in self.apps]}
+        out: dict = {"recording": self.recording}
+        if self.setup:
+            out["setup_steps"] = self.setup
+        out["apps"] = [e.to_dict() for e in self.apps]
+        return out
 
 
 def save(proposal: Proposal, path: Path) -> Path:
@@ -193,7 +211,7 @@ def from_dict(data: object, name: str = "proposal") -> Proposal:
             raise _err(f"{name}: entries with id '{app_id}' disagree on include; set it the same")
     if not any(e.include for e in entries):
         raise _err(f"{name}: every entry is dropped (include: false); nothing would be written")
-    return Proposal(rec, entries)
+    return Proposal(rec, entries, int(data.get("setup_steps") or 0))
 
 
 def _origin_ok(origin: str) -> bool:
@@ -250,6 +268,13 @@ class _Step:
     def is_tab(self) -> bool:
         """A tab was opened, switched to or closed: no application's own action."""
         return str(self.data.get("action") or "") in TAB_ACTIONS
+
+    @property
+    def setup(self) -> str | None:
+        """Why this is a setup event (a blank page, a browser page), or None."""
+        from labctl.botlog.recording import setup_reason
+
+        return setup_reason(self.data)
 
 
 @dataclass
@@ -420,7 +445,8 @@ def propose(recording: Path) -> Proposal:
         raise ProposalError(f"{rec}: a recording folder is needed (steps.jsonl and recording.har)")
     steps = _load_steps(rec)
     entries = _entries(_load_har(rec))
-    steps = [s for s in steps if s.origin and not s.is_tab] or []
+    setup = sum(1 for s in steps if s.setup)
+    steps = [s for s in steps if s.origin and not s.is_tab and not s.setup] or []
     if not steps:
         raise ProposalError(f"{rec.name}: no step has an http(s) page address; nothing to group")
     several_tabs = len({s.tab for s in steps if s.tab}) > 1
@@ -449,7 +475,7 @@ def propose(recording: Path) -> Proposal:
     if not any(e.include for e in result):  # a recording of nothing but sign-on: keep it usable
         for e in result:
             e.include = True
-    return Proposal(rec.name, result)
+    return Proposal(rec.name, result, setup)
 
 
 # --- applying ----------------------------------------------------------------------------------------
@@ -688,9 +714,12 @@ def apply(
     if not rec.is_dir():
         raise ProposalError(f"{rec}: a recording folder is needed")
     proposal = from_dict(proposal.to_dict(), "proposal")  # validate what is being applied
-    # A page load with no web address (a new tab's about:blank) belongs to no application.
-    steps = [s for s in _load_steps(rec)
-             if s.origin or s.is_tab or s.data.get("action") != "goto"]  # fmt: skip
+    # A setup event (the blank page a browser starts on) belongs to no application: it is kept,
+    # for provenance, in the sequence file's `setup` list.
+    every = _load_steps(rec)
+    setup = [s for s in every if s.setup and not s.is_tab]
+    steps = [s for s in every if not (s.setup and not s.is_tab)
+             and (s.origin or s.is_tab or s.data.get("action") != "goto")]  # fmt: skip
     doc = _load_har(rec)
     entries = _entries(doc)
     tabs = _load_tabs(rec)
@@ -729,35 +758,89 @@ def apply(
         if out.exists():
             shutil.rmtree(out)
         out.mkdir(parents=True)
+    app_of = {s.seq: router.step_app[s.index].id for s in steps
+              if not s.is_tab and s.index in router.step_app}  # fmt: skip
+    last_app = next((app_of[s.seq] for s in reversed(steps) if s.seq in app_of), None)
     paths = []
     for i in ids:
         mine = [s for s in steps if router.step_app[s.index].id == i and not s.is_tab]
-        _write_part(rec, outs[i], doc, entries, ent_app, i, mine)
+        _write_part(rec, outs[i], doc, entries, ent_app, i, _with_tabs(mine, steps),
+                    app_of, last_app == i)  # fmt: skip
         paths.append(outs[i])
-    _write_sequence(rec, root, steps, router, included, proposal, tabs)
+    _write_sequence(rec, root, steps, router, included, proposal, tabs, setup, len(every))
     return paths
 
 
+def _with_tabs(mine: list[_Step], steps: list[_Step]) -> list[_Step]:
+    """The part's steps, with the tab steps it needs to replay on its own when the application
+    was used in more than one tab: each tab opened after the first (its opener kept only when
+    that tab is the part's too), each tab closed, and a switch wherever the next step is in
+    another tab than the one before (the switches are made again for the part)."""
+    used = list(dict.fromkeys(s.tab for s in mine if s.tab))
+    if len(used) < 2:
+        return mine
+    keep = {id(s) for s in mine}
+    out: list[_Step] = []
+    current = None
+    for s in steps:
+        action = str(s.data.get("action") or "")
+        if s.is_tab:
+            if s.tab not in used or action == "tab-switch":
+                continue
+            if action == "tab-open":
+                if not out:  # the part starts in this tab: nothing to open
+                    continue
+                data = dict(s.data)
+                if data.get("opener") not in used:
+                    data.pop("opener", None)  # opened from another application: open it here
+                s = _Step(s.index, data, s.seq, s.ts, s.url, s.origin, s.path, tab=s.tab)
+                current = s.tab
+            elif action == "tab-close" and current == s.tab:
+                current = None
+            out.append(s)
+            continue
+        if id(s) not in keep:
+            continue
+        if current is not None and s.tab and s.tab != current or (current is None and out):
+            if s.tab:
+                data = {"seq": None, "ts": s.data.get("ts"), "url": s.url, "action": "tab-switch",
+                        "selector": None, "dom": None, "tab": s.tab}  # fmt: skip
+                if s.data.get("origin"):
+                    data["origin"] = s.data["origin"]
+                out.append(_Step(-1, data, 0, s.ts, s.url, s.origin, s.path, tab=s.tab))
+        current = s.tab or current
+        out.append(s)
+    return out
+
+
 def _write_part(rec: Path, out: Path, doc: dict, entries: list[_Entry], ent_app: dict[int, str],
-                app_id: str, mine: list[_Step]) -> None:  # fmt: skip
+                app_id: str, mine: list[_Step], app_of: dict[int, str] | None = None,
+                has_end: bool = True) -> None:  # fmt: skip
     (out / "dom").mkdir()
     lines = []
-    local_of = {s.seq: n for n, s in enumerate(mine, 1)}  # whole recording's step -> this part's
+    # The explicit map from the whole recording's step numbers to this part's. A reference to a
+    # step that went to another application is kept as a cross-app reference ({app, step}: the
+    # whole recording's number), never dropped or left pointing at a wrong step.
+    local_of = {s.seq: n for n, s in enumerate(mine, 1) if s.seq}
+    refs = _Refs(local_of, app_of or {}, app_id)
     for local, s in enumerate(mine, 1):
         step = json.loads(json.dumps(s.data))  # a deep copy: locators are changed below
-        old = s.seq
+        old = s.seq or None
         step["seq"] = local
         step["global_seq"] = old
-        # Step numbers inside a step are this part's numbers too. A cause in another application
-        # (a link in one app that loads the other in the same tab) is no cause here.
         if isinstance(step.get("caused_by"), int):
-            if step["caused_by"] in local_of:
-                step["caused_by"] = local_of[step["caused_by"]]
+            new, outside = refs.step(step["caused_by"])
+            if new is not None:
+                step["caused_by"] = new
             else:
                 step.pop("caused_by")
+                step["caused_by_outside"] = outside
         for cand in step.get("locators") or []:
             if isinstance(cand, dict) and isinstance(cand.get("text_from"), int):
-                cand["text_from"] = local_of.get(cand["text_from"])
+                new, outside = refs.step(cand["text_from"])
+                cand["text_from"] = new
+                if outside is not None:
+                    cand["text_from_outside"] = outside
         for key, suffix in (("dom", ".html"), ("dom_before", ".before.html")):
             rel = step.get(key)
             if rel and (rec / rel).is_file():
@@ -767,7 +850,7 @@ def _write_part(rec: Path, out: Path, doc: dict, entries: list[_Entry], ent_app:
             elif rel:
                 step[key] = None
         shot = step.get("screenshot")
-        if shot:
+        if shot and old:
             step["screenshot"] = _copy_screens(rec, out, old, local, shot)
         lines.append(json.dumps(step))
     (out / "steps.jsonl").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
@@ -778,13 +861,103 @@ def _write_part(rec: Path, out: Path, doc: dict, entries: list[_Entry], ent_app:
     log["pages"] = [p for p in doc["log"].get("pages") or [] if p.get("id") in pages]
     (out / "recording.har").write_text(json.dumps({"log": log}), encoding="utf-8")
     _copy_docs(rec, out, entries, ent_app, app_id)
-    _split_bindings(rec, out, local_of)
+    _split_declarations(rec, out, refs, has_end)
+    _split_bindings(rec, out, local_of, refs)
     if (rec / "recording.json").is_file():  # how it was recorded: browser, viewport
         shutil.copyfile(rec / "recording.json", out / "recording.json")
 
 
-def _split_bindings(rec: Path, out: Path, local_of: dict[int, int]) -> None:
-    """The part of the recording's bindings file that binds this part's steps, renumbered."""
+class _Refs:
+    """Step references, from the whole recording's numbers to a part's: (local number, None), or
+    (None, {app, step}) for a step that went to another application (or to none: a tab or setup
+    step, app None). Every cross-app reference made is remembered for the bindings."""
+
+    def __init__(self, local_of: dict[int, int], app_of: dict[int, str], app_id: str):
+        self.local_of, self.app_of, self.app_id = local_of, app_of, app_id
+        self.outside: list[dict] = []
+
+    def step(self, seq: int) -> tuple[int | None, dict | None]:
+        if seq in self.local_of:
+            return self.local_of[seq], None
+        ref = {"app": self.app_of.get(seq), "step": seq}
+        if ref not in self.outside:
+            self.outside.append(ref)
+        return None, ref
+
+    def value(self, value):
+        """`{binding: n}` and `{record: n}` in an expected value, renumbered or made cross-app."""
+        if isinstance(value, list):
+            return [self.value(v) for v in value]
+        if isinstance(value, dict):
+            if len(value) == 1 and next(iter(value)) in ("binding", "record"):
+                (kind, ref), = value.items()  # fmt: skip
+                try:
+                    new, outside = self.step(int(ref))
+                except (TypeError, ValueError):
+                    return value
+                return {kind: new if new is not None else outside}
+            return {k: self.value(v) for k, v in value.items()}
+        return value
+
+    def owns(self, after, has_end: bool) -> bool:
+        """Whether a declaration evaluated `after` a step (or at the end) is this part's."""
+        if after in (None, "end") or str(after).strip().lower() == "end":
+            return has_end
+        try:
+            return int(after) in self.local_of
+        except (TypeError, ValueError):
+            return has_end
+
+
+DECLARED = (("acceptance.yaml", "cases"), ("visual.yaml", "states"))
+
+
+def _split_declarations(rec: Path, out: Path, refs: _Refs, has_end: bool) -> None:
+    """The acceptance cases and visual states beside the recording, each in the part whose step
+    it is evaluated after (`end` in the part the recording ends in), with its step numbers
+    renumbered and references to another application's steps kept as cross-app ones. A scope
+    or baseline declaration has no step numbers: it is copied to every part."""
+    for name, key in DECLARED:
+        src = rec / name
+        if not src.is_file():
+            continue
+        try:
+            data = yaml.safe_load(src.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        items = []
+        for item in data.get(key) or []:
+            if not isinstance(item, dict) or not refs.owns(item.get("after", "end"), has_end):
+                continue
+            item = dict(item)
+            if isinstance(item.get("after"), int) or str(item.get("after", "")).isdigit():
+                item["after"] = refs.local_of[int(item["after"])]
+            for op in ("equals", "contains", "matches"):
+                if op in item:
+                    item[op] = refs.value(item[op])
+            items.append(item)
+        body = dict(data)
+        body["recording"] = out.name
+        body[key] = items
+        (out / name).write_text(
+            f"# Split from {name} of the whole recording: step numbers are this part's own;\n"
+            "# {app, step} is a step of another application (the whole recording's number).\n"
+            + yaml.safe_dump(body, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+    for name in ("scope.yaml", "baseline.yaml"):
+        if (rec / name).is_file():
+            shutil.copyfile(rec / name, out / name)
+
+
+def _split_bindings(
+    rec: Path, out: Path, local_of: dict[int, int], refs: _Refs | None = None
+) -> None:
+    """The part of the recording's bindings file that binds this part's steps, renumbered, and,
+    under `outside:`, the values the whole recording's bindings give the other applications'
+    steps this part refers to (`<app>#<step>`): supplied from outside."""
     src = rec / BINDINGS
     if not src.is_file():
         return
@@ -793,7 +966,7 @@ def _split_bindings(rec: Path, out: Path, local_of: dict[int, int]) -> None:
     except (OSError, yaml.YAMLError):
         return
     steps = data.get("steps") if isinstance(data, dict) else None
-    mine = {}
+    mine, given = {}, {}
     for key, entry in (steps or {}).items():
         try:
             seq = int(key)
@@ -801,12 +974,26 @@ def _split_bindings(rec: Path, out: Path, local_of: dict[int, int]) -> None:
             continue
         if seq in local_of:
             mine[local_of[seq]] = entry
-    if not mine:
+        given[seq] = entry
+    outside = dict(data.get("outside") or {}) if isinstance(data, dict) else {}
+    for ref in refs.outside if refs else []:
+        entry = given.get(ref["step"])
+        value = (
+            (entry.get("value") if entry.get("value") is not None else entry.get("record"))
+            if isinstance(entry, dict)
+            else entry
+        )
+        if value is not None:
+            outside[f"{ref['app']}#{ref['step']}"] = str(value)
+    if not mine and not outside:
         return
     body = {"version": data.get("version", 1), "recording": out.name,
             "steps": dict(sorted(mine.items()))}  # fmt: skip
+    if outside:
+        body["outside"] = outside
     (out / BINDINGS).write_text(
         "# Split from the bindings of the whole recording; step numbers are this part's own.\n"
+        "# outside: values of other applications' steps this part refers to (<app>#<step>).\n"
         + yaml.safe_dump(body, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
@@ -871,7 +1058,8 @@ def _copy_docs(
 
 
 def _write_sequence(rec: Path, root: Path, steps: list[_Step], router: _Router, included: set[str],
-                    proposal: Proposal, tabs: dict[str, dict] | None = None) -> Path:  # fmt: skip
+                    proposal: Proposal, tabs: dict[str, dict] | None = None,
+                    setup: list[_Step] = (), total: int | None = None) -> Path:  # fmt: skip
     """The whole order across applications, in the shape of `appmodel.Flow` steps (screen, path,
     do) plus the global step number and the app id; `apps` replaces the single `app`. With
     `tabs` (which tab each application was used in), `handovers` (where the flow goes from one
@@ -917,6 +1105,17 @@ def _write_sequence(rec: Path, root: Path, steps: list[_Step], router: _Router, 
                                       if s.tab == tab and not s.is_tab))  # fmt: skip
             data["tabs"].append({"tab": tab, "opener": (info.get(tab) or {}).get("opener"),
                                  "apps": apps})  # fmt: skip
+    # Setup events: kept for provenance, in no application and in no count of one. The counts
+    # are the ones the proposal and the parts have: total = setup + tab steps + each app's.
+    data["setup"] = [{"n": s.seq, "do": "open a blank page" if s.setup == "blank page"
+                      else "open a browser page", "reason": s.setup} for s in setup]  # fmt: skip
+    per_app: dict[str, int] = dict.fromkeys(ids, 0)
+    for s in steps:
+        if not s.is_tab:
+            per_app[router.step_app[s.index].id] = per_app.get(router.step_app[s.index].id, 0) + 1
+    data["counts"] = {"total": total if total is not None else len(steps) + len(setup),
+                      "setup": len(setup), "tab": sum(1 for s in steps if s.is_tab),
+                      "apps": per_app}  # fmt: skip
     data["handovers"] = _handovers(rows)
     data["travels"] = [t for t in _travels(rec, steps, router)
                        if t["from"]["app"] in included and t["to"]["app"] in included]  # fmt: skip

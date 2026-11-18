@@ -168,6 +168,11 @@ evidence record-across <name> <url>` records such a flow, and `labctl evidence b
 stopping first for a person to confirm the proposed applications. The portal's Recordings page
 does the same.
 
+To replay a recording that crosses applications in one run, give each source origin its
+replica: `labctl behaviour fidelity <recording> --map https://real.example=http://localhost:8101`
+(repeat per application), or keep a `replicas.yaml` beside the recording. What is deliberately
+left out of the comparison goes in a reviewed `scope.yaml`.
+
 ## Privacy
 
 A HAR or a database export from a real system holds customer data, cookies and tokens. So:

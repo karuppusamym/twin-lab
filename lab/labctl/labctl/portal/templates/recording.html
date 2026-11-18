@@ -45,6 +45,11 @@
 </form>
 <form method="post" action="/recordings/{{ rec.name }}/proposal/reset" class="inline"><button type="submit" class="secondary">Propose again from the recording</button></form>
 
+<section class="card" id="declare">
+  <h2>Values, checks and replay across the applications</h2>
+  <p class="small">Fill the synthetic values for this whole recording, and declare its baseline, acceptance cases, exclusions and pictures. <a href="/recordings/{{ rec.name }}/files">Open the files</a>. Each application's own recording is declared and replayed from its page.</p>
+</section>
+
 <section class="card" id="create">
   <h2>2 · Create the applications</h2>
   <p class="small">Splits the recording, drafts each application's flow (to review), writes each brief and builds each package. Running it again is safe: an application built before is enhanced from all its evidence, not replaced.</p>

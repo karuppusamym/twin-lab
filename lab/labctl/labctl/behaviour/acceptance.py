@@ -237,6 +237,13 @@ def resolve_expected(value, binding: Callable[[int], str | None],
         return [resolve_expected(v, binding, record) for v in value]
     if isinstance(value, dict) and len(value) == 1:
         (kind, ref), = value.items()  # fmt: skip
+        if kind in ("binding", "record") and isinstance(ref, dict):
+            # another application's step, in a split part: supplied from outside
+            got = (binding if kind == "binding" else record)(ref)
+            if got is None:
+                raise _Unbound(f"no value is supplied from outside for step {ref.get('step')} "
+                               f"of {ref.get('app')} (bindings.yaml outside:)")  # fmt: skip
+            return got
         if kind in ("binding", "record"):
             try:
                 seq = int(ref)

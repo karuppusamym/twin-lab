@@ -213,7 +213,12 @@ def data_location(model: AppModel, override: str | None) -> dict | None:
     was = (found or {}).get("kind", "not assessed")
     base = found or {"storage": [], "referenced": [], "keys": [], "shape": {}, "evidence": []}
     note = f"overridden by a person with --data {override}; the recording showed: {was}"
-    return {**base, "kind": override, "overridden": True, "evidence": [note, *base["evidence"]]}
+    persistence = "server" if override == "server" else (
+        base.get("persistence") if base.get("persistence") in ("storage", "navigation", "transient")
+        else "unknown"
+    )  # fmt: skip
+    return {**base, "kind": override, "overridden": True, "persistence": persistence,
+            "label": f"{override} (named by a person)", "evidence": [note, *base["evidence"]]}  # fmt: skip
 
 
 def scope(
@@ -385,10 +390,17 @@ def _data_gaps(brief: Brief) -> None:
                 f"{len(brief.routes)} route(s) the evidence shows are left out of the build"
             )
             brief.tables = {}
+        if data.get("persistence") in ("transient", "navigation", "unknown", None) and not data.get(
+            "keys"
+        ):
+            brief.gaps.append("persistence is not shown: no storage key was observed changing or "
+                              "surviving a reload, and the absence of server writes is not evidence "
+                              "of localStorage. Ask the owner whether the data survives a reload, "
+                              "or record a reload after a change")  # fmt: skip
         if not data.get("keys"):
-            brief.gaps.append("browser storage keys were not observed: the recorder does not capture "
-                              "storage; choose them, say so in BUILD-NOTES.md, or record again with "
-                              "storage capture")  # fmt: skip
+            brief.gaps.append("browser storage keys were not observed: record again after a "
+                              "change so the recorder captures them, or choose them and say so in "
+                              "BUILD-NOTES.md")  # fmt: skip
         if not data.get("shape"):
             brief.gaps.append("the shape of the stored records was not observed: build it from what "
                               "the screens show and say so in BUILD-NOTES.md")  # fmt: skip
@@ -599,12 +611,29 @@ def browser_storage(brief: Brief) -> list[str]:
             "**Overridden by a person** with `labctl brief --data browser`; the evidence below is "
             "what the recording showed.\n"
         )
-    out.append(
-        "This app keeps its business data **in the browser**, not in a server database: no "
-        "table, no database container and no database address. Build it to keep the data in the "
-        "same storage, under the same keys and record shape. Do not add a server-side store for "
-        "it.\n"
-    )
+    persistence = data.get("persistence") or ("storage" if kinds else "transient")
+    if persistence == "storage":
+        out.append(
+            "This app keeps its business data **in browser storage**, observed in the recording, "
+            "not in a server database: no table, no database container and no database address. "
+            "Build it to keep the data in the same storage, under the same keys and record shape. "
+            "Do not add a server-side store for it.\n"
+        )
+    else:
+        what = {
+            "navigation": "values carried in URLs or form fields (navigation state)",
+            "transient": "the page changing after clicks and typing (transient page state)",
+        }.get(persistence, "nothing that shows where the data is kept")
+        out.append(
+            "No server write and no data request reached the app's own origin, so there is no "
+            "server database to build: no table, no database container and no database address. "
+            f"What the recording shows is {what}. **It does not show that the data persists** in "
+            "`localStorage`, `sessionStorage` or anywhere else: the absence of server writes is "
+            "not evidence of browser storage. Keep the data in the page (memory) and in the "
+            "address, as recorded; add storage only if the application owner says the real "
+            "application keeps it there, and record that decision in BUILD-NOTES.md.\n"
+        )
+    out.append(f"**Where the data lives:** {data.get('label') or persistence}.\n")
     out += ["| | |", "|---|---|"]
     if kinds:
         out.append(f"| Storage kind | {', '.join(f'`{k}`' for k in kinds)} (observed) |")
@@ -615,8 +644,8 @@ def browser_storage(brief: Brief) -> list[str]:
             else ""
         )
         out.append(
-            f"| Storage kind | **not observed**{hint}: the recording holds no browser storage; "
-            "it is inferred from the absence of requests |"
+            f"| Storage kind | **not observed**{hint}: the recording holds no browser storage "
+            "keys; a script mention or the absence of requests does not make it localStorage |"
         )
     keys = data.get("keys") or []
     script_keys = [k for k in data.get("script_keys", []) if k not in keys]
@@ -646,8 +675,9 @@ def browser_storage(brief: Brief) -> list[str]:
         resets = [f"`{k}`: {RESETS[k]}" for k in (kinds or referenced) if k in RESETS]
     else:
         resets = [
-            "storage kind unknown: `localStorage` survives reloads and restarts, `sessionStorage` "
-            "lasts one tab; either is cleared by clearing the site's data or a fresh browser context"
+            "persistence unknown: transient page state is lost on reload; only storage the "
+            "application is shown to use survives, and it is cleared by clearing the site's data "
+            "or a fresh browser context"
         ]
     out.append(
         "| What resets it | "
@@ -701,7 +731,7 @@ def render(brief: Brief, repo_root: Path) -> str:
             else "assumed"
         )
         if brief.browser_only:
-            w("| database | none: the business data is in browser storage |\n")
+            w("| database | none: no server write observed (see *Browser storage*) |\n")
         else:
             w(f"| database | {brief.db_engine} ({origin}) |\n")
         if any(v and not v[0].isdigit() for v in versions):
@@ -711,7 +741,7 @@ def render(brief: Brief, repo_root: Path) -> str:
                 "application runs.\n"
             )
     elif brief.browser_only and not (model.stack.frontend or {}).get("marker"):
-        w("No evidence shows the stack. The business data is in browser storage: no database.\n")
+        w("No evidence shows the stack. No server database is shown (see *Browser storage*).\n")
     elif not (model.stack.frontend or {}).get("marker"):
         w(f"No evidence shows the stack. Use {DEFAULT_STACK}; database: {brief.db_engine}.\n")
     front = model.stack.frontend or {}
@@ -720,8 +750,8 @@ def render(brief: Brief, repo_root: Path) -> str:
         w(f"Front end: **{name}**, read from the recording ({front['marker']}). Build the screens "
           "with it, so they render the same elements.")  # fmt: skip
         if brief.browser_only:
-            w("No server database: the business data is in browser storage (see *Browser "
-              "storage*). The container only serves the files; say in BUILD-NOTES.md what serves "
+            w("No server database (see *Browser storage* for where the data lives and whether it "
+              "persists). The container only serves the files; say in BUILD-NOTES.md what serves "
               "them.")  # fmt: skip
         elif not model.stack.backend:
             w("No evidence shows the backend: use FastAPI (the lab default) and say so in "
@@ -872,8 +902,8 @@ def render(brief: Brief, repo_root: Path) -> str:
     w(f"- Read configuration from the same environment variables as the evidence shows: "
       f"{', '.join(f'`{e}`' for e in model.stack.env) or 'none found'}.")  # fmt: skip
     if brief.browser_only:
-        w("- There is no database. The container only serves the files; the business data stays in "
-          "browser storage under the keys in *Browser storage*. Its health is hosting health, not "
+        w("- There is no database. The container only serves the files; where the data lives and "
+          "whether it persists is in *Browser storage*. Its health is hosting health, not "
           "business-data health.")  # fmt: skip
     else:
         w(f"- The database is a {brief.db_engine} server outside the container, reached through "
@@ -892,9 +922,9 @@ def render(brief: Brief, repo_root: Path) -> str:
       "and response fields as the evidence shows. Fields marked *automations read* come from the "
       "bots' own code: a missing one breaks the bot even when conformance is READY.")  # fmt: skip
     if brief.browser_only:
-        w("3. The app writes and reads its data in the browser storage named under *Browser "
-          "storage*, with the same keys and record shape; `db/schema.sql` has no table and "
-          "nothing in the app opens a database.")  # fmt: skip
+        w("3. The app keeps its data where *Browser storage* says (in browser storage only when it "
+          "says storage was observed, with the same keys and record shape); `db/schema.sql` has "
+          "no table and nothing in the app opens a database.")  # fmt: skip
     else:
         w("3. `db/schema.sql` applies unchanged and the app works on it.")
     w("4. Every rule under *Rules* behaves as stated; each stays `hypothesis` in `app.yaml`.")

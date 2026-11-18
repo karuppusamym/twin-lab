@@ -43,8 +43,21 @@ button is `check`/`uncheck`.
 the one a robot drives, over the Chrome DevTools protocol. Both follow every tab and popup of the
 browser context; `attach()` cannot see what a tab did before it attached.
 
+Capture is deterministic: each action is sent to the recorder the moment it happens, while its
+document is alive, and numbered on arrival: one sequence for all tabs, never re-sorted by
+timestamps. Nothing depends on a call made while a page unloads (newer Chromium drops those):
+a batch the page leaves before it settles simply has no after-snapshot. A tab's `tab-open` step is
+written with the tab's first action; a click is sent at once and a double click replaces the
+clicks it was made of; the blank page a browser starts on is a `setup` step the recorder writes
+itself. A click, key press or submit that loads another page is observed at that page
+(`after: navigation`, no snapshot of its own), whatever the page's speed. Steps may also carry
+`shadow` (open/closed root), `surface: canvas`, `option_index` (select), `dialog` ({kind,
+choice}; a prompt's text is a typed value), `files` on an `upload` step (name shape, type, size
+class: never the file), `download` ({name_shape, ext}) and `service_worker`.
+
 The DOM is captured inside the page, after each navigation (full load or history change) and after
-each click, change or submit, once the page has been quiet for `settle_ms`. Values typed are never
+each click, change or submit, once the page has been quiet for `settle_ms` with no fetch or XHR
+in flight (up to 15 s; `recording.json` says so under `settle`). Values typed are never
 written: the recorder holds them in memory only, to take them out of snapshots, the HAR, pictures
 (masked) and locator texts, and to tell which record (list item, table row) a later action is on:
 a step on a record says "the record titled with what was typed at step N", and the replay takes
@@ -62,8 +75,13 @@ from pathlib import Path
 
 LISTENER_JS = r"""
 (() => {
-  if (window.__tlInstalled) return;
+  // Once per document. A popup's first page (about:blank) and the page it then loads can share
+  // one window object: what an earlier install hung on the window stands aside (live()).
+  if (window.__tlInstalledFor === document) return;
+  window.__tlInstalledFor = document;
   window.__tlInstalled = true;
+  const DOC = document;
+  const live = () => document === DOC;
   // Runs in every frame. The top page keeps the steps and takes the snapshots; a frame reports
   // its actions and changes to its parent with postMessage (which works across origins), each
   // parent adds the frame's selector, and the top page gets "iframe#x >>> button#save".
@@ -228,7 +246,56 @@ LISTENER_JS = r"""
   }
   // A record's title: its text without the text of its controls (the same on replay).
   const rowTitle = __ROW_TITLE__;
+  // Inside an open shadow root: the same kinds of candidate, counted across every open root
+  // (Playwright's role, placeholder, text and CSS locators pierce open roots), and a structure
+  // from the host: `x-card#card input.title`. A closed root has none: no locator reaches it.
+  function deepAll(sel) {
+    const out = [];
+    const visit = (root) => {
+      try { out.push(...root.querySelectorAll(sel)); } catch (e) {}
+      for (const n of root.querySelectorAll("*")) if (n.shadowRoot) visit(n.shadowRoot);
+    };
+    visit(document);
+    return out;
+  }
+  function shadowLocators(el, root) {
+    const list = [];
+    const deepCount = (sel, pred) => deepAll(sel).filter(pred).length;
+    for (const a of TESTID) {
+      const v = el.getAttribute(a);
+      if (v && !dataLike(v)) { list.push({kind: "testid", attr: a, value: v, count: deepAll("[" + a + "=" + q(v) + "]").length}); break; }
+    }
+    if (el.id && !dataLike(el.id)) list.push({kind: "id", value: el.id, count: deepAll("#" + CSS.escape(el.id)).length});
+    const role = roleOf(el);
+    const name = role ? nameOf(el, role) : "";
+    if (role && name && !hasDigit(name) && name.length <= 80 && ROLE_SEL[role]) {
+      list.push({kind: "role", role, name, count: deepCount(ROLE_SEL[role], (x) => roleOf(x) === role && nameOf(x, role) === name)});
+    }
+    const ph = /^(input|textarea)$/.test(el.localName) ? norm(el.getAttribute("placeholder")) : "";
+    if (ph && !hasDigit(ph) && ph.length <= 80) {
+      list.push({kind: "placeholder", text: ph, count: deepCount("[placeholder]", (x) => norm(x.getAttribute("placeholder")) === ph)});
+    }
+    if (/^(a|button|summary)$/.test(el.localName)) {
+      const t = norm(el.textContent);
+      if (t && !hasDigit(t) && t.length <= 80) list.push({kind: "text", tag: el.localName, text: t, count: deepCount(el.localName, (x) => norm(x.textContent) === t)});
+    }
+    const host = root.host;
+    const hostSel = host.localName + (host.id ? "#" + CSS.escape(host.id) : "");
+    const inner = pathFrom(null, el);
+    let matches = [];
+    for (const h of deepAll(hostSel)) {
+      if (!h.shadowRoot) continue;
+      try { matches = matches.concat(Array.from(h.shadowRoot.querySelectorAll(inner))); } catch (e) {}
+    }
+    const index = matches.indexOf(el);
+    if (index >= 0) list.push({kind: "structure", css: hostSel + " " + inner, index, count: matches.length});
+    return {list};
+  }
   function locators(el) {
+    const root = el && el.getRootNode ? el.getRootNode() : null;
+    if (el && el.nodeType === 1 && root && root !== document && root.host && root.mode === "open") {
+      return shadowLocators(el, root);
+    }
     if (!el || el.nodeType !== 1 || el.getRootNode() !== document) return {list: []};
     if (el === document.body || el === document.documentElement) return {list: []};
     const list = [];
@@ -363,21 +430,55 @@ LISTENER_JS = r"""
   }
 
   // --- steps --------------------------------------------------------------------------------
+  // Each event goes to the recorder the moment it happens (`__tlEvent`), while the document is
+  // alive: the recorder numbers it on arrival, the one sequence of the recording. The batch only
+  // decides when the page is quiet enough for the after-snapshot (`__tlStep`), which names the
+  // events it belongs to. A batch the page leaves before it is quiet gets no snapshot (what the
+  // page shows then is not what the action led to; the next page's load is the next step), and
+  // nothing is sent while the document is being torn down: no step depends on such a call.
+  let eidSeq = 0;
   function flush(leaving) {
     clearTimeout(timer); timer = null;
     if (!TOP || !pending.length) return Promise.resolve();
-    const events = pending; pending = []; first = 0;
-    // Leaving: the page is being replaced, so what it shows now is not what the action led to
-    // (the next page is); its load is the next step, with its own snapshot.
-    return window.__tlStep({events, url: location.href, ts: new Date().toISOString(),
-                            html: snapshot(), storage: storageInfo(), leaving: !!leaving});
+    const eids = pending.map((p) => p.eid); pending = []; first = 0;
+    if (leaving) return Promise.resolve();
+    try {
+      return window.__tlStep({eids, doc: FRAME_ID, url: location.href, ts: new Date().toISOString(),
+                              html: snapshot(), storage: storageInfo(), sw: !!window.__tlSW});
+    } catch (e) { return Promise.resolve(); }
   }
+  // The settle rule: the page is quiet for SETTLE ms with no fetch or XHR of its own in flight
+  // (up to NET_WAIT ms), so a step's after-snapshot has what a delayed answer shows.
+  const NET_WAIT = 15000;
+  let inflight = 0;
+  function netDone() { inflight = Math.max(0, inflight - 1); quietAgain(); }
+  try {
+    const origFetch = window.fetch;
+    if (origFetch) {
+      window.fetch = function (...args) {
+        if (!live()) return origFetch.apply(this, args);
+        inflight++;
+        let p;
+        try { p = origFetch.apply(this, args); } catch (e) { netDone(); throw e; }
+        p.then(netDone, netDone);
+        return p;
+      };
+    }
+    const send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (...args) {
+      if (!live()) return send.apply(this, args);
+      inflight++;
+      this.addEventListener("loadend", netDone, {once: true});
+      return send.apply(this, args);
+    };
+  } catch (e) {}
   function quietAgain() {
     if (!TOP) { changed(); return; }
     if (!pending.length) return;
     clearTimeout(timer);
-    if (Date.now() - first > MAX_WAIT) { flush(); return; }
-    timer = setTimeout(flush, SETTLE);
+    const waited = Date.now() - first;
+    if (waited > (inflight ? NET_WAIT : MAX_WAIT)) { flush(); return; }
+    timer = setTimeout(() => { if (inflight && Date.now() - first < NET_WAIT) quietAgain(); else flush(); }, SETTLE);
   }
   let lastPing = 0;
   function changed() {  // a frame's page changed: the top page waits until it settles too
@@ -391,12 +492,18 @@ LISTENER_JS = r"""
     const gap = Date.now() - lastAt;
     if (action === "submit") return (last.action === "click" || last.action === "keypress") && gap < JOIN;
     if (action === "goto") return ["click", "submit", "keypress"].includes(last.action) && gap < NAV_JOIN;
+    // a dialog the action opened (the page waits while it is open: no time limit)
+    if (action === "dialog") return ["click", "dblclick", "keypress", "submit"].includes(last.action);
     return false;
   }
   function record(ev) {
     if (pending.length && !joins(ev.action)) flush();
     else if (pending.length) ev.caused = true;
-    pending.push(ev);
+    ev.eid = FRAME_ID + ":" + (++eidSeq);
+    try {
+      window.__tlEvent(Object.assign({}, ev, {doc: FRAME_ID, url: location.href}));
+    } catch (e) {}
+    pending.push({action: ev.action, eid: ev.eid});
     if (!first) first = Date.now();
     lastAt = Date.now();
     quietAgain();
@@ -409,6 +516,8 @@ LISTENER_JS = r"""
     const loc = action === "goto" ? {list: []} : locators(el);
     const ev = Object.assign({action, selector: el ? selectorOf(el) : null, before, at,
                               locators: loc.list, row_title: loc.title}, extra || {});
+    const root = el && el.getRootNode ? el.getRootNode() : null;
+    if (root && root.host) ev.shadow = root.mode === "open" ? "open" : "closed";
     return ev;
   }
   function emit(ev) {
@@ -423,6 +532,7 @@ LISTENER_JS = r"""
     emit(make(action, el, extra));
   }
   window.addEventListener("message", (e) => {
+    if (!live()) return;
     const d = e.data;
     if (!d || d.__tl !== TOKEN || !e.source || e.source === window) return;
     if (d.kind === "mut") { quietAgain(); return; }
@@ -436,7 +546,8 @@ LISTENER_JS = r"""
   });
 
   // --- clicks that may be the first half of a double click ---------------------------------
-  let held = null;  // {el, events, timer}
+  let held = null;  // {el, events, timer}: in a frame, clicks wait to see whether one follows
+  let clicks = [];  // the top page's recent clicks: {el, eid, ev, when}
   function releaseHeld() {
     if (!held) return;
     const h = held; held = null;
@@ -470,7 +581,18 @@ LISTENER_JS = r"""
       note(t.checked ? "check" : "uncheck", t);
       return;
     }
+    if (t.localName === "input" && type === "file") return;  // the choice is the upload step
+    if (t.localName === "canvas") { note("click", t, {surface: "canvas"}); return; }
     if (!holds(t)) { note("click", t); return; }
+    if (TOP) {
+      // In the top page a click is sent at once, like any action (its place in the sequence is
+      // when it happened); a double click that follows replaces the clicks it was made of.
+      const ev = make("click", t);
+      emit(ev);
+      clicks = clicks.filter((c) => c.el === t && Date.now() - c.when < HOLD).slice(-1);
+      clicks.push({el: t, eid: ev.eid, ev, when: Date.now()});
+      return;
+    }
     if (held && held.el === t && held.events.length < 2) {
       held.events.push(make("click", t));
       clearTimeout(held.timer);
@@ -484,6 +606,15 @@ LISTENER_JS = r"""
   function onDblClick(el) {
     const t = target(el);
     if (!t || t.nodeType !== 1) return;
+    const prior = clicks.filter((c) => c.el === t);
+    clicks = [];
+    if (TOP && prior.length) {
+      const firstClick = prior[0].ev;
+      emit(Object.assign(make("dblclick", t), {before: firstClick.before, at: firstClick.at,
+                                               locators: firstClick.locators, row_title: firstClick.row_title,
+                                               replaces: prior.map((c) => c.eid)}));
+      return;
+    }
     if (held && held.el === t) {
       const firstClick = held.events[0];
       clearTimeout(held.timer); held = null;
@@ -512,7 +643,7 @@ LISTENER_JS = r"""
     const tag = el.localName;
     if (tag === "textarea") return true;
     if (tag !== "input") return false;
-    return !/^(checkbox|radio|button|submit|reset|image|hidden)$/.test((el.type || "").toLowerCase());
+    return !/^(checkbox|radio|button|submit|reset|image|hidden|file)$/.test((el.type || "").toLowerCase());
   }
   function onInput(e) {
     const el = realTarget(e);
@@ -543,7 +674,24 @@ LISTENER_JS = r"""
   function emitAllTyped() { for (const el of Array.from(dirty.keys())) emitType(el); }
   function onChange(e) {
     const el = realTarget(e), tag = el.localName || "";
-    if (tag === "select") { emitAllTyped(); note("select", el); return; }
+    if (tag === "select") { emitAllTyped(); note("select", el, {option_index: el.selectedIndex}); return; }
+    if (tag === "input" && (el.type || "").toLowerCase() === "file") {
+      // That a file was chosen, its name's shape, type and size class: never the file. Its
+      // name is taken out of everything written, like a typed value.
+      const files = Array.from(el.files || []).slice(0, 20).map((f) => {
+        const tid = FRAME_ID + "-" + (++tidSeq);
+        secret(tid, f.name);
+        const kb = f.size / 1024, dot = f.name.lastIndexOf(".");
+        const ext = dot > 0 ? f.name.slice(dot + 1).toLowerCase() : "";
+        const stem = shapeOf(dot > 0 ? f.name.slice(0, dot) : f.name).slice(0, 56);
+        return {name_shape: stem + (/^[a-z0-9]{1,8}$/.test(ext) ? "." + ext : ""),
+                type: (f.type || "").slice(0, 80),
+                size: kb < 1 ? "<1KB" : kb < 1024 ? "1KB-1MB" : kb < 10240 ? "1MB-10MB" : ">10MB"};
+      });
+      emitAllTyped();
+      note("upload", el, {files});
+      return;
+    }
     if (typable(el)) {
       // Written already at Enter or blur: nothing. A value set without input events (a robot's
       // simulated typing) is written now.
@@ -596,6 +744,34 @@ LISTENER_JS = r"""
     return !!(el && el.nodeType === 1 && !el.shadowRoot && window.__tlShadows
               && window.__tlShadows.get(el));
   }
+  // Dialogs: which one, and the choice made (a prompt's text is a typed value: its shape only).
+  for (const kind of ["alert", "confirm", "prompt"]) {
+    const orig = window[kind];
+    if (typeof orig !== "function") continue;
+    window[kind] = function (...args) {
+      if (!live()) return orig.apply(this, args);
+      const r = orig.apply(this, args);
+      const choice = kind === "alert" ? "accept" : kind === "confirm" ? (r ? "accept" : "dismiss")
+        : (r === null ? "dismiss" : "accept");
+      const extra = {dialog: {kind, choice}};
+      if (kind === "prompt" && typeof r === "string") {
+        if (r.trim() === "") extra.blank = r.slice(0, 64);
+        else { const tid = FRAME_ID + "-" + (++tidSeq); secret(tid, r); extra.tid = tid; extra.typed_shape = shapeOf(r); }
+      }
+      note("dialog", null, extra);
+      return r;
+    };
+  }
+  // Drag and drop: recorded so the replay can say it does not perform it.
+  document.addEventListener("dragstart", (e) => { const el = realTarget(e); if (el && el.nodeType === 1) note("drag", el); }, true);
+  // A service worker the page registers: the replay blocks workers and says so.
+  try {
+    const SWC = window.ServiceWorkerContainer && ServiceWorkerContainer.prototype;
+    if (SWC && SWC.register) {
+      const reg = SWC.register;
+      SWC.register = function (...args) { window.__tlSW = true; return reg.apply(this, args); };
+    }
+  } catch (e) {}
   document.addEventListener("click", (e) => onClick(realTarget(e), e), true);
   document.addEventListener("dblclick", (e) => { const el = realTarget(e); if (!closedHost(el)) onDblClick(el); }, true);
   document.addEventListener("input", onInput, true);
@@ -625,12 +801,16 @@ LISTENER_JS = r"""
   for (const el of document.querySelectorAll("*")) if (el.shadowRoot) watchRoot(el.shadowRoot);
 
   window.__tlFlush = () => { emitAllTyped(); releaseHeld(); return flush(); };
-  window.addEventListener("pagehide", () => { emitAllTyped(); releaseHeld(); flush(true); });
+  // Before the document goes (beforeunload comes while it is still whole): typing not yet written
+  // and a click held for a possible double click are sent now, not while it is torn down.
+  window.addEventListener("beforeunload", () => { if (live()) { emitAllTyped(); releaseHeld(); } }, true);
+  window.addEventListener("pagehide", () => { if (live()) { emitAllTyped(); releaseHeld(); flush(true); } });
   if (TOP) {
     const NAV = {pushState: "push", replaceState: "replace"};
     for (const name of ["pushState", "replaceState"]) {
       const orig = history[name];
       history[name] = function (...args) {
+        if (!live()) return orig.apply(this, args);
         emitAllTyped();
         releaseHeld();
         // The old address still shows the old page: capture it before the address changes.
@@ -640,11 +820,14 @@ LISTENER_JS = r"""
         return r;
       };
     }
-    window.addEventListener("popstate", () => { emitAllTyped(); note("goto", null, {nav: "pop"}); });
+    window.addEventListener("popstate", () => { if (live()) { emitAllTyped(); note("goto", null, {nav: "pop"}); } });
   }
   new MutationObserver(quietAgain).observe(document, {subtree: true, childList: true,
                                                       attributes: true, characterData: true});
   function loaded() {
+    // A blank page (a new tab before its first address) is no page of the application: the
+    // recorder writes that setup step itself, so it never depends on this script running there.
+    if (location.protocol === "about:") return;
     let nav = "navigate";
     try { nav = (performance.getEntriesByType("navigation")[0] || {}).type || nav; } catch (e) {}
     note("goto", null, {nav});
@@ -688,6 +871,16 @@ MARK_TYPED_JS = r"""([values, check]) => {
   }
   return n;
 }"""
+
+
+def _literal(text: str):
+    """A re.sub replacement that is taken as it is (a shape can hold a backslash)."""
+    return lambda _m: text
+
+
+def _public(step: dict) -> dict:
+    """A step as written: without the recorder's own bookkeeping (keys starting with _)."""
+    return {k: v for k, v in step.items() if not k.startswith("_")}
 
 
 def _origin(url: str) -> str:
@@ -794,11 +987,19 @@ def _boxes(masks: list) -> list[dict]:
     return out[:200]
 
 
-def write_meta(out_dir: Path, browser, viewport: dict | None, mode: str) -> None:
+def write_meta(
+    out_dir: Path, browser, viewport: dict | None, mode: str, settle_ms: int | None = None
+) -> None:
     """`recording.json`: how the recording was made (browser, viewport, scale), for replays and
     visual comparison. Optional: older recordings have none."""
     meta = {"recorder": "twinlab", "mode": mode, "viewport": viewport,
             "device_scale_factor": DEVICE_SCALE_FACTOR if viewport else None}  # fmt: skip
+    if settle_ms is not None:  # when a step's after-snapshot is taken
+        meta["settle"] = {
+            "quiet_ms": int(settle_ms),
+            "network": "no fetch or XHR in flight",
+            "max_ms": 15000,
+        }
     try:
         meta["browser"] = browser.browser_type.name
         meta["browser_version"] = browser.version
@@ -945,12 +1146,14 @@ class _Secrets:
                 if not v.strip():
                     continue
                 if len(v.strip()) >= 3:
-                    value = re.sub(re.escape(v), _shape(raw.strip()), value, flags=re.I)
+                    value = re.sub(re.escape(v), _literal(_shape(raw.strip())), value, flags=re.I)
                 elif value == v:
                     value = _shape(v)
                 else:  # a short value: only where it is a whole JSON string or form field
-                    value = re.sub(r'(?<=")' + re.escape(v) + r'(?=")', _shape(v), value)
-                    value = re.sub(r"(?<==)" + re.escape(v) + r"(?=&|$)", _shape(v), value)
+                    value = re.sub(r'(?<=")' + re.escape(v) + r'(?=")', _literal(_shape(v)), value)
+                    value = re.sub(
+                        r"(?<==)" + re.escape(v) + r"(?=&|$)", _literal(_shape(v)), value
+                    )
         return value
 
     def scrub_har(self, path: Path) -> None:
@@ -986,6 +1189,16 @@ class _Steps:
         self.last_storage: dict[str, str] = {}  # tab -> the storage last written for it
         self.last_boxes: list[dict] = []  # the mask rectangles of the last picture taken
         self.tab_last: dict[str, tuple] = {}  # tab -> (seq, action, caused_by, ts) of its last step
+        # Steps whose batch has not been flushed yet: event id -> (step, page), in arrival order;
+        # per tab, the document they came from and the step that started the current batch.
+        self.open: dict[str, tuple[dict, object]] = {}
+        self.open_doc: dict[str, str] = {}
+        self.batch_cause: dict[str, int] = {}
+        self.rewrite = False  # a step already written was changed: close() writes them again
+        self.sw_seen: set[str] = set()  # tabs whose page registered a service worker
+        self.nav_observed: list[tuple[str, int, int]] = []  # (tab, cause, page load) per load
+        self.scripts: list[str] = []  # the init scripts, for a page that missed them
+        self.replaced: list[tuple[int, list[str]]] = []  # (double click, the clicks it replaces)
 
     LOAD_CAUSES = ("click", "submit", "keypress", "dblclick")
 
@@ -1013,7 +1226,9 @@ class _Steps:
             return None
         key = _guid(page)
         if key not in self.tabs:
-            self.on_page(page, quiet=True)
+            # The page's first event came before the browser said the tab opened: it is the
+            # same tab-open, whichever of the two arrives first.
+            self.on_page(page)
         return self.tabs[key]["tab"]
 
     def on_page(self, page, quiet: bool = False) -> None:
@@ -1031,22 +1246,62 @@ class _Steps:
         self.pages[key] = page
         try:
             page.on("close", lambda _p=None, page=page: self.on_page_close(page))
+            page.on("download", lambda d, page=page: self.on_download(page, d))
         except Exception:  # noqa: BLE001 - a page that is already gone
             pass
-        if len(self.tabs) > 1 and not quiet:
-            self._tab_step("tab-open", info, url=_safe_url(page))
+        # The tab-open step is written when the tab's first action reaches the recorder (or when
+        # it closes), never when the browser reports the tab: that report can come before or
+        # after the click that opened it, and the order must not depend on which came first.
+        info["announced"] = quiet or len(self.tabs) == 1
+
+    def _announce(self, info: dict | None, ts: str | None = None) -> None:
+        if info is None or info.get("announced") is not False:
+            return
+        info["announced"] = True
+        page = self.pages.get(info["har_page"])
+        self._tab_step("tab-open", info, url=_safe_url(page) if page is not None else "", ts=ts)
 
     def on_page_close(self, page) -> None:
         info = self.tabs.get(_guid(page))
         if info is None or info["closed"]:
             return
         info["closed"] = _now()
+        self._announce(info)  # a tab that closed before it did anything was still opened
+        self._close_open(info["tab"])  # its last batch gets no snapshot now
         if not self.closing:
             self._tab_step("tab-close", info, url=info.get("last_url") or "")
 
-    def _tab_step(self, action: str, info: dict, url: str = "") -> None:
+    def on_download(self, page, download) -> None:
+        """A file the page downloaded: a step of its own (the shape of its suggested name and its
+        extension), caused by the action before it in that tab. The file is never kept."""
+        info = self.tabs.get(_guid(page)) or {}
+        tab = info.get("tab")
+        try:
+            name = str(download.suggested_filename or "")
+        except Exception:  # noqa: BLE001
+            name = ""
+        stem, dot, ext = name.rpartition(".")
+        if not dot:
+            stem, ext = name, ""
+        ext = ext.lower() if ext.isalnum() and len(ext) <= 8 else ""
         self.seq += 1
-        step = {"seq": self.seq, "ts": _now(), "url": url, "action": action, "selector": None,
+        url = _safe_url(page)
+        step = {"seq": self.seq, "ts": _now(), "url": url, "action": "download", "selector": None,
+                "dom": None, "dom_before": None, "screenshot": None,
+                "download": {"name_shape": (_shape(stem) + (f".{ext}" if ext else ""))[:64],
+                             "ext": ext}}  # fmt: skip
+        if tab:
+            step["tab"] = tab
+        if _origin(url):
+            step["origin"] = _origin(url)
+        last = self.tab_last.get(tab or "")
+        if last and last[1] in self.LOAD_CAUSES:
+            step["caused_by"] = last[2] if isinstance(last[2], int) else last[0]
+        self.waiting.append((step, None))
+
+    def _tab_step(self, action: str, info: dict, url: str = "", ts: str | None = None) -> None:
+        self.seq += 1
+        step = {"seq": self.seq, "ts": ts or _now(), "url": url, "action": action, "selector": None,
                 "dom": None, "dom_before": None, "screenshot": None, "tab": info["tab"]}  # fmt: skip
         if info.get("opener"):
             step["opener"] = info["opener"]
@@ -1070,6 +1325,8 @@ class _Steps:
         Called when the recording loop has control (never from inside the binding)."""
         from labctl.behaviour.dom import fill_frames
 
+        if pictures:
+            self._ensure_installed()
         waiting, self.waiting = self.waiting, []
         for step, page in waiting:
             html = step.pop("_html", None)
@@ -1115,8 +1372,25 @@ class _Steps:
                     pass
             step = self.secrets.clean_step(step)
             self.written.append(step)
-            self.file.write(json.dumps(step) + "\n")
+            self.file.write(json.dumps(_public(step)) + "\n")
         self.file.flush()
+
+    INSTALLED_JS = "() => location.protocol === 'about:' || window.__tlInstalledFor === document"
+
+    def _ensure_installed(self) -> None:
+        """A popup's first page (about:blank) and the page it loads can share one window, and the
+        browser then runs no init script for the loaded page: the listener is added to it here,
+        before the next action (the recording loop calls this before each one)."""
+        for page in list(self.pages.values()):
+            try:
+                if page.is_closed():
+                    continue
+                for frame in page.frames:
+                    if not frame.evaluate(self.INSTALLED_JS):
+                        for script in self.scripts:
+                            frame.evaluate(script)
+            except Exception:  # noqa: BLE001 - a page navigating or closing: its init script runs
+                continue
 
     def _picture(self, page, path: Path) -> bool:
         """The window, with what shows a typed value masked. The page may change between masking
@@ -1204,102 +1478,257 @@ class _Steps:
                           lambda m, note=note: m.group(1) + note, html, count=1, flags=re.S)  # fmt: skip
         return html
 
-    def on_capture(self, source, data: dict) -> None:
+    def on_event(self, source, event: dict) -> None:
+        """One action, sent by the page the moment it happened (`__tlEvent`). It is numbered
+        here, on arrival: the one sequence of the whole recording, all tabs together. Its
+        after-snapshot comes later with its batch (`on_flush`), or never when the page left
+        first; neither changes its number or its order."""
         # Playwright passes the binding's source as a dict: {"context", "page", "frame"}.
         page = source.get("page") if isinstance(source, dict) else None
-        events = data.get("events") or []
+        if not isinstance(event, dict):
+            return
         tab = self.tab_of(page)
+        key = tab or ""
         info = self.tabs.get(_guid(page)) if page is not None else None
-        if info is not None and isinstance(data.get("url"), str):
-            info["first_url"] = info["first_url"] or data["url"]
-            info["last_url"] = data["url"]
+        self._announce(info, event.get("at") if isinstance(event.get("at"), str) else None)
+        url = event.get("url") if isinstance(event.get("url"), str) else ""
+        if info is not None and url:
+            info["first_url"] = info["first_url"] or url
+            info["last_url"] = url
+        doc = str(event.get("doc") or "")
+        if self.open_doc.get(key) not in (None, doc):
+            self._close_open(key)  # a new document in the tab: the old one's batch is final
+        self.open_doc[key] = doc
+        self.seq += 1
+        before = None
+        if event.get("before"):
+            before = f"dom/{self.seq:04d}.before.html"
+            (self.out_dir / before).write_text(
+                self.secrets.redact_html(event["before"]), encoding="utf-8"
+            )
+        # ts is when the action happened; the snapshot is taken once the page is quiet.
+        step = {"seq": self.seq, "ts": event.get("at") or _now(), "url": url,
+                "action": event.get("action"), "selector": event.get("selector"), "dom": None,
+                "dom_before": before, "screenshot": None}  # fmt: skip
+        if tab:
+            step["tab"] = tab
+            if info and info.get("opener"):
+                step["opener"] = info["opener"]
+        if _origin(url):
+            step["origin"] = _origin(url)
+        if event.get("frame"):
+            step["frame"] = str(event["frame"])  # the action happened inside this frame
+            step["before_scope"] = "frame"  # its dom_before is that frame's document
+        if event.get("typed_shape"):
+            step["typed_shape"] = str(event["typed_shape"])[:64]
+        if isinstance(event.get("blank"), str) and not event["blank"].strip():
+            step["blank"] = event["blank"][:64]  # empty or spaces: not data, kept as it is
+        if event.get("action") == "keypress" and isinstance(event.get("key"), str):
+            step["key"] = event["key"][:32]
+            step["modifiers"] = [m for m in event.get("modifiers") or [] if m in MODIFIERS]
+        if event.get("action") == "goto" and isinstance(event.get("nav"), str):
+            step["nav"] = event["nav"][:16]
+        if event.get("shadow") in ("open", "closed"):
+            step["shadow"] = event["shadow"]
+        if event.get("surface") == "canvas":
+            step["surface"] = "canvas"
+        d = event.get("dialog")
+        if isinstance(d, dict) and d.get("kind") in ("alert", "confirm", "prompt"):
+            step["dialog"] = {"kind": d["kind"],
+                              "choice": "accept" if d.get("choice") == "accept" else "dismiss"}  # fmt: skip
+        if isinstance(event.get("files"), list):
+            step["files"] = [{"name_shape": str(f.get("name_shape") or "")[:64],
+                              "type": str(f.get("type") or "")[:80],
+                              "size": str(f.get("size") or "")[:12]}
+                             for f in event["files"][:20] if isinstance(f, dict)]  # fmt: skip
+        loaded_by = None if event.get("caused") else self._loaded_by(tab, event)
+        if event.get("caused") and key in self.batch_cause:
+            step["caused_by"] = self.batch_cause[key]
+        elif loaded_by is not None:
+            # A new document: its page's listener cannot know what loaded it, the tab can.
+            step["caused_by"] = self.batch_cause[key] = loaded_by
+            self._observe_at_navigation(key, loaded_by)
+        elif not event.get("caused"):
+            self.batch_cause[key] = self.seq
+        self.tab_last[key] = (step["seq"], step["action"], step.get("caused_by"), step["ts"])
+        if event.get("tid"):
+            self.secrets.place(str(event["tid"]), self.seq)
+        locs = _locators(event.get("locators"))
+        if locs:
+            rec = next((c for c in locs if c["kind"] == "record"), None)
+            if rec is not None:
+                title = event.get("row_title")
+                title = title if isinstance(title, str) else ""
+                # The record is the one whose title was typed at that step; its binding
+                # gives the title on replay. The title itself is never written.
+                rec["text_from"] = self.secrets.typed_step(title)
+                rec["title_shape"] = _shape(title)[:64]
+            step["locators"] = locs
+        eid = str(event.get("eid") or f"x{self.seq}")
+        step["_eid"] = eid
+        if isinstance(event.get("replaces"), list):  # a double click: in place of its clicks
+            self.replaced.append((self.seq, [str(e) for e in event["replaces"]]))
+        self.open[eid] = (step, page)
+
+    def on_flush(self, source, data: dict) -> None:
+        """The page settled after a batch (`__tlStep`): its after-snapshot and storage go to
+        the batch's last step, and the batch's steps are final."""
+        page = source.get("page") if isinstance(source, dict) else None
+        if not isinstance(data, dict):
+            return
+        tab = self.tab_of(page)
+        key = tab or ""
+        eids = [str(e) for e in data.get("eids") or [] if str(e) in self.open]
+        if not eids:
+            return
+        url = data.get("url") if isinstance(data.get("url"), str) else None
+        info = self.tabs.get(_guid(page)) if page is not None else None
+        if info is not None and url:
+            info["last_url"] = url
         storage = _storage(data.get("storage"))
         if storage is not None:
-            storage["origin"] = _origin(data.get("url") or "")
+            storage["origin"] = _origin(url or "")
             seen = json.dumps(storage, sort_keys=True)
-            storage = None if self.last_storage.get(tab or "") == seen else storage
-            self.last_storage[tab or ""] = seen
-        cause = None  # the seq of the click or key press a submit or navigation came from
-        for n, event in enumerate(events):
-            self.seq += 1
-            dom = before = None
-            if event.get("before"):
-                before = f"dom/{self.seq:04d}.before.html"
-                (self.out_dir / before).write_text(
-                    self.secrets.redact_html(event["before"]), encoding="utf-8"
-                )
-            html = None
-            # One snapshot, after the last event of the batch; none when the page was leaving
-            # (it shows the page the action left, not the one it led to: that is the next step's).
-            if n == len(events) - 1 and not data.get("leaving"):
-                dom = f"dom/{self.seq:04d}.html"
-                html = data.get("html", "")  # written by drain(), once frames are filled in
-            # ts is when the action happened; the snapshot is taken once the page is quiet.
-            step = {"seq": self.seq, "ts": event.get("at") or data.get("ts"), "url": data.get("url"),
-                    "action": event.get("action"), "selector": event.get("selector"), "dom": dom,
-                    "dom_before": before, "screenshot": None}  # fmt: skip
-            if tab:
-                step["tab"] = tab
-                if info and info.get("opener"):
-                    step["opener"] = info["opener"]
-            if isinstance(data.get("url"), str) and _origin(data["url"]):
-                step["origin"] = _origin(data["url"])
-            if n == len(events) - 1 and storage is not None:
-                step["storage"] = storage  # the storage once the page had settled after it
-            if event.get("frame"):
-                step["frame"] = str(event["frame"])  # the action happened inside this frame
-                step["before_scope"] = "frame"  # its dom_before is that frame's document
-            if event.get("typed_shape"):
-                step["typed_shape"] = str(event["typed_shape"])[:64]
-            if isinstance(event.get("blank"), str) and not event["blank"].strip():
-                step["blank"] = event["blank"][:64]  # empty or spaces: not data, kept as it is
-            if event.get("action") == "keypress" and isinstance(event.get("key"), str):
-                step["key"] = event["key"][:32]
-                step["modifiers"] = [m for m in event.get("modifiers") or [] if m in MODIFIERS]
-            if event.get("action") == "goto" and isinstance(event.get("nav"), str):
-                step["nav"] = event["nav"][:16]
-            if event.get("caused") and cause is not None:
-                step["caused_by"] = cause
-            elif n == 0 and self._loaded_by(tab, event) is not None:
-                # A new document: its page's listener cannot know what loaded it, the tab can.
-                step["caused_by"] = cause = self._loaded_by(tab, event)
-            elif not event.get("caused"):
-                cause = self.seq
-            self.tab_last[tab or ""] = (step["seq"], step["action"], step.get("caused_by"),
-                                        step["ts"])  # fmt: skip
-            if event.get("tid"):
-                self.secrets.place(str(event["tid"]), self.seq)
-            locs = _locators(event.get("locators"))
-            if locs:
-                rec = next((c for c in locs if c["kind"] == "record"), None)
-                if rec is not None:
-                    title = event.get("row_title")
-                    title = title if isinstance(title, str) else ""
-                    # The record is the one whose title was typed at that step; its binding
-                    # gives the title on replay. The title itself is never written.
-                    rec["text_from"] = self.secrets.typed_step(title)
-                    rec["title_shape"] = _shape(title)[:64]
-                step["locators"] = locs
-            if html is not None:
-                step["_html"] = html
-            self.waiting.append((step, page))
+            storage = None if self.last_storage.get(key) == seen else storage
+            self.last_storage[key] = seen
+        steps = [self.open.pop(e) for e in eids]
+        for step, _ in steps:
+            if url:  # the page's address after the batch
+                step["url"] = url
+                if _origin(url):
+                    step["origin"] = _origin(url)
+        last = steps[-1][0]
+        last["dom"] = f"dom/{last['seq']:04d}.html"
+        last["_html"] = data.get("html") or ""  # written by drain(), once frames are filled in
+        if storage is not None:
+            last["storage"] = storage  # the storage once the page had settled after it
+        if data.get("sw") is True and key not in self.sw_seen:
+            self.sw_seen.add(key)
+            last["service_worker"] = "registered"  # the replay blocks it and says so
+        self.waiting.extend(steps)
+        self._release(key)
+
+    def _release(self, key: str) -> None:
+        """Nothing goes ahead of a step still open in the same tab: steps wait in arrival order
+        (a batch's snapshot can arrive after the next batch's events)."""
+        self.waiting.sort(key=lambda sp: sp[0]["seq"])
+
+    def _close_open(self, key: str | None = None) -> None:
+        """The steps of a batch whose page went before it settled (or whose tab closed, or the
+        recording ended): final without an after-snapshot."""
+        gone = [e for e, (s, _) in self.open.items() if key is None or (s.get("tab") or "") == key]
+        for e in gone:
+            self.waiting.append(self.open.pop(e))
+        if gone:
+            self.waiting.sort(key=lambda sp: sp[0]["seq"])
+
+    def _observe_at_navigation(self, key: str, cause: int) -> None:
+        """A click (key press, submit) that loaded a new document is observed at that page's load:
+        a snapshot its batch took before the new page came (a page slower than the settle time)
+        shows the page it left, so it is dropped, and the step says `after: navigation`."""
+        # Applied to the final steps at close(): a step may be on its way to the file right now
+        # (its picture being taken), and what it ends as must not depend on that.
+        self.nav_observed.append((key, cause, self.seq))
+        self.rewrite = True
+
+    def _apply_replaced(self, steps: list[dict]) -> list[dict]:
+        """A double click takes the place of the clicks it was made of (sent at once, as every
+        action is): their steps and files go, and it is numbered where the first one was."""
+        if not self.replaced:
+            return steps
+        by_eid = {s.get("_eid"): s for s in steps if s.get("_eid")}
+        by_seq = {s.get("seq"): s for s in steps}
+        gone: set[int] = set()
+        moved: dict[int, int] = {}
+        for seq, eids in self.replaced:
+            olds = [by_eid[e] for e in eids if e in by_eid]
+            dbl = by_seq.get(seq)
+            if not olds or dbl is None:
+                continue
+            first = min(o["seq"] for o in olds)
+            for o in olds:
+                gone.add(id(o))
+                for name in ("dom", "dom_before", "screenshot"):
+                    if isinstance(o.get(name), str) and o[name]:
+                        (self.out_dir / o[name]).unlink(missing_ok=True)
+                moved[o["seq"]] = first
+            for name in ("dom", "dom_before", "screenshot"):  # its files take the first's names
+                rel = dbl.get(name)
+                if isinstance(rel, str) and rel:
+                    new = rel.replace(f"{seq:04d}.", f"{first:04d}.", 1)
+                    if (self.out_dir / rel).exists():
+                        (self.out_dir / rel).replace(self.out_dir / new)
+                    dbl[name] = new
+            moved[seq] = first
+            dbl["seq"] = first
+            if isinstance(dbl.get("caused_by"), int):
+                dbl.pop("caused_by")
+        kept = [s for s in steps if id(s) not in gone]
+        for s in kept:  # what pointed at the clicks or the double click points at it, renumbered
+            if isinstance(s.get("caused_by"), int) and s["caused_by"] in moved:
+                s["caused_by"] = moved[s["caused_by"]]
+            for cand in s.get("locators") or []:
+                if isinstance(cand, dict) and cand.get("text_from") in moved:
+                    cand["text_from"] = moved[cand["text_from"]]
+        kept.sort(key=lambda s: (not isinstance(s.get("seq"), int), s.get("seq") or 0))
+        self.rewrite = True
+        return kept
+
+    def _apply_nav_observed(self, steps: list[dict]) -> None:
+        for step in steps:
+            seq = step.get("seq")
+            if not isinstance(seq, int) or str(step.get("action") or "").startswith(
+                ("goto", "tab-")
+            ):
+                continue
+            if not any((step.get("tab") or "") == key and cause <= seq < upto
+                       for key, cause, upto in self.nav_observed):  # fmt: skip
+                continue
+            # observed at the page it loaded (caused_by says which): no snapshot of its own
+            step.pop("mask_boxes", None)
+            for name in ("dom", "screenshot"):
+                rel = step.get(name)
+                if isinstance(rel, str) and rel:
+                    (self.out_dir / rel).unlink(missing_ok=True)
+                step[name] = None
+
+    def setup_step(self, page, url: str, reason: str) -> None:
+        """A setup step the recorder itself writes (the blank page a new browser starts on): kept
+        for provenance, no part of any application (labctl.botlog.recording.setup_reason)."""
+        tab = self.tab_of(page)
+        self.seq += 1
+        step = {"seq": self.seq, "ts": _now(), "url": url, "action": "goto", "selector": None,
+                "dom": None, "dom_before": None, "screenshot": None, "nav": "navigate"}  # fmt: skip
+        # (a setup event by its address: labctl.botlog.recording.setup_reason; no field of its own)
+        if tab:
+            step["tab"] = tab
+        self.waiting.append((step, None))
 
     def close(self) -> None:
+        for info in list(self.tabs.values()):  # a tab opened that never did anything
+            self._announce(info)
+        self._close_open()  # batches never flushed: final, without an after-snapshot
         self.drain(pictures=False)
         self.file.close()
-        steps = self.written
+        # The order is the sequence the steps were numbered in on arrival, nothing else.
+        steps = sorted(self.written, key=lambda s: (not isinstance(s.get("seq"), int),
+                                                    s.get("seq") or 0))  # fmt: skip
+        steps = self._apply_replaced(steps)
+        reordered = [s.get("seq") for s in steps] != [s.get("seq") for s in self.written]
+        self._apply_nav_observed(steps)
         several = len(self.tabs) > 1
         if several:
             steps = self._in_order(steps)
         else:  # one tab: no tab steps (a single page's recording reads as it always did)
             steps = [s for s in steps if not str(s.get("action") or "").startswith("tab-")]
         renumbered = self._renumber(steps)
-        if several or renumbered or len(steps) != len(self.written) or self.secrets:
+        if (several or renumbered or reordered or self.rewrite or len(steps) != len(self.written)
+                or self.secrets):  # fmt: skip
             # A value typed late may have been on the page before it was typed: go over
             # everything once more with every value typed.
             steps = [self.secrets.clean_step(s) for s in steps]
             (self.out_dir / "steps.jsonl").write_text(
-                "".join(json.dumps(s) + "\n" for s in steps), encoding="utf-8"
+                "".join(json.dumps(_public(s)) + "\n" for s in steps), encoding="utf-8"
             )
         self.written = steps
         if several:
@@ -1318,29 +1747,11 @@ class _Steps:
                 path.write_text(clean, encoding="utf-8")
 
     def _in_order(self, steps: list[dict]) -> list[dict]:
-        """All tabs on one sequence: each tab's steps stay in the order that tab made them, and
-        the tabs are merged by when each step happened (a tab's batch can reach the recorder
-        after a later batch of another tab). Where the next action is in another tab than the
-        one before, a `tab-switch` step says so."""
-        from labctl.botlog.recording import _ts
-
-        queues: dict[str, list[tuple[int, dict]]] = {}
-        for n, s in enumerate(steps):
-            queues.setdefault(str(s.get("tab") or ""), []).append((n, s))
-        last_time: dict[str, object] = {}
-
-        def when(tab: str):
-            n, s = queues[tab][0]
-            t = _ts(s.get("ts")) or last_time.get(tab)
-            return (t is None, t or 0, n)
-
-        merged: list[dict] = []
-        while any(queues.values()):
-            tab = min((t for t in queues if queues[t]), key=when)
-            _, s = queues[tab].pop(0)
-            if _ts(s.get("ts")):
-                last_time[tab] = _ts(s.get("ts"))
-            merged.append(s)
+        """All tabs on one sequence, in the order the recorder numbered the steps as they arrived
+        (never re-sorted by timestamps: a page's clock and the recorder's are not one clock).
+        Where the next action is in another tab than the one before, a `tab-switch` step says
+        so."""
+        merged = list(steps)
         out: list[dict] = []
         current, seen = None, set()
         for s in merged:
@@ -1637,7 +2048,7 @@ def attach(
     (out_dir / "dom").mkdir(parents=True, exist_ok=True)
     steps = _Steps(out_dir, screenshots)
     har = _Har()
-    scripts = _init_scripts(settle_ms)
+    scripts = steps.scripts = _init_scripts(settle_ms)
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.connect_over_cdp(cdp_url)
@@ -1653,8 +2064,9 @@ def attach(
                 size = context.pages[0].viewport_size if context.pages else None
             except Exception:  # noqa: BLE001
                 size = None
-            write_meta(out_dir, browser, size, "attach")
-            context.expose_binding("__tlStep", steps.on_capture)
+            write_meta(out_dir, browser, size, "attach", settle_ms)
+            context.expose_binding("__tlEvent", steps.on_event)
+            context.expose_binding("__tlStep", steps.on_flush)
             context.expose_binding("__tlSecret", steps.on_secret)
             for s in scripts:
                 context.add_init_script(s)
@@ -1711,8 +2123,9 @@ def record(
     max_seconds: float = 1800,
     screenshots: bool = True,
     storage_state: dict | str | Path | None = None,
+    browser: str = "chromium",
 ) -> Path:
-    """Open `url` in Chromium and record until the page is closed (or `script(page)` returns).
+    """Open `url` in Chromium (or `browser`: firefox, webkit) and record until the page is closed (or `script(page)` returns).
     A window nobody closes is closed after `max_seconds`; what was recorded until then is kept.
 
     With `script`, the callback drives the page (for tests and scripted evidence runs); otherwise a
@@ -1727,8 +2140,9 @@ def record(
     steps = _Steps(out_dir, screenshots)
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=headless)
+            browser = getattr(pw, browser).launch(headless=headless)
             context = browser.new_context(
+                accept_downloads=True,
                 record_har_path=str(out_dir / "recording.har"),
                 record_har_content="embed",
                 record_har_mode="full",
@@ -1738,14 +2152,17 @@ def record(
                 viewport=VIEWPORT,
                 device_scale_factor=DEVICE_SCALE_FACTOR,
             )
-            write_meta(out_dir, browser, VIEWPORT, "record")
+            write_meta(out_dir, browser, VIEWPORT, "record", settle_ms)
             # Every tab and popup the flow opens is recorded, on the same sequence.
             context.on("page", steps.on_page)
-            context.expose_binding("__tlStep", steps.on_capture)
+            context.expose_binding("__tlEvent", steps.on_event)
+            context.expose_binding("__tlStep", steps.on_flush)
             context.expose_binding("__tlSecret", steps.on_secret)
-            for s in _init_scripts(settle_ms):
+            steps.scripts = _init_scripts(settle_ms)
+            for s in steps.scripts:
                 context.add_init_script(s)
             page = context.new_page()
+            steps.setup_step(page, "about:blank", "blank page")  # where every browser starts
             page.goto(url)
 
             def open_pages():

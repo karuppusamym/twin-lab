@@ -92,7 +92,15 @@ def fidelity(
     strict: bool = typer.Option(
         False, "--strict", help="exit 1 unless the status is PASS WITHIN DECLARED SCOPE"
     ),
-) -> None:
+    origin_map: list[str] = typer.Option(
+        [], "--map", help="source=replica origin, repeat for each application (a recording "
+        "across applications); default: replicas.yaml beside the recording, else --base-url"),
+    replicas: Path | None = typer.Option(
+        None, "--replicas", help="replicas.yaml (apps: id, source, replica)"),
+    scope: Path | None = typer.Option(
+        None, "--scope", help="reviewed exclusions (default: scope.yaml beside the recording)"),
+    browser: str = typer.Option("chromium", "--browser", help="chromium, firefox or webkit"),
+) -> None:  # fmt: skip
     """Replay a recording against a running app and compare each step's DOM, then evaluate the
     declared acceptance cases and visual states. Exit 1 unless the replay passed (a failed or
     BLOCKED replay exits 1); with --strict, unless the scoped status passed."""
@@ -133,7 +141,9 @@ def fidelity(
                                  bindings=bindings, expected=expected,
                                  storage_state=storage_state, acceptance=acceptance,
                                  baseline=baseline, visual=visual, viewport=viewport,
-                                 artifacts=artifacts, outcome_judge=judge)  # fmt: skip
+                                 artifacts=artifacts, outcome_judge=judge,
+                                 origins=origin_map or None, replicas=replicas, scope=scope,
+                                 browser=browser)  # fmt: skip
     if json_out:
         json_out.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
     if md_out:
@@ -192,6 +202,41 @@ def visual_cmd(
 ) -> None:
     """Write the visual baseline template: one state per picture the recorder kept."""
     _template("visual", recording, out)
+
+
+@app.command("scope")
+def scope_cmd(
+    recording: Path = typer.Argument(..., exists=True, file_okay=False, help="recording folder"),
+    from_brief: Path | None = typer.Option(
+        None, "--from-brief", exists=True, help="apps/<app>/BRIEF.md: its Out of scope section"),
+    model: Path | None = typer.Option(
+        None, "--model", help="model.yaml (default: beside the brief)"),
+    out: Path | None = typer.Option(None, "--out", help="default: scope.yaml beside it"),
+) -> None:  # fmt: skip
+    """Draft the reviewed exclusions for comparing a replay with this recording (scope.yaml):
+    the out-of-scope screens the brief lists, and each link on the recorded pages that leads to
+    one. Nothing in it is used until a person sets approved_by. An existing file is never
+    overwritten."""
+    import yaml
+
+    from labctl.behaviour import scope as scope_mod
+    from labctl.botlog.recording import load as load_recording
+
+    rec = load_recording(recording)
+    target = out or recording / scope_mod.FILE
+    if target.exists():
+        typer.echo(f"{target} exists: it is not overwritten (delete it, or --out)", err=True)
+        raise typer.Exit(1)
+    brief = from_brief.read_text(encoding="utf-8") if from_brief else ""
+    model_path = model or (from_brief.parent / "model.yaml" if from_brief else None)
+    data = None
+    if model_path is not None and model_path.is_file():
+        data = yaml.safe_load(model_path.read_text(encoding="utf-8")) or {}
+    screens = scope_mod.screens_of(brief)
+    text = scope_mod.draft(rec.id, brief, data, scope_mod.links_to(rec, screens))
+    target.write_text(text, encoding="utf-8")
+    n = len((yaml.safe_load(text) or {}).get("exclusions") or [])
+    typer.echo(f"wrote {target}: {n} exclusion(s) to review; set approved_by to use them")
 
 
 @app.command("bindings")

@@ -506,30 +506,49 @@ def _browser_database_text(conf: dict, app: str) -> str:
     kinds = data.get("storage") or data.get("referenced") or []
     keys = data.get("keys") or []
     named = [k for k in data.get("script_keys") or [] if k not in keys]
-    seen = "observed" if data.get("storage") else "referenced by the page's scripts; not observed"
-    return (
-        "**There is no server database.** This app keeps its business data in the browser: "
-        + (
-            ", ".join(f"`{k}`" for k in kinds) + f" ({seen})"
-            if kinds
-            else "storage kind not observed"
-        )
-        + (
-            ", under the keys " + ", ".join(f"`{k}`" for k in keys)
-            if keys
-            else ", key names not observed"
+    observed = bool(data.get("storage"))
+    persistence = data.get("persistence") or ("storage" if observed else "transient")
+    if persistence == "storage":
+        where = (
+            "Its business data is kept in browser storage, "
+            + ", ".join(f"`{k}`" for k in kinds)
+            + " (observed)"
             + (
-                " (the page's scripts name " + ", ".join(f"`{k}`" for k in named) + ")"
-                if named
-                else ""
+                ", under the keys " + ", ".join(f"`{k}`" for k in keys)
+                if keys
+                else ", key names not observed"
+                + (
+                    " (the page's scripts name " + ", ".join(f"`{k}`" for k in named) + ")"
+                    if named
+                    else ""
+                )
             )
+            + ". Keep it there, under the same keys and the same record shape as the brief's "
+            "*Browser storage* section; where the brief says a key or shape was not observed, "
+            "choose one, write the choice in BUILD-NOTES.md and do not claim it was recorded."
         )
-        + f". Keep it there, under the same keys and the same record shape as the brief's "
-        "*Browser storage* section; where the brief says a key or shape was not observed, choose "
-        "one, write the choice in BUILD-NOTES.md and do not claim it was recorded. The container "
-        "only serves the files: its health is hosting health, not business-data health. "
-        f"`{app}/db/schema.sql` has no table: create no table, no server-side store and no "
-        "endpoint for the data, and do not read a database address."
+    else:
+        refs = (
+            "storage "
+            + ", ".join(f"`{k}`" for k in kinds)
+            + " is referenced by the page's scripts but not observed"
+            if kinds
+            else "no browser storage was observed"
+        )
+        where = (
+            "No server write was observed, and nothing shows that the data persists in "
+            f"`localStorage`, `sessionStorage` or anywhere else ({refs}): the absence of server "
+            "writes is not evidence of browser storage. Follow the brief's *Browser storage* "
+            "section: keep the data as the recording shows it (page state or values in the "
+            "address), add storage only if the owner says the real application keeps it there, "
+            "and write that decision in BUILD-NOTES.md."
+        )
+    return (
+        "**There is no server database.** "
+        + where
+        + " The container only serves the files: its health is hosting health, not "
+        f"business-data health. `{app}/db/schema.sql` has no table: create no table, no "
+        "server-side store and no endpoint for the data, and do not read a database address."
     )
 
 

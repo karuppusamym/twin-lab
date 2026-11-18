@@ -400,6 +400,32 @@ def _labs(on: list[str]) -> dict[str, str]:
     return out
 
 
+@app.command()
+def coverage(
+    app_id: str = typer.Argument(..., help="Application id."),
+    as_json: bool = typer.Option(False, "--json", help="Print the matrix as JSON."),
+    no_save: bool = typer.Option(False, "--no-save", help="Do not keep the result for the portal."),
+) -> None:
+    """The coverage matrix: every requirement, what shows it, what checks it, and what to ask for.
+
+    Prints the claim "100% of the agreed replication acceptance cases passed" only when every
+    required row is VERIFIED or EXCLUDED; otherwise the exact shortfall. Exit 1 when it cannot be
+    claimed."""
+    from labctl import coverage as coverage_mod
+
+    root = _root()
+    try:
+        report = coverage_mod.build(root, app_id)
+    except coverage_mod.CoverageError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    if not no_save:
+        coverage_mod.save(root, report)
+    typer.echo(report.model_dump_json(indent=2) if as_json else report.markdown())
+    if not report.claim:
+        raise typer.Exit(1)
+
+
 ON_HELP = "Use this copy of an app's lab (app.copy); repeat for several apps."
 
 
