@@ -35,6 +35,26 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
 - `tools/audit_replication_gates.py` is the audit's probe; it exits 0 now. Tests:
   `test_audit_gates.py`.
 
+## 2026-11-18 — Roles and session lifecycle, recorded and replayed on a local fixture
+- A fixture application with two roles (`lab/labctl/tests/fixtures/roles/roles_app.py`): sign-in,
+  a clerk and a supervisor, a page and a menu entry for the supervisor only (a clerk gets a
+  refusal page with HTTP 403), a cookie session that can end, sign-out; `serve(faults=...)` gives
+  a replica wrong in one named way. `tests/test_roles_and_sessions.py` records and replays it:
+  the supervisor's recording passes against a correct replica; a menu entry shown to every role
+  fails at the first page with the menu, and a clerk let into the supervisor's page fails at that
+  page; the refusal page is compared like any other; a session that ends after a number of pages,
+  and signing in again, replays, and a replica whose session never ends fails at the redirect.
+  No file of a recording holds a typed user name or password; the replay types the bindings'.
+- Fixed in the replay: Back after sign-out was not made as Back. The source answers the page gone
+  back to with sign-in, so the recorded history step carries the sign-in address, which matched
+  no entry of the replay's history; the replay loaded that address, and a replica still showing
+  the protected page passed. With one direction possible the step is now made that way and the
+  replica must arrive at the recorded address by itself.
+- Left open: the HTTP status of a page is not compared (a refusal answered 200 passes if the
+  page is the same). A session ended by elapsed time, or from outside the browser, between two
+  steps is not replayed (a strict xfail says so). Single sign-on, multi-factor sign-in and token
+  renewal are not tested.
+
 ## 2026-11-18 — A page load right after a submit is that submit's result
 - Re-running the public-site trial recording showed one of its findings still failing on that
   recording: source against source, the two submit steps were compared with the form snapshot
