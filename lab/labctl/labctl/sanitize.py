@@ -266,7 +266,9 @@ def _asset_path(value: str) -> str:
 
 
 CELL_INT = re.compile(r"^[-+]?(\d{1,3}(,\d{3})+|[1-9]\d*|0)$")
-CELL_DEC = re.compile(r"^[-+(]?[$€£¥]?\s?\d[\d,]*[.,]\d{1,6}\)?\s?%?$|^[-+]?[$€£¥]\s?\d[\d,]*\)?$|^\d+%$")
+CELL_DEC = re.compile(
+    r"^[-+(]?[$€£¥]?\s?\d[\d,]*[.,]\d{1,6}\)?\s?%?$|^[-+]?[$€£¥]\s?\d[\d,]*\)?$|^\d+%$"
+)
 CELL_DATE = re.compile(
     r"^(\d{4}-\d{2}-\d{2}|\d{1,2}[/.]\d{1,2}[/.]\d{2,4}|\d{1,2}[- ][A-Za-z]{3,9}[- ,]+\d{2,4}|"
     r"[A-Za-z]{3,9}\.? \d{1,2},? \d{4})$"
@@ -409,13 +411,22 @@ class _Page(HTMLParser):
             self._fact("link", _asset_path(a["href"]))
         if tag == "meta":
             meta = a.get("name", "").lower()
-            if meta in ("csrf-param", "csrf-token", "generator", "_csrf", "_csrf_header", "viewport"):
+            if meta in (
+                "csrf-param",
+                "csrf-token",
+                "generator",
+                "_csrf",
+                "_csrf_header",
+                "viewport",
+            ):
                 self._fact("meta", meta)
             if meta == "generator":
                 m = PRODUCT.match(raw.get("content", "").strip())
                 if m:
                     self._fact("meta", f"generator:{m.group(0)}")
-        if tag in ("a", "form", "iframe", "frame") and (a.get("href") or a.get("action") or a.get("src")):
+        if tag in ("a", "form", "iframe", "frame") and (
+            a.get("href") or a.get("action") or a.get("src")
+        ):
             value = raw.get("href") or raw.get("action") or raw.get("src") or ""
             if ";jsessionid" in value.lower():
                 self._fact("flag", "jsessionid-in-url")
@@ -580,7 +591,9 @@ class _Page(HTMLParser):
         rows = t["rows"]
         if t["nested"] or len(rows) < 2:
             return None
-        head = next((r for r in rows[:2] if r["cells"] and all(c["tag"] == "th" for c in r["cells"])), None)
+        head = next(
+            (r for r in rows[:2] if r["cells"] and all(c["tag"] == "th" for c in r["cells"])), None
+        )
         if head is None or len(head["cells"]) < 2:
             return None
         labels = []

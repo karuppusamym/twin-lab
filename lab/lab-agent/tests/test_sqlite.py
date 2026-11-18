@@ -84,7 +84,9 @@ def test_load_snapshot_and_reset_on_sqlite(db_file):
     with pytest.raises(DataProblems) as bad:
         asyncio.run(db.replace({"cases": [{"case_no": "x", "category_id": 1}]}))
     assert (bad.value.problems[0].column, bad.value.problems[0].message) == (
-        "closed", "required (NOT NULL) and missing")  # the key (case_id) is not: SQLite gives one
+        "closed",
+        "required (NOT NULL) and missing",
+    )  # the key (case_id) is not: SQLite gives one
     assert asyncio.run(db.snapshot())[1]["notes"][0]["id"] == 100  # nothing changed
     # an app adds a row; replacing the parent table clears the children that point at it
     conn = sqlite3.connect(path)

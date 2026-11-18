@@ -74,8 +74,11 @@ def test_php_from_headers_cookies_and_addresses(tmp_path):
     assert server["framework"] == "Laravel" and server["framework_confidence"] == "certain"
     assert server["web_server"]["name"] == "Apache HTTP Server"
     assert server["web_server"]["version"] == "2.4.41"
-    assert {e["marker"] for e in stack.detected} >= {"PHPSESSID cookie", "laravel_session cookie",
-                                                     "X-Powered-By header names PHP"}
+    assert {e["marker"] for e in stack.detected} >= {
+        "PHPSESSID cookie",
+        "laravel_session cookie",
+        "X-Powered-By header names PHP",
+    }
 
 
 def test_a_php_address_alone_is_only_likely(tmp_path):
@@ -90,7 +93,7 @@ def test_java_jsf_primefaces_with_jquery(tmp_path):
         " value='abc'><table class='ui-datatable'><tr><td>x</td></tr></table>"
         "<input id='f' name='f'><input id='g' name='g'></form>",
         head="<script src='/javax.faces.resource/jquery/jquery.js.xhtml?ln=primefaces'></script>"
-             "<script src='/js/jquery-1.12.4.min.js'></script>",
+        "<script src='/js/jquery-1.12.4.min.js'></script>",
     )
     model, stack = detect(tmp_path, [
         entry("http://a.test/app/orders.xhtml", html,
@@ -109,9 +112,11 @@ def test_java_jsf_primefaces_with_jquery(tmp_path):
 
 
 def test_dotnet_web_forms_and_iis(tmp_path):
-    html = page("<form id='form1' method='post'><input type='hidden' name='__VIEWSTATE' id='__VIEWSTATE' "
-                "value='dDw'><input type='hidden' name='__EVENTVALIDATION' value='x'>"
-                "<input id='a' name='a'><input id='b' name='b'></form>")
+    html = page(
+        "<form id='form1' method='post'><input type='hidden' name='__VIEWSTATE' id='__VIEWSTATE' "
+        "value='dDw'><input type='hidden' name='__EVENTVALIDATION' value='x'>"
+        "<input id='a' name='a'><input id='b' name='b'></form>"
+    )
     model, stack = detect(tmp_path, [
         entry("http://a.test/Accounts/Home.aspx", html,
               resp_headers=[{"name": "Server", "value": "Microsoft-IIS/10.0"},
@@ -136,7 +141,10 @@ def test_aspnet_mvc_razor_and_core_and_blazor(tmp_path):
     assert mvc.server["version"] == "5.2"
     _, core = detect(tmp_path, [entry("http://a.test/", page(FORM), set_cookies=[".AspNetCore.Session"],
                                       resp_headers=[{"name": "Server", "value": "Kestrel"}])])  # fmt: skip
-    assert core.server["framework"] == "ASP.NET Core" and core.server["web_server"]["name"] == "Kestrel"
+    assert (
+        core.server["framework"] == "ASP.NET Core"
+        and core.server["web_server"]["name"] == "Kestrel"
+    )
     _, blazor = detect(tmp_path, [
         entry("http://a.test/", page(FORM, head="<script src='/_framework/blazor.web.js'></script>")),
         entry("http://a.test/_blazor/negotiate?negotiateVersion=1", "", mime="application/json", method="POST"),
@@ -198,7 +206,9 @@ def test_react_front_end_on_a_java_backend_reports_both(tmp_path):
         entry("http://a.test/api/orders", '[{"id":1}]', mime="application/json",
               resp_headers=[{"name": "Server", "value": "Apache-Coyote/1.1"}], set_cookies=["JSESSIONID"]),
     ])  # fmt: skip
-    assert model.stack.frontend["framework"] == "react" and model.stack.frontend["version"] == "18.3.1"
+    assert (
+        model.stack.frontend["framework"] == "react" and model.stack.frontend["version"] == "18.3.1"
+    )
     assert stack.server["technology"] == "Java"
     assert stack.pinned == {"react-dom": "18.3.1"}
 
@@ -208,17 +218,23 @@ def test_conflicting_server_signals_report_the_stronger_and_list_the_other(tmp_p
         entry("http://a.test/index.php", page(FORM), set_cookies=["JSESSIONID"]),
     ])  # fmt: skip
     assert stack.server["technology"] == "Java"  # certain beats likely
-    assert stack.server["also"] == [{"technology": "PHP", "marker": ".php addresses", "confidence": "likely"}]
+    assert stack.server["also"] == [
+        {"technology": "PHP", "marker": ".php addresses", "confidence": "likely"}
+    ]
 
 
 def test_guesses_do_not_outrank_or_clutter(tmp_path):
-    _, stack = detect(tmp_path, [entry("http://a.test/", page(FORM), set_cookies=["JSESSIONID", "session"])])
+    _, stack = detect(
+        tmp_path, [entry("http://a.test/", page(FORM), set_cookies=["JSESSIONID", "session"])]
+    )
     assert stack.server["technology"] == "Java" and "also" not in stack.server
     assert any(e["confidence"] == "guess" for e in stack.detected)
 
 
 def test_ui_suites_prove_their_platform_as_likely_at_most(tmp_path):
-    html = page("<div class='RadGrid RadGrid_Default'></div><input id='a' name='a'><input id='b' name='b'>")
+    html = page(
+        "<div class='RadGrid RadGrid_Default'></div><input id='a' name='a'><input id='b' name='b'>"
+    )
     _, stack = detect(tmp_path, [entry("http://a.test/p", html)])
     assert stack.server["technology"] == ".NET" and stack.server["confidence"] == "likely"
     assert stack.server["framework"] == "ASP.NET Web Forms"
@@ -284,8 +300,11 @@ def libs(tmp_path, head="", body="", scripts=(), entries=()):
 
 
 def test_jquery_versions_from_names_and_banners(tmp_path):
-    _, found = libs(tmp_path, head="<script src='/js/jquery-3.6.0.min.js'></script>"
-                                   "<script src='https://cdn.test/jquery-ui-1.13.2.min.js'></script>")
+    _, found = libs(
+        tmp_path,
+        head="<script src='/js/jquery-3.6.0.min.js'></script>"
+        "<script src='https://cdn.test/jquery-ui-1.13.2.min.js'></script>",
+    )
     assert found["jQuery"]["version"] == "3.6.0" and found["jQuery"]["confidence"] == "certain"
     assert found["jQuery UI"]["version"] == "1.13.2"
     _, banner = libs(tmp_path, head="<script src='/js/bundle.js'></script>",
@@ -294,9 +313,14 @@ def test_jquery_versions_from_names_and_banners(tmp_path):
 
 
 def test_bootstrap_major_version(tmp_path):
-    _, cdn = libs(tmp_path, head="<script src='https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js'></script>")
+    _, cdn = libs(
+        tmp_path,
+        head="<script src='https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js'></script>",
+    )
     assert cdn["Bootstrap"]["version"] == "5.3.0"
-    _, v5 = libs(tmp_path, body="<button data-bs-toggle='modal' id='b'>x</button><input id='a' name='a'>")
+    _, v5 = libs(
+        tmp_path, body="<button data-bs-toggle='modal' id='b'>x</button><input id='a' name='a'>"
+    )
     assert v5["Bootstrap"]["version"] == "5" and v5["Bootstrap"]["confidence"] == "likely"
     _, v3 = libs(tmp_path, body="<div class='col-xs-6 glyphicon'></div><input id='a' name='a'>")
     assert v3["Bootstrap"]["version"] == "3"
@@ -318,7 +342,10 @@ def test_angularjs_is_not_angular(tmp_path):
 def test_angular_2_plus_stays_angular_with_material_and_primeng(tmp_path):
     model, found = libs(tmp_path, body="<app-root ng-version='14.2.0' id='r'><mat-toolbar>x</mat-toolbar>"
                                        "<p-table id='t'></p-table></app-root>")  # fmt: skip
-    assert model.stack.frontend["framework"] == "angular" and model.stack.frontend["version"] == "14.2.0"
+    assert (
+        model.stack.frontend["framework"] == "angular"
+        and model.stack.frontend["version"] == "14.2.0"
+    )
     assert {"Angular Material", "PrimeNG"} <= set(found)
     assert model.stack.frontend["ui_library"] in ("Angular Material", "PrimeNG")
 
@@ -380,21 +407,44 @@ def test_component_suite_is_the_ui_library_not_bootstrap(tmp_path):
 def test_the_result_keeps_the_old_keys_and_adds_the_new_ones():
     out = har._framework([], [], [])
     assert out == {"server": {}, "libraries": [], "evidence": []}
-    pages = [sanitize.page("<html><body><app-root ng-version='14.2.0'><input id='q'></app-root></body></html>")]
+    pages = [
+        sanitize.page(
+            "<html><body><app-root ng-version='14.2.0'><input id='q'></app-root></body></html>"
+        )
+    ]
     out = har._framework(pages, [])
-    assert {"framework", "version", "rendering", "marker", "server", "libraries", "evidence"} <= set(out)
+    assert {
+        "framework",
+        "version",
+        "rendering",
+        "marker",
+        "server",
+        "libraries",
+        "evidence",
+    } <= set(out)
     assert out["framework"] == "angular" and out["marker"] == 'ng-version="14.2.0"'
-    assert {"kind": "front", "name": "angular", "marker": 'ng-version="14.2.0"', "confidence": "certain"} in out["evidence"]
+    assert {
+        "kind": "front",
+        "name": "angular",
+        "marker": 'ng-version="14.2.0"',
+        "confidence": "certain",
+    } in out["evidence"]
 
 
 def test_no_cookie_value_or_token_reaches_the_model(tmp_path):
-    html = page("<form><input type='hidden' name='__VIEWSTATE' value='" + SECRET + "'>"
-                "<input id='a' name='a'><input id='b' name='b'></form>",
-                head=f"<meta name='csrf-token' content='{SECRET}'><meta name='generator' content='WordPress 6.2'>")
+    html = page(
+        "<form><input type='hidden' name='__VIEWSTATE' value='" + SECRET + "'>"
+        "<input id='a' name='a'><input id='b' name='b'></form>",
+        head=f"<meta name='csrf-token' content='{SECRET}'><meta name='generator' content='WordPress 6.2'>",
+    )
     model = run(tmp_path, [entry("http://a.test/p", html, cookies=["PHPSESSID"], set_cookies=["JSESSIONID"],
                                  resp_headers=[{"name": "Server", "value": "nginx/1.18.0"}])])  # fmt: skip
-    assert SECRET not in model.model_dump_json() and SECRET not in json.dumps(model.model_dump(by_alias=True))
-    assert "PHPSESSID cookie" in json.dumps(model.stack.detected)  # a catalog label, never the value
+    assert SECRET not in model.model_dump_json() and SECRET not in json.dumps(
+        model.model_dump(by_alias=True)
+    )
+    assert "PHPSESSID cookie" in json.dumps(
+        model.stack.detected
+    )  # a catalog label, never the value
 
 
 def test_page_facts_hold_names_and_files_not_values():
@@ -411,7 +461,12 @@ def test_page_facts_hold_names_and_files_not_values():
     assert f["url"] >= {"/a/b.do?user,x", "/c"} and f["flag"] == {"jsessionid-in-url"}
     assert f["attr"] == {"data-bind", "ng-app"}
     blob = json.dumps({k: sorted(v) for k, v in f.items()})
-    assert "TOKEN123" not in blob and "SECRETQ" not in blob and "ABC123" not in blob and "jane" not in blob
+    assert (
+        "TOKEN123" not in blob
+        and "SECRETQ" not in blob
+        and "ABC123" not in blob
+        and "jane" not in blob
+    )
 
 
 def test_brief_prints_the_facts_in_a_table(tmp_path):
@@ -429,10 +484,14 @@ def test_brief_prints_the_facts_in_a_table(tmp_path):
 
 
 def test_the_rendered_brief_carries_the_table(tmp_path):
-    model = run(tmp_path, [entry("http://a.test/x/home.jsp", page(FORM), set_cookies=["JSESSIONID"])])
+    model = run(
+        tmp_path, [entry("http://a.test/x/home.jsp", page(FORM), set_cookies=["JSESSIONID"])]
+    )
     built = brief_mod.scope("legacy", "Legacy system", mb.merge("legacy", [model]))
     text = brief_mod.render(built, ROOT)
-    assert "| Server technology | Java (JSP) | JSESSIONID cookie; .jsp addresses | certain |" in text
+    assert (
+        "| Server technology | Java (JSP) | JSESSIONID cookie; .jsp addresses | certain |" in text
+    )
     assert "| Web server | not identified — choose at onboarding |" in text
 
 
@@ -440,7 +499,13 @@ def test_brief_says_plainly_when_nothing_is_found(tmp_path):
     model = run(tmp_path, [entry("http://a.test/", "<html><body></body></html>")])
     lines = brief_mod.detected_stack(model.stack)
     text = "\n".join(lines)
-    for part in ("Front end", "Server technology", "Web server", "UI components", "Client libraries"):
+    for part in (
+        "Front end",
+        "Server technology",
+        "Web server",
+        "UI components",
+        "Client libraries",
+    ):
         assert f"| {part} | not identified — choose at onboarding |" in text
     assert brief_mod.detected_stack(Stack()) == []  # a stack that did not come from a recording
 
@@ -488,25 +553,36 @@ def test_the_entity_is_named_from_the_grid_id_the_address_or_the_heading(tmp_pat
     generic = named.replace("ctl00_Main_gvInvoices", "GridView1")
     m = grid_model(tmp_path, [entry("http://a.test/Billing/Customers.jsp", page(generic))])
     assert [t.name for t in m.tables] == ["customers"]
-    m = grid_model(tmp_path, [entry("http://a.test/page.php", page("<h1>Supplier list</h1>" + generic))])
+    m = grid_model(
+        tmp_path, [entry("http://a.test/page.php", page("<h1>Supplier list</h1>" + generic))]
+    )
     assert [t.name for t in m.tables] == ["supplier"]
 
 
 def test_layout_tables_and_key_value_tables_are_not_grids(tmp_path):
-    layout = "<table><tr><td>Menu</td><td>Body text here</td></tr><tr><td>a</td><td>b</td></tr></table>"
+    layout = (
+        "<table><tr><td>Menu</td><td>Body text here</td></tr><tr><td>a</td><td>b</td></tr></table>"
+    )
     kv = "<table id='tblDetail'><tr><th>Name</th><td>Jan</td></tr><tr><th>City</th><td>Ede</td></tr></table>"
-    nested = ("<table id='tblOuter'><tr><th>A</th><th>B</th></tr><tr><td><table><tr><td>x</td></tr></table></td>"
-              "<td>y</td></tr></table>")
+    nested = (
+        "<table id='tblOuter'><tr><th>A</th><th>B</th></tr><tr><td><table><tr><td>x</td></tr></table></td>"
+        "<td>y</td></tr></table>"
+    )
     header_only = "<table id='tblEmpty'><tr><th>A</th><th>B</th></tr></table>"
     one_header = "<table id='tblOne'><tr><th>A</th></tr><tr><td>1</td></tr></table>"
-    m = grid_model(tmp_path, [entry("http://a.test/x/home.aspx", page(layout + kv + nested + header_only + one_header))])
+    m = grid_model(
+        tmp_path,
+        [entry("http://a.test/x/home.aspx", page(layout + kv + nested + header_only + one_header))],
+    )
     assert m.tables == []
 
 
 def test_mixed_cell_shapes_and_empty_cells(tmp_path):
-    html = ("<table id='gvRows'><thead><tr><th>Ref</th><th>Seen</th><th>Score</th><th>Note</th></tr></thead><tbody>"
-            "<tr><td>7</td><td>2026-01-02 10:30</td><td>1</td><td>fine</td></tr>"
-            "<tr><td>8</td><td>2026-01-03 11:45:10</td><td>2.5</td><td></td></tr></tbody></table>")
+    html = (
+        "<table id='gvRows'><thead><tr><th>Ref</th><th>Seen</th><th>Score</th><th>Note</th></tr></thead><tbody>"
+        "<tr><td>7</td><td>2026-01-02 10:30</td><td>1</td><td>fine</td></tr>"
+        "<tr><td>8</td><td>2026-01-03 11:45:10</td><td>2.5</td><td></td></tr></tbody></table>"
+    )
     t = table(grid_model(tmp_path, [entry("http://a.test/x/rows.php", page(html))]), "rows")
     types = {c.name: c.type for c in t.columns}
     assert types == {"ref": "INTEGER", "seen": "TIMESTAMP", "score": "NUMERIC", "note": "TEXT"}
@@ -518,18 +594,26 @@ def test_json_evidence_wins_over_a_grid_of_the_same_entity(tmp_path):
     model = grid_model(tmp_path, [entry("http://a.test/Orders.aspx", page(GRID)), api])
     orders = [t for t in model.tables if t.name == "orders"]
     assert len(orders) == 1 and orders[0].basis == "inferred"
-    assert {c.name for c in orders[0].columns} == {"id", "status", "opened_at"}  # no grid labels mixed in
+    assert {c.name for c in orders[0].columns} == {
+        "id",
+        "status",
+        "opened_at",
+    }  # no grid labels mixed in
 
 
 def test_the_same_entity_on_several_pages_merges_columns_and_types(tmp_path):
-    other = ("<table id='gvOrders'><tr><th>Order No</th><th>Total</th><th>Carrier</th></tr>"
-             "<tr><td>7</td><td>12</td><td>DHL</td></tr></table>")
+    other = (
+        "<table id='gvOrders'><tr><th>Order No</th><th>Total</th><th>Carrier</th></tr>"
+        "<tr><td>7</td><td>12</td><td>DHL</td></tr></table>"
+    )
     model = grid_model(tmp_path, [entry("http://a.test/Orders/List.aspx", page(GRID)),
                                   entry("http://a.test/Reports/Orders.aspx", page(other), t=1)])  # fmt: skip
     orders = [t for t in model.tables if t.name == "orders"]
     assert len(orders) == 1
     types = {c.name: c.type for c in orders[0].columns}
-    assert types["carrier"] == "TEXT" and types["total"] == "NUMERIC"  # integer + decimal -> decimal
+    assert (
+        types["carrier"] == "TEXT" and types["total"] == "NUMERIC"
+    )  # integer + decimal -> decimal
     assert "order_no" in types and "customer_name" in types
 
 
@@ -556,8 +640,10 @@ def test_detail_forms_add_columns_and_code_lists(tmp_path):
 
 
 def test_search_and_login_forms_are_not_entities(tmp_path):
-    search = ("<h1>Find an account</h1><form><input id='a' name='txtAccount'><input id='b' name='txtName'>"
-              "<input type='submit' value='Find'></form>")
+    search = (
+        "<h1>Find an account</h1><form><input id='a' name='txtAccount'><input id='b' name='txtName'>"
+        "<input type='submit' value='Find'></form>"
+    )
     login = "<h1>Welcome</h1><form><input id='u' name='user'><input id='p' name='pw' type='password'></form>"
     m = grid_model(tmp_path, [entry("http://a.test/Accounts/Search.aspx", page(search)),
                               entry("http://a.test/Auth/Login.aspx", page(login), t=1)])  # fmt: skip
@@ -565,24 +651,33 @@ def test_search_and_login_forms_are_not_entities(tmp_path):
 
 
 def test_a_search_page_with_a_results_grid_gives_the_grid_only(tmp_path):
-    html = ("<h1>Find an account</h1><form><input id='a' name='txtAccount'><input id='b' name='txtName'></form>"
-            "<table id='gvResults'><tr><th>Holder</th><th>Balance</th></tr><tr><td>Ottilie Vanderbrook</td>"
-            "<td>1,234.56</td></tr></table>")
+    html = (
+        "<h1>Find an account</h1><form><input id='a' name='txtAccount'><input id='b' name='txtName'></form>"
+        "<table id='gvResults'><tr><th>Holder</th><th>Balance</th></tr><tr><td>Ottilie Vanderbrook</td>"
+        "<td>1,234.56</td></tr></table>"
+    )
     m = grid_model(tmp_path, [entry("http://a.test/Accounts/Search.aspx", page(html))])
     (t,) = m.tables
-    assert t.name == "accounts" and {c.name: c.type for c in t.columns} == {"holder": "TEXT", "balance": "NUMERIC"}
+    assert t.name == "accounts" and {c.name: c.type for c in t.columns} == {
+        "holder": "TEXT",
+        "balance": "NUMERIC",
+    }
 
 
 def test_form_fields_inside_a_grid_are_not_columns_of_the_form(tmp_path):
-    html = ("<h1>Orders</h1><table id='gvLines'><tr><th>Item</th><th>Qty</th></tr>"
-            "<tr><td>pen</td><td><input id='q1' name='gvLines$ctl02$txtQty'></td></tr></table>")
+    html = (
+        "<h1>Orders</h1><table id='gvLines'><tr><th>Item</th><th>Qty</th></tr>"
+        "<tr><td>pen</td><td><input id='q1' name='gvLines$ctl02$txtQty'></td></tr></table>"
+    )
     m = grid_model(tmp_path, [entry("http://a.test/Orders/Lines.aspx", page(html))])
     (t,) = m.tables
     assert t.name == "lines" and [c.name for c in t.columns] == ["item", "qty"] or t.name == "lines"
 
 
 def test_unnamed_grid_is_left_out_with_a_note(tmp_path):
-    html = "<table id='GridView1'><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
+    html = (
+        "<table id='GridView1'><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
+    )
     m = grid_model(tmp_path, [entry("http://a.test/index.aspx", page(html))])
     assert m.tables == [] and any("no usable name" in p for p in m.problems)
 
@@ -597,7 +692,9 @@ def test_cell_shapes():
     }  # fmt: skip
     assert {k: sanitize.cell_shape(k) for k in shapes} == shapes
     assert sanitize.cell_type([]) is None
-    assert sanitize.cell_type(["1", "2.5"]) == "decimal" and sanitize.cell_type(["1", "x"]) == "text"
+    assert (
+        sanitize.cell_type(["1", "2.5"]) == "decimal" and sanitize.cell_type(["1", "x"]) == "text"
+    )
     assert sanitize.cell_type(["2026-01-01", "2026-01-01 10:00"]) == "datetime"
 
 
@@ -612,6 +709,6 @@ def test_grids_are_read_without_their_cells():
 
 
 def test_unclosed_cells_and_rows_still_form_a_grid():
-    html = ("<table id='t'><tr><th>A<th>B<tr><td>1<td>x<tr><td>2<td>y</table>")
+    html = "<table id='t'><tr><th>A<th>B<tr><td>1<td>x<tr><td>2<td>y</table>"
     (g,) = sanitize.page(html).grids
     assert g["headers"] == ["A", "B"] and g["types"] == ["integer", "text"] and g["rows"] == 2

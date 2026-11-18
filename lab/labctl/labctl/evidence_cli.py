@@ -166,8 +166,11 @@ def attach(
 def split(
     recording: Path = typer.Argument(..., help="A recording folder that visited several apps."),
     proposal: Path | None = typer.Option(
-        None, "--proposal", help="Proposal file to read (with --apply) or write (default: "
-        "<recording>.split.yaml next to the recording)."),
+        None,
+        "--proposal",
+        help="Proposal file to read (with --apply) or write (default: "
+        "<recording>.split.yaml next to the recording).",
+    ),
     apply: bool = typer.Option(False, "--apply", help="Write evidence/<app>/<recording>/ per app."),
     force: bool = typer.Option(False, "--force", help="Replace folders a former split wrote."),
 ) -> None:
@@ -196,7 +199,9 @@ def split(
             typer.echo(f"{'id':<28} {'origin':<34} {'kind':<8} steps screens")
             for e in prop.apps:
                 drop = "" if e.include else "  (excluded)"
-                typer.echo(f"{e.id:<28} {e.origin:<34} {e.kind:<8} {e.steps:>5} {e.screens:>7}{drop}")
+                typer.echo(
+                    f"{e.id:<28} {e.origin:<34} {e.kind:<8} {e.steps:>5} {e.screens:>7}{drop}"
+                )
                 for o in e.embedded:
                     typer.echo(f"    embedded: {o}")
             typer.echo(f"wrote {target}; edit it, then run again with --apply")

@@ -152,7 +152,9 @@ def test_sign_on_heuristics(tmp_path):
     kinds = {origin: e.kind for origin, e in got.items()}
     assert kinds["https://idp.example.com"] == "sign-on"  # redirect, then only a credential form
     assert kinds["https://app.example.com"] == "app"
-    assert kinds["https://app2.example.com"] == "app"  # its own /login page does not make it sign-on
+    assert (
+        kinds["https://app2.example.com"] == "app"
+    )  # its own /login page does not make it sign-on
     assert kinds["https://app3.example.com"] == "sign-on"  # every visit on auth paths
     assert kinds["https://sso.corp.example.com"] == "sign-on"  # by host
 
@@ -221,7 +223,9 @@ def test_readers_work_on_each_part(rec, tmp_path):
     model_b = mb.from_recording("b-example-org-8443", b, root, None)
     assert model_a.screens and model_b.screens
     assert any("/api/cases" in r.key for r in model_a.routes)
-    assert any("/dash/items" in r.key for r in model_b.routes)  # har.py itself skips other-host APIs
+    assert any(
+        "/dash/items" in r.key for r in model_b.routes
+    )  # har.py itself skips other-host APIs
     assert not any("/api/cases" in r.key for r in model_b.routes)
 
 
@@ -236,7 +240,9 @@ def test_sequence_file_keeps_global_order(rec, tmp_path):
         (7, "b-example-org-8443"), (8, "a-example-com"),
     ]  # fmt: skip
     s2 = doc["steps"][1]
-    assert s2["path"] == "/cases/{id}" and s2["screen"] == "cases-item" and s2["do"] == "click a#open"
+    assert (
+        s2["path"] == "/cases/{id}" and s2["screen"] == "cases-item" and s2["do"] == "click a#open"
+    )
     assert doc["steps"][4]["excluded"] is True and "excluded" not in doc["steps"][0]
     assert doc["steps"][2]["frame"] == "iframe#pay"
     assert set(doc["apps"]) == {"a-example-com", "b-example-org-8443", "login-sso-example-net"}
@@ -372,7 +378,8 @@ def test_canvas_pictures_and_documents_follow_their_step(tmp_path):
     rec = make_recording(tmp_path)
     (rec / "screens" / "0004.c1.png").write_bytes(b"canvas")
     (rec / "dom" / "0004.html").write_text(
-        _page("B", '<tl-canvas-text data-tl-image="screens/0004.c1.png"></tl-canvas-text>'), "utf-8")
+        _page("B", '<tl-canvas-text data-tl-image="screens/0004.c1.png"></tl-canvas-text>'), "utf-8"
+    )
     (rec / "docs").mkdir()
     (rec / "docs" / "01.pdf").write_bytes(b"%PDF-a")
     (rec / "docs" / "02.pdf").write_bytes(b"%PDF-b")

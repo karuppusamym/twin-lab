@@ -84,9 +84,13 @@ def package(
 @app.command()
 def start(
     app_id: str = typer.Argument(..., help="App folder under apps/."),
-    builder: str = typer.Option(None, "--builder", help="claude, devin or manual (default: config)."),
+    builder: str = typer.Option(
+        None, "--builder", help="claude, devin or manual (default: config)."
+    ),
     pr: bool = typer.Option(False, "--pr", help="claude: commit, push and open the pull request."),
-    detach: bool = typer.Option(False, "--detach", help="claude: return at once; follow with status."),
+    detach: bool = typer.Option(
+        False, "--detach", help="claude: return at once; follow with status."
+    ),
     repo: str = typer.Option(None, "--repo", help="GitHub repository owner/name."),
 ) -> None:
     """Start a build with the chosen builder (default `manual`)."""
@@ -128,7 +132,9 @@ def status(app_id: str = typer.Argument(..., help="App folder under apps/.")) ->
         typer.echo(f"Could not refresh: {exc}", err=True)
     _show(job)
     if len(jobs) > 1:
-        typer.echo(f"\n{len(jobs) - 1} earlier build(s) under {pkg.default_state_dir(root) / 'builds' / app_id}")
+        typer.echo(
+            f"\n{len(jobs) - 1} earlier build(s) under {pkg.default_state_dir(root) / 'builds' / app_id}"
+        )
 
 
 @app.command("attach-pr")

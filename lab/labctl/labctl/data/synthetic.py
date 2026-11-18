@@ -230,8 +230,11 @@ class _TableGen:
                     lo = min(lo, hi)
                 value = round(rng.uniform(lo, hi), scale)
                 return format(Decimal(str(value)), "f") if ctype.startswith("NUMERIC") else value
-        if kind in ("date", "datetime") and lo_hi and ctype in ("DATE", "TIMESTAMP",
-                                                                  "TIMESTAMP WITH TIME ZONE"):
+        if (
+            kind in ("date", "datetime")
+            and lo_hi
+            and ctype in ("DATE", "TIMESTAMP", "TIMESTAMP WITH TIME ZONE")
+        ):
             first = date.fromisoformat(lo_hi[0] + "-01")
             y, m = int(lo_hi[1][:4]), int(lo_hi[1][5:7])
             last = date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1)

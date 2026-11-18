@@ -59,7 +59,12 @@ class Entry:
     screens: int = 0
 
     def to_dict(self) -> dict:
-        out: dict = {"id": self.id, "origin": self.origin, "kind": self.kind, "include": self.include}
+        out: dict = {
+            "id": self.id,
+            "origin": self.origin,
+            "kind": self.kind,
+            "include": self.include,
+        }
         if self.path_prefix:
             out["path_prefix"] = self.path_prefix
         if self.embedded:
@@ -173,7 +178,9 @@ def from_dict(data: object, name: str = "proposal") -> Proposal:
 
 def _origin_ok(origin: str) -> bool:
     p = urlsplit(origin)
-    return p.scheme in ("http", "https") and bool(p.hostname) and p.path in ("", "/") and not p.query
+    return (
+        p.scheme in ("http", "https") and bool(p.hostname) and p.path in ("", "/") and not p.query
+    )
 
 
 def normalise_origin(url: str) -> str:
@@ -267,7 +274,9 @@ def _iframes(html: str, base: str) -> list[tuple[str, str]]:
 def _load_steps(rec: Path) -> list[_Step]:
     steps_file = rec / "steps.jsonl"
     if not steps_file.is_file():
-        raise ProposalError(f"{rec.name}: no steps.jsonl; a recording without steps cannot be split")
+        raise ProposalError(
+            f"{rec.name}: no steps.jsonl; a recording without steps cannot be split"
+        )
     out: list[_Step] = []
     for n, line in enumerate(steps_file.read_text(encoding="utf-8").splitlines()):
         if not line.strip():
@@ -295,7 +304,9 @@ def _load_steps(rec: Path) -> list[_Step]:
             first = str(data["frame"]).split(">>>")[0].strip()
             ident = first.split("#", 1)[1] if "#" in first else ""
             match = [o for i, o in cross if ident and i == ident]
-            step.frame_origin = (match or [cross[0][1]])[0] if (match or len(set(o for _, o in cross)) == 1) else ""
+            step.frame_origin = (
+                (match or [cross[0][1]])[0] if (match or len(set(o for _, o in cross)) == 1) else ""
+            )
         out.append(step)
     return out
 
@@ -437,7 +448,9 @@ class _Router:
         best = None
         for o in prefixed:
             p = o.path_prefix or ""
-            if (path == p or path.startswith(p + "/")) and (best is None or len(p) > len(best.path_prefix or "")):
+            if (path == p or path.startswith(p + "/")) and (
+                best is None or len(p) > len(best.path_prefix or "")
+            ):
                 best = o
         if best is not None:
             return best
@@ -478,7 +491,9 @@ def _flow_text(step: _Step) -> str:
     return f"{action} {sel}" if sel else action
 
 
-def apply(recording: Path, proposal: Proposal, root: Path, *, overwrite: bool = False) -> list[Path]:
+def apply(
+    recording: Path, proposal: Proposal, root: Path, *, overwrite: bool = False
+) -> list[Path]:
     """Write `root/evidence/<app>/<recording>/` for each included application, and the sequence
     file `root/evidence/_sequences/<recording>.flow.yaml`. Returns the recording folders."""
     rec, root = Path(recording), Path(root)
@@ -577,10 +592,16 @@ def _copy_screens(rec: Path, out: Path, old: int, new: int, shot: str) -> str | 
             (out / "screens").mkdir(exist_ok=True)
             shutil.copyfile(f, out / "screens" / f"{new:04d}.{f.name.split('.', 1)[1]}")
             found = True
-    return f"screens/{new:04d}.png" if found and (out / "screens" / f"{new:04d}.png").exists() else None
+    return (
+        f"screens/{new:04d}.png"
+        if found and (out / "screens" / f"{new:04d}.png").exists()
+        else None
+    )
 
 
-def _copy_docs(rec: Path, out: Path, entries: list[_Entry], ent_app: dict[int, str], app_id: str) -> None:
+def _copy_docs(
+    rec: Path, out: Path, entries: list[_Entry], ent_app: dict[int, str], app_id: str
+) -> None:
     index = rec / "docs" / "documents.json"
     if not index.is_file():
         return
@@ -594,7 +615,9 @@ def _copy_docs(rec: Path, out: Path, entries: list[_Entry], ent_app: dict[int, s
         url = str(d.get("url") or "")
         owner = url_app.get(url)
         if owner is None:
-            owner = ent_app.get(next((n for n, e in enumerate(entries) if e.origin == normalise_origin(url)), -1))
+            owner = ent_app.get(
+                next((n for n, e in enumerate(entries) if e.origin == normalise_origin(url)), -1)
+            )
         if owner == app_id:
             kept.append(d)
     if not kept:

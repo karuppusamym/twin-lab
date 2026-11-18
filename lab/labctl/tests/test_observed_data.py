@@ -223,8 +223,10 @@ def test_html_tables_and_record_pages_feed_the_profile(tmp_path, tables):
     )
     queue = ("<html><body><table id='q'><thead><tr><th>Case no</th><th>Status</th>"
              f"<th>Customer name</th></tr></thead><tbody>{rows}</tbody></table></body></html>")  # fmt: skip
-    page = ("<html><body><h1>Case <span id='caseNo'>C-1001</span></h1>"
-            "<span id='caseStatus'>OPEN</span></body></html>")
+    page = (
+        "<html><body><h1>Case <span id='caseNo'>C-1001</span></h1>"
+        "<span id='caseStatus'>OPEN</span></body></html>"
+    )
     har = {"log": {"entries": [
         _entry("GET", "http://app.test/cases", queue, 1, mime="text/html"),
         _entry("GET", "http://app.test/cases/C-1001", page, 2, mime="text/html"),
@@ -292,7 +294,9 @@ def test_generated_rows_follow_the_profile(tables, profile):
 
 def test_anchor_rows_exist_with_their_starting_state(tables, profile):
     report: dict = {}
-    rows = synthetic.generate(tables, 3, {"customer": 5, "cases": 2}, profile=profile, report=report)
+    rows = synthetic.generate(
+        tables, 3, {"customer": 5, "cases": 2}, profile=profile, report=report
+    )
     by_no = {r["case_no"]: r for r in rows["cases"]}
     assert len(rows["cases"]) == 3  # the count was raised to hold the anchors
     assert by_no["C-1001"]["status"] == "OPEN"
@@ -337,5 +341,7 @@ def test_observe_and_generate_from_observed(root):
 
 def test_generate_without_counts_or_profile_is_refused(root):
     schema = root / "apps" / "demo" / "db" / "schema.sql"
-    res = runner.invoke(app, ["generate", str(schema), "--seed", "1", "--out", str(root / "o.json")])
+    res = runner.invoke(
+        app, ["generate", str(schema), "--seed", "1", "--out", str(root / "o.json")]
+    )
     assert res.exit_code == 2

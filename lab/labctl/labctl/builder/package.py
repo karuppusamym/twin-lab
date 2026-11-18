@@ -265,7 +265,9 @@ def brief_inventory(brief: str, schema: str = "") -> dict[str, set[str]]:
 
 def _create_tables(sql: str) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
-    for m in re.finditer(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"\[\]`]+)\s*\(", sql, re.I):
+    for m in re.finditer(
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"\[\]`]+)\s*\(", sql, re.I
+    ):
         depth, i = 1, m.end()
         while i < len(sql) and depth:
             depth += {"(": 1, ")": -1}.get(sql[i], 0)
@@ -303,7 +305,11 @@ def _git_show(repo_root: Path, spec: str) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return done.stdout.decode("utf-8", "replace").replace("\r\n", "\n") if done.returncode == 0 else None
+    return (
+        done.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+        if done.returncode == 0
+        else None
+    )
 
 
 def _git_commits(repo_root: Path, rel: str) -> list[str]:
@@ -359,13 +365,21 @@ def previous_brief(
     snap = baseline_dir(repo_root, app_id, state_dir)
     if (snap / "BRIEF.md").is_file():
         text = (snap / "BRIEF.md").read_bytes().decode("utf-8", "replace")
-        schema = (snap / "schema.sql").read_text(encoding="utf-8") if (snap / "schema.sql").is_file() else ""
+        schema = (
+            (snap / "schema.sql").read_text(encoding="utf-8")
+            if (snap / "schema.sql").is_file()
+            else ""
+        )
         return text, schema, "the brief stored when the last build started"
     rel = f"apps/{app_id}/BRIEF.md"
     schema_rel = f"apps/{app_id}/db/schema.sql"
     head = _git_show(repo_root, f"HEAD:{rel}")
     if head is not None and head != now:
-        return head, _git_show(repo_root, f"HEAD:{schema_rel}") or "", "the brief at the last commit"
+        return (
+            head,
+            _git_show(repo_root, f"HEAD:{schema_rel}") or "",
+            "the brief at the last commit",
+        )
     commits = _git_commits(repo_root, rel)
     if len(commits) == 2:
         old = _git_show(repo_root, f"{commits[1]}:{rel}")
@@ -425,7 +439,9 @@ def whats_new(repo_root: Path, app_id: str, state_dir: Path | None = None) -> st
     head = f"Compared with {source}."
     if not lines and not removed:
         if old_brief.strip() == new_brief.strip():
-            return head + " The brief has not changed: only check that the existing app still passes."
+            return (
+                head + " The brief has not changed: only check that the existing app still passes."
+            )
         return (
             head + " No screen, element, route, table or column was added or removed; wording, "
             "rules or behaviour notes changed. Read the brief against the app and fix the "
@@ -461,9 +477,7 @@ def _engine_text(engine: str, db_var: str) -> str:
     )
 
 
-def prompt(
-    repo_root: Path, app_id: str, repo: str | None, state_dir: Path | None = None
-) -> str:
+def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | None = None) -> str:
     """The task text for the coding agent. Pasted unchanged by a person, or passed by a builder."""
     repo_root = Path(repo_root)
     _check_inputs(repo_root, app_id)
@@ -681,6 +695,7 @@ request, leave the work committed on your branch and say so.
 - If you cannot clone, push or open the pull request (for example GitHub access is missing),
   stop and say so; do not work around it with another repository.
 """
+
 
 def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None) -> Path:
     """Write `twinlab-<app>-<digest8>.zip` into `out_dir` and return its path.

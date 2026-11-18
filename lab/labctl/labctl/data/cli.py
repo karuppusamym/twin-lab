@@ -118,7 +118,8 @@ def generate(
         None, "--profile", help="Observed profile (YAML from `data observe`) that shapes the rows."
     ),
     from_observed: bool = typer.Option(
-        False, "--from-observed",
+        False,
+        "--from-observed",
         help="Use apps/<app>/db/observed-profile.yaml, the app being the schema's folder.",
     ),
 ) -> None:
@@ -165,9 +166,13 @@ def generate(
 
 @app.command()
 def observe(
-    app_id: str = typer.Argument(..., metavar="APP", help="App id: evidence/<app>/ holds the recordings."),
+    app_id: str = typer.Argument(
+        ..., metavar="APP", help="App id: evidence/<app>/ holds the recordings."
+    ),
     schema: Path = typer.Option(
-        None, "--schema", help="Schema (DDL) to match names against; default apps/<app>/db/schema.sql."
+        None,
+        "--schema",
+        help="Schema (DDL) to match names against; default apps/<app>/db/schema.sql.",
     ),
     out: Path = typer.Option(
         None, "--out", help="Profile to write; default apps/<app>/db/observed-profile.yaml."
@@ -192,7 +197,9 @@ def observe(
         typer.echo(f"cannot observe {app_id}: {exc}", err=True)
         raise typer.Exit(2) from exc
     if not profile["tables"] and not profile.get("anchors"):
-        typer.echo(f"{app_id}: no recordings under evidence/{app_id}/ held anything to profile", err=True)
+        typer.echo(
+            f"{app_id}: no recordings under evidence/{app_id}/ held anything to profile", err=True
+        )
     s = observed.summary(profile)
     typer.echo(f"wrote {out}")
     typer.echo(

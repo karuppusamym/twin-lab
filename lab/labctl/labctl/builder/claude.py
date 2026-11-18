@@ -162,7 +162,10 @@ class ClaudeBuilder:
         for i in range(1, 30):
             name = branch if i == 1 else f"{branch}-{i}"
             ref = f"refs/heads/{name}"
-            if _git(repo_root, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0:
+            if (
+                _git(repo_root, "rev-parse", "--verify", "--quiet", ref, check=False).returncode
+                == 0
+            ):
                 continue
             _git(repo_root, "worktree", "add", "-b", name, str(worktree), "HEAD")
             return name

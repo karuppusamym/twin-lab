@@ -79,7 +79,9 @@ def load_config(repo_root: Path, env: Mapping[str, str] | None = None) -> Builde
     return BuilderConfig(
         name=name,
         claude_executable=str(
-            pick("claude_executable", "TWINLAB_CLAUDE_EXECUTABLE", claude.get("executable"), "claude")
+            pick(
+                "claude_executable", "TWINLAB_CLAUDE_EXECUTABLE", claude.get("executable"), "claude"
+            )
         ),
         claude_model=str(model) if model else None,
         claude_args=tuple(str(a) for a in args),

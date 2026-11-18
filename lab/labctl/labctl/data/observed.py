@@ -74,7 +74,9 @@ IDENT = re.compile(r"^(?P<prefix>[A-Za-z]{1,4}[-_/]?)?(?P<digits>\d{2,12})$")
 ANCHOR_ID = re.compile(r"^[A-Z]{1,4}[-_]\d{2,8}$")
 AMOUNT_NAME = re.compile(r"amount|rate|total|price|fee|score|term|count|qty|quantity|ltv|percent|"
                          r"balance|cost|limit", re.IGNORECASE)  # fmt: skip
-CODE_SHAPED = re.compile(r"[A-Z0-9][A-Z0-9_./-]*")  # how a code reads in a column not named like one
+CODE_SHAPED = re.compile(
+    r"[A-Z0-9][A-Z0-9_./-]*"
+)  # how a code reads in a column not named like one
 PEOPLE = ("user", "customer", "person", "people", "employee", "contact", "client", "member",
           "staff", "agent", "patient", "student", "borrower", "owner", "account", "loan",
           "policy", "claim")  # fmt: skip
@@ -280,14 +282,19 @@ def classify_column(name: str, values: list[Any], personal_values: frozenset[str
         and all(is_vocab_value(v) for v in counts)
         and (CODE_NAME.search(col) is not None or all(CODE_SHAPED.fullmatch(v) for v in counts))
         and not any(v.lower() in personal_values for v in counts)
-        and (CODE_NAME.search(col) is not None or all(n >= 2 for n in counts.values())
-             or (len(strings) >= 2 and len(counts) < len(strings)))  # fmt: skip
+        and (
+            CODE_NAME.search(col) is not None
+            or all(n >= 2 for n in counts.values())
+            or (len(strings) >= 2 and len(counts) < len(strings))
+        )  # fmt: skip
         and not (len(counts) == len(strings) and len(strings) > 3)  # all different: identifiers
     )
     if closed:
         out["kind"] = "code"
         total = len(strings)
-        out["values"] = {v: round(n / total, 2) for v, n in sorted(counts.items(), key=lambda x: -x[1])}
+        out["values"] = {
+            v: round(n / total, 2) for v, n in sorted(counts.items(), key=lambda x: -x[1])
+        }
         out["case"] = _case(list(counts))
         return out
     if pattern is not None:
@@ -432,7 +439,9 @@ def _entity(path: str) -> str | None:
 class _Obs:
     """Raw observations, in memory only: entity -> column -> values."""
 
-    cols: dict[str, dict[str, list]] = field(default_factory=lambda: defaultdict(lambda: defaultdict(list)))
+    cols: dict[str, dict[str, list]] = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(list))
+    )
     rows: dict[str, int] = field(default_factory=dict)
     seen: set[str] = field(default_factory=set)
     pairs: list[tuple[str, list[tuple[str, str]]]] = field(default_factory=list)
@@ -441,7 +450,9 @@ class _Obs:
     declared: dict[str, dict[str, list[str]]] = field(default_factory=lambda: defaultdict(dict))
 
     def add_row(self, entity: str, row: dict[str, Any], list_len: int | None = None) -> None:
-        digest = entity + hashlib.sha1(json.dumps(row, sort_keys=True, default=str).encode()).hexdigest()
+        digest = (
+            entity + hashlib.sha1(json.dumps(row, sort_keys=True, default=str).encode()).hexdigest()
+        )
         if digest in self.seen:
             return
         self.seen.add(digest)
@@ -541,7 +552,14 @@ def _read_model(obs: _Obs, root: Path, app: str) -> None:
         ent = _entity(str(screen.get("path") or "")) if screen.get("path") else None
         for el in screen.get("elements") or []:
             if el.get("tag") == "select" and el.get("options"):
-                col = snake(re.sub(r"(filter|select|dropdown|list)$", "", snake(el.get("name") or el.get("id") or ""), flags=re.I))
+                col = snake(
+                    re.sub(
+                        r"(filter|select|dropdown|list)$",
+                        "",
+                        snake(el.get("name") or el.get("id") or ""),
+                        flags=re.I,
+                    )
+                )
                 if ent and col and CODE_NAME.search(col):
                     obs.declared[ent].setdefault(col, [str(o) for o in el["options"] if o])
 
@@ -557,9 +575,17 @@ def _resolve_table(entity: str, columns: set[str], tables: list) -> Any | None:
     for t in tables if entity else []:
         if singular(t.name) == target:
             return t
-    near = [t for t in tables if entity and len(target) >= 4 and (
-        singular(t.name).endswith("_" + target) or singular(t.name).startswith(target + "_")
-        or key(singular(t.name)).endswith(target))]  # `reviews` -> `qc_reviews`; fmt: skip
+    near = [
+        t
+        for t in tables
+        if entity
+        and len(target) >= 4
+        and (
+            singular(t.name).endswith("_" + target)
+            or singular(t.name).startswith(target + "_")
+            or key(singular(t.name)).endswith(target)
+        )
+    ]  # `reviews` -> `qc_reviews`; fmt: skip
     if len(near) == 1:
         return near[0]
     keys = {key(c) for c in columns}
@@ -577,7 +603,7 @@ def _resolve_column(entity: str, col: str, table: Any | None) -> str:
     if key(col) in names:
         return names[key(col)]
     prefix = singular(entity)
-    stripped = key(col)[len(prefix):] if key(col).startswith(prefix) else None
+    stripped = key(col)[len(prefix) :] if key(col).startswith(prefix) else None
     if stripped and stripped in names:
         return names[stripped]
     return col
@@ -601,7 +627,7 @@ def _assign_pair(name: str, entity: str, schema: list) -> tuple[Any, str] | None
     """The schema table and column a label/value pair of a record's page belongs to."""
     k = key(name)
     own = next((t for t in schema if singular(t.name) == singular(entity)), None)
-    for t in ([own] if own else []):
+    for t in [own] if own else []:
         for c in t.columns:
             if key(c.name) == k:
                 return t, c.name
@@ -609,7 +635,7 @@ def _assign_pair(name: str, entity: str, schema: list) -> tuple[Any, str] | None
         s = singular(t.name)
         if k.startswith(s):
             for c in t.columns:
-                if key(c.name) == k[len(s):]:
+                if key(c.name) == k[len(s) :]:
                     return t, c.name
     hits = [(t, c.name) for t in schema for c in t.columns if key(c.name) == k]
     return hits[0] if len(hits) == 1 else None
@@ -642,8 +668,12 @@ def from_observations(app: str, obs: _Obs, schema: list) -> dict[str, Any]:
     entities = set(obs.cols) | set(obs.declared)
     # values of personal columns anywhere: a vocabulary entry equal to one of them is dropped
     personal_values = frozenset(
-        str(v).lower() for ent in obs.cols.values() for c, vs in ent.items()
-        if PERSONAL.search(c) for v in vs if v is not None  # fmt: skip
+        str(v).lower()
+        for ent in obs.cols.values()
+        for c, vs in ent.items()
+        if PERSONAL.search(c)
+        for v in vs
+        if v is not None  # fmt: skip
     )
     profile_tables: dict[str, Any] = {}
     entity_table: dict[str, str] = {}
@@ -657,7 +687,10 @@ def from_observations(app: str, obs: _Obs, schema: list) -> dict[str, Any]:
         for col, values in cols.items():
             target = _resolve_column(entity, col, table)
             info = classify_column(col, values, personal_values)
-            if target in entry["columns"] and entry["columns"][target].get("seen", 0) >= info["seen"]:
+            if (
+                target in entry["columns"]
+                and entry["columns"][target].get("seen", 0) >= info["seen"]
+            ):
                 continue
             entry["columns"][target] = info
             raw.setdefault(name, {})[target] = values
@@ -693,13 +726,15 @@ def from_observations(app: str, obs: _Obs, schema: list) -> dict[str, Any]:
                 for c, i in e["columns"].items() if i.get("values")}  # fmt: skip
     for a in anchors:
         if a["key"].get("id"):
-            verbatim.setdefault(f"{a['table']}.{a['key']['column']} (anchor)", []).append(a["key"]["id"])
+            verbatim.setdefault(f"{a['table']}.{a['key']['column']} (anchor)", []).append(
+                a["key"]["id"]
+            )
     out: dict[str, Any] = {
         "version": VERSION,
         "app": app,
         "from": obs.sources,
         "review": "Read `verbatim` before use: it is every value copied from the recordings. "
-                  "Everything else in this file is shape only. Delete a line to drop it.",
+        "Everything else in this file is shape only. Delete a line to drop it.",
         "verbatim": dict(sorted(verbatim.items())),
         "tables": dict(sorted(profile_tables.items())),
     }
@@ -719,8 +754,12 @@ def _anchors(obs: _Obs, profile_tables: dict, entity_table: dict, schema: list) 
         if name is None:
             table = _resolve_table(entity, {snake(p[0]) for p in d["pairs"]}, schema)
             if table is None and schema:  # the table most of the page's labels belong to
-                hits = Counter(h[0].name for p in d["pairs"] if (h := _assign_pair(p[0], entity, schema)))
-                table = next((t for t in schema if hits and t.name == hits.most_common(1)[0][0]), None)
+                hits = Counter(
+                    h[0].name for p in d["pairs"] if (h := _assign_pair(p[0], entity, schema))
+                )
+                table = next(
+                    (t for t in schema if hits and t.name == hits.most_common(1)[0][0]), None
+                )
             name = table.name if table is not None else entity
         if (name, ident) in done:
             continue
@@ -771,19 +810,23 @@ def check(profile: dict[str, Any]) -> None:
         for c, info in (entry.get("columns") or {}).items():
             if info.get("kind") != "code" and (info.get("values") or "example" in info):
                 bad.append(f"{t}.{c}: values on a column that is not a code list")
-            for v in (info.get("values") or {}):
+            for v in info.get("values") or {}:
                 if not is_vocab_value(v) or PERSONAL.search(c):
                     bad.append(f"{t}.{c}: {v!r} may not be kept verbatim")
     for a in profile.get("anchors") or []:
         ident = (a.get("key") or {}).get("id")
-        if ident is not None and not keep_anchor_id(a["key"].get("column", ""), a.get("table", ""), ident):
+        if ident is not None and not keep_anchor_id(
+            a["key"].get("column", ""), a.get("table", ""), ident
+        ):
             bad.append(f"anchor {a.get('table')}: identifier {ident!r} may not be kept verbatim")
     if bad:
         raise ProfileError("profile refused: " + "; ".join(bad[:8]))
 
 
 def summary(profile: dict[str, Any]) -> dict[str, int]:
-    cols = [i for e in (profile.get("tables") or {}).values() for i in (e.get("columns") or {}).values()]
+    cols = [
+        i for e in (profile.get("tables") or {}).values() for i in (e.get("columns") or {}).values()
+    ]
     kept = sum(len(i.get("values") or {}) for i in cols)
     anchors = profile.get("anchors") or []
     return {

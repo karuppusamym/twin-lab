@@ -50,19 +50,24 @@ Front end: **Angular 17** with PrimeNG. Backend: ASP.NET Core 8; database: sqlse
 
 ## Out of scope
 """
-BRIEF_V2 = BRIEF_V1.replace(
-    "| `input#username` | type | bot | observed | yes |\n",
-    "| `input#username` | type | bot | observed | yes |\n| `button#btnSearch` | click | bot | observed | yes |\n",
-).replace(
-    "**/login** (login, observed)\n",
-    "**/login** (login, observed)\n",
-).replace(
-    "### API routes",
-    "**/loans** (list, observed)\n\n| Element | Used for | By | Basis | In evidence |\n|---|---|---|---|---|\n"
-    "| `table#loanGrid` | - |  | observed | yes |\n\n### API routes",
-).replace(
-    "| `GET /login` | observed | - | serves screen /login |\n",
-    "| `GET /login` | observed | - | serves screen /login |\n| `GET /api/loans` | observed | - | x |\n",
+BRIEF_V2 = (
+    BRIEF_V1.replace(
+        "| `input#username` | type | bot | observed | yes |\n",
+        "| `input#username` | type | bot | observed | yes |\n| `button#btnSearch` | click | bot | observed | yes |\n",
+    )
+    .replace(
+        "**/login** (login, observed)\n",
+        "**/login** (login, observed)\n",
+    )
+    .replace(
+        "### API routes",
+        "**/loans** (list, observed)\n\n| Element | Used for | By | Basis | In evidence |\n|---|---|---|---|---|\n"
+        "| `table#loanGrid` | - |  | observed | yes |\n\n### API routes",
+    )
+    .replace(
+        "| `GET /login` | observed | - | serves screen /login |\n",
+        "| `GET /login` | observed | - | serves screen /login |\n| `GET /api/loans` | observed | - | x |\n",
+    )
 )
 SCHEMA_V1 = "CREATE TABLE users (id integer PRIMARY KEY, name varchar(20));\n"
 SCHEMA_V2 = (
@@ -129,7 +134,7 @@ def test_task_is_neutral_and_ordered(tmp_path):
     assert positions == sorted(positions)
     assert "Angular 17" in text  # the brief's stack section is quoted
     for needle in [
-        "same technology the brief's \"Stack to pin\"",
+        'same technology the brief\'s "Stack to pin"',
         "every recorded selector, element id, class",
         "iframe and shadow-DOM",
         "Only the **tables and data**",
