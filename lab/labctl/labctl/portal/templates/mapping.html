@@ -13,11 +13,12 @@
         <td><a href="/automations/{{ a.id }}">{{ a.id }}</a></td>
         {% for app in apps %}
           <td>{% if app in a.apps() %}
-            {% set failed = (v.items if v else []) | selectattr("app", "equalto", app) | selectattr("status", "equalto", "failed") | list %}
+            {% set failed = (v['items'] if v else []) | selectattr("app", "equalto", app) | selectattr("status", "equalto", "failed") | list %}
             {% if not v %}<span class="pill">not checked</span>{% elif failed %}<span class="pill err">{{ failed | length }} missing</span>{% else %}<span class="pill ok">ok</span>{% endif %}
           {% else %}-{% endif %}</td>
         {% endfor %}
-        <td>{% if v %}<span class="pill {{ 'ok' if v.verdict == 'READY' else 'err' }}">{{ v.verdict }}</span>{% else %}<span class="pill">-</span>{% endif %}</td>
+        {% set f = fresh.get(a.id) %}
+        <td>{% if f and f.state != 'none' %}<span class="pill sentence {{ f.css }}">{{ f.text }}</span>{% else %}<span class="pill">not checked</span>{% endif %}</td>
         <td class="small">{% if v %}{% for k, n in v.checked_basis.items() %}{{ n }} {{ k }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</td>
       </tr>
     {% else %}

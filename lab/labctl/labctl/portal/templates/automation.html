@@ -10,12 +10,14 @@
   <div class="card">
     <h2>Readiness</h2>
     <p class="small muted">Replays the bot's screen steps in a browser against the running demo app, and checks every route and table it uses.</p>
+    <p id="readiness-now"><span class="pill sentence {{ freshness.css }}">{{ freshness.text }}</span></p>
+    {% if conformance %}<p class="small muted">Recent checks:</p>{% endif %}
     {% for j in conformance %}
       <p><a href="/jobs/{{ j.id }}">{{ j.created }}</a>
         {% if j.result and j.result.verdict %}<span class="pill {{ 'ok' if j.result.verdict == 'READY' else 'err' }}">{{ j.result.verdict }}</span>
         {% else %}<span class="pill {{ 'err' if j.status == 'failed' else 'warn' }}">{{ j.status }}</span>{% endif %}</p>
-    {% else %}<p class="muted">Not checked yet.</p>{% endfor %}
-    <form method="post" action="/automations/{{ a.id }}/conformance"><button type="submit">Check readiness now</button></form>
+    {% endfor %}
+    <form method="post" action="/automations/{{ a.id }}/conformance"><button type="submit">{{ "Check readiness again" if freshness.state in ("stale", "unconfirmed", "legacy") else "Check readiness now" }}</button></form>
   </div>
   <div class="card">
     <h2>Run it against the lab</h2>
@@ -73,6 +75,8 @@
 
 <div class="card" id="runs">
   <h2>Robot runs (logs from production)</h2>
+  <details class="more" id="more-runs" {{ 'open' if botruns }}>
+  <summary>More: upload a robot log, calibrate a slowdown condition from it, compare with production (parity)</summary>
   <p class="small muted">Upload the bot's own log (an Orchestrator job log export, or NLog JSON lines) to see each run step by step with its timings. From those timings Twin Lab can make a condition that slows the lab the way production was slow, and compare a production run with a lab session of the same bot (parity). Logs stay on this machine (<code>.lab-state/botruns</code>); fields the bot marks Private are masked when read.</p>
   <form method="post" action="/automations/{{ a.id }}/botruns" enctype="multipart/form-data" class="grid">
     <label>Robot log <input type="file" name="log" required></label>
@@ -109,5 +113,6 @@
     <div><button type="submit" class="secondary">Compare</button></div>
   </form>
   {% endif %}
+  </details>
 </div>
 {% endblock %}

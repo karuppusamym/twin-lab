@@ -20,8 +20,8 @@
           {% if a.analysis.reviewed_by %}<span class="pill ok">reviewed</span>{% endif %}
         </td>
         <td>
-          {% set v = verdicts.get(a.id) %}
-          {% if v %}<span class="pill {{ 'ok' if v.verdict == 'READY' else 'err' }}">{{ v.verdict }}</span>{% else %}<span class="pill">not checked</span>{% endif %}
+          {% set f = fresh.get(a.id) %}
+          {% if f and f.state != 'none' %}<span class="pill sentence {{ f.css }}">{{ f.text }}</span>{% else %}<span class="pill">not checked</span>{% endif %}
         </td>
       </tr>
       {% else %}

@@ -46,6 +46,18 @@ verification contracts are not redesigned.
    are useful after a first successful rehearsal. Prioritize the guided path before adding more
    top-level features or another runner.
 
+## Status of the remaining decisions (17 November 2026, later the same day)
+
+1. Business success per automation: the mechanism is built (`outcome:` acceptance cases, judged
+   apart from `expects:`). The reference automation declares one case. Cases for real
+   automations still need the process owner.
+2. Fidelity with real evidence: open. It needs approved UAT recordings, schema and inputs.
+3. Readiness freshness: done. A result names what it was checked against and shows when it is
+   out of date.
+4. Advanced controls secondary: done on the app page, start page and automation page.
+
+The dashboard point under "Operational limits" is done: concurrent reads with a short cache.
+
 ## Operational limits
 
 Live baseline/session progress is conservative when the lab is stopped or unreachable: it does
@@ -70,3 +82,11 @@ Validation results:
 
 The full run reported two dependency deprecation warnings. Containers and OpenShift were not
 rebuilt or deployed because this change does not modify a demo app or its image.
+
+## Public-web replication follow-up
+
+The TodoMVC trial exposed capture and replay gaps despite 13 passing paired checks. See
+[Replication gaps and fix plan](replication-gaps.md) for priorities, acceptance criteria and the
+precise scope of a fully verified replica. Outcome and readiness-freshness code has since appeared
+in the working tree; the earlier remaining-decisions section is historical, not a current claim
+that those implementations are absent.

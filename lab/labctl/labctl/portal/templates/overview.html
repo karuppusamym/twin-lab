@@ -15,10 +15,11 @@
         <td class="small">{{ a.automations | join(", ") or "flows only" }}</td>
         <td>
           {% if a.lab is none %}<span class="pill">-</span>
+          {% elif a.unreachable %}<span class="pill err" title="{{ a.lab.error or 'its lab agent did not answer' }}">lab not reachable</span>
           {% elif a.lab.running %}<span class="pill ok">running</span>
           {% else %}<span class="pill">stopped</span>{% endif %}
         </td>
-        <td>{% if a.automations %}{{ a.ready | length }} / {{ a.automations | length }}{% else %}-{% endif %}</td>
+        <td>{% if a.automations %}{{ a.ready | length }} / {{ a.automations | length }}{% if a.out_of_date %}<br><span class="small muted" title="Their READY no longer holds or cannot be confirmed: {{ a.out_of_date | join(', ') }}">{{ a.out_of_date | length }} out of date: check again</span>{% endif %}{% else %}-{% endif %}</td>
       </tr>
     {% else %}
       <tr><td colspan="6" class="muted">No app is needed yet. Start by <a href="/automations">registering a bot</a> or <a href="/flows">writing a flow</a>.</td></tr>

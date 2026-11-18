@@ -13,9 +13,14 @@ report also says how much of what was checked is `observed` rather than only `de
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
+import subprocess
 import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -44,6 +49,7 @@ class Report:
     verdict: str = "READY"
     items: list[Item] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    fingerprint: dict | None = None  # what this check was made against (see `fingerprint`)
 
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -66,6 +72,7 @@ class Report:
             "checked_basis": self.basis_counts(),
             "errors": self.errors,
             "items": [asdict(i) for i in self.items],
+            "fingerprint": self.fingerprint,
         }
 
 
@@ -386,14 +393,22 @@ def _reset(root: Path, apps: list[str], report: Report, when: str) -> None:
             report.errors.append(f"{app_id}: data not reset {when} the check ({_short(exc)})")
 
 
-def _app_changed_at(root: Path, app_id: str) -> float:
-    """When the app's own files last changed (its build), to tell a replay made before it."""
+def _app_changed_at(root: Path, app_id: str, ignore: frozenset[str] = frozenset()) -> float:
+    """When the app's own files last changed (its build), to tell a replay made before it.
+    `ignore` names files (relative to the app folder, with `/`) that are left out."""
     folder = root / "apps" / app_id
     skip = {"node_modules", ".venv", "__pycache__", "dist", "build"}
     newest = 0.0
-    for path in folder.rglob("*"):
-        if path.is_file() and not skip.intersection(path.relative_to(folder).parts):
-            newest = max(newest, path.stat().st_mtime)
+    for here, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for name in files:
+            path = Path(here) / name
+            if ignore and path.relative_to(folder).as_posix() in ignore:
+                continue
+            try:
+                newest = max(newest, path.stat().st_mtime)
+            except OSError:
+                continue
     return newest
 
 
@@ -452,6 +467,258 @@ def _check_fidelity(root: Path, automation: Automation, report: Report, require:
             )
 
 
+# --- what a check was made against, and whether that still holds ------------------------------------
+
+FINGERPRINT_VERSION = 1
+TOLERANCE_S = 2  # file times are whole seconds on some systems
+# Files that have their own digest (or are not the build): a change there is not "the app was rebuilt".
+_NOT_THE_BUILD = frozenset({"app.yaml", "BRIEF.md", "db/schema.sql", "BUILD-NOTES.md"})
+
+
+def _digest(data: bytes | None) -> str | None:
+    return hashlib.sha256(data).hexdigest()[:12] if data is not None else None
+
+
+def _file_digest(path: Path) -> str | None:
+    try:
+        return _digest(path.read_bytes())
+    except OSError:
+        return None
+
+
+def app_facts(root: Path, app_id: str) -> dict:
+    """What can be read from the repository about one app, with no lab and no Docker."""
+    from labctl import dbservers
+
+    folder = root / "apps" / app_id
+    try:
+        data = yaml.safe_load((folder / "app.yaml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        data = None
+    data = data if isinstance(data, dict) else {}
+    lab = data.get("lab") if isinstance(data.get("lab"), dict) else {}
+    rest = {k: v for k, v in data.items() if k != "lab"}  # ports and sign-in are not the app
+    copies = data.get("copies") if isinstance(data.get("copies"), dict) else {}
+    return {
+        "app_yaml": _digest(json.dumps(rest, sort_keys=True, default=str).encode())
+        if data
+        else None,
+        "brief": _file_digest(folder / "BRIEF.md"),
+        "schema": _file_digest(folder / "db" / "schema.sql"),
+        "copies_ref": copies.get("ref"),
+        "changed_at": _app_changed_at(root, app_id, _NOT_THE_BUILD),
+        "database": dbservers.choice(lab.get("database")),
+    }
+
+
+def image_id(app_id: str) -> str | None:
+    """The id of the built image, from Docker. Slow-ish: for a check (a job), never a page load."""
+    try:
+        out = subprocess.run(
+            ["docker", "image", "inspect", f"twinlab/{app_id}:dev", "--format", "{{.Id}}"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    text = out.stdout.strip()
+    return text.removeprefix("sha256:")[:12] if out.returncode == 0 and text else None
+
+
+def baseline_of(info: dict | None) -> dict | None:
+    """The lab's current data baseline from its agent metadata: `{"id", "loaded_at"}` or None."""
+    base = (info or {}).get("baseline")
+    if not isinstance(base, dict) or not base:
+        return None
+    return {"id": base.get("id"), "loaded_at": base.get("loaded_at")}
+
+
+def automation_digest(root: Path, automation_id: str) -> str | None:
+    return _file_digest(root / "automations" / automation_id / "automation.yaml")
+
+
+def fingerprint(root: Path, automation: Automation, labs: dict | None = None) -> dict:
+    """What a check is made against: per app its description, brief, schema, build time, image,
+    database choice and the lab's data baseline; the automation's own file; and when."""
+    from labctl import lab as lab_mod
+
+    labs = labs or {}
+    apps: dict[str, dict] = {}
+    for app_id in automation.apps():
+        lab_id = labs.get(app_id, app_id)
+        entry = {**app_facts(root, app_id), "lab": lab_id, "image": image_id(app_id)}
+        entry["baseline"], entry["baseline_read"] = None, False
+        try:
+            agent = lab_mod.agent(root, lab_id)
+            if getattr(agent, "http", None) is not None:
+                agent.http.timeout = 5
+            entry["baseline"], entry["baseline_read"] = baseline_of(agent.info()), True
+        except Exception:  # noqa: BLE001 - a check made without a lab says so, it does not fail
+            pass
+        apps[app_id] = entry
+    return {
+        "version": FINGERPRINT_VERSION,
+        "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "automation": {"id": automation.id, "digest": automation_digest(root, automation.id)},
+        "apps": apps,
+    }
+
+
+def _when(stamp: str | None) -> str:
+    try:
+        return datetime.fromisoformat(str(stamp)).astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    except (TypeError, ValueError):
+        return str(stamp or "an unknown time")
+
+
+def _join(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+@dataclass
+class Freshness:
+    """Is a saved check still true of what exists now?
+
+    state: `none` (never checked), `legacy` (saved before this was tracked), `current`, `stale`
+    (something changed: `reasons` names it) or `unconfirmed` (the lab cannot be read, so the data
+    baseline cannot be compared). Only READY and `current` counts as ready."""
+
+    state: str
+    verdict: str | None = None
+    checked_at: str | None = None
+    reasons: list[str] = field(default_factory=list)
+
+    @property
+    def ready(self) -> bool:
+        return self.verdict == "READY" and self.state == "current"
+
+    @property
+    def needs_recheck(self) -> bool:
+        """A READY that cannot be relied on: out of date, unconfirmed or from before tracking."""
+        return self.verdict == "READY" and self.state in ("stale", "unconfirmed", "legacy")
+
+    @property
+    def css(self) -> str:
+        if self.state == "none":
+            return ""
+        if self.verdict != "READY":
+            return "err"
+        return "ok" if self.state == "current" else "warn"
+
+    @property
+    def text(self) -> str:
+        v, when = self.verdict, _when(self.checked_at)
+        if self.state == "none":
+            return "not checked"
+        if self.state == "legacy":
+            return "checked before freshness was tracked — check again"
+        if self.state == "stale":
+            return f"{v}, but out of date: {_join(self.reasons)} since {when} — check again"
+        if self.state == "unconfirmed":
+            return (
+                f"{v}, checked {when}; whether it is still current cannot be confirmed "
+                "(the lab is stopped or not reachable) — check again when it runs"
+            )
+        return f"{v}, checked {when}, still current"
+
+    @property
+    def reason(self) -> str:
+        """A few words for a next-step hint."""
+        if self.state == "stale":
+            return _join(self.reasons)
+        if self.state == "unconfirmed":
+            return "the lab cannot be read to confirm it is current"
+        if self.state == "legacy":
+            return "it was checked before freshness was tracked"
+        return ""
+
+
+def assess(
+    root: Path,
+    result: dict | None,
+    automation: Automation,
+    baselines: dict[str, dict | None],
+    facts=app_facts,
+    images: dict[str, str | None] | None = None,
+) -> Freshness:
+    """Compare a saved check result with what exists now. `baselines` maps app id to the lab's
+    current baseline (`{"id", "loaded_at"}`, or None when it has none); an app missing from it
+    is one whose lab could not be read. `facts` and `images` may come from a cache."""
+    if not result or not result.get("verdict"):
+        return Freshness("none")
+    verdict, saved = result["verdict"], result.get("fingerprint")
+    if not isinstance(saved, dict):
+        return Freshness("legacy", verdict)
+    reasons: list[str] = []
+    unknown = False
+    if (saved.get("automation") or {}).get("digest") != automation_digest(root, automation.id):
+        reasons.append("the automation changed")
+    saved_apps = saved.get("apps") or {}
+    many = len(saved_apps) > 1
+    for app_id, then in saved_apps.items():
+        name = f"the app {app_id}" if many else "the app"
+        now = facts(root, app_id)
+        described = [
+            label
+            for key, label in (
+                ("app_yaml", "description"),
+                ("brief", "brief"),
+                ("schema", "schema"),
+            )
+            if then.get(key) != now.get(key)
+        ]
+        if described:
+            reasons.append(f"{name}'s {' and '.join(described)} changed")
+        image = (images or {}).get(app_id)
+        newer = (now.get("changed_at") or 0) > (then.get("changed_at") or 0) + TOLERANCE_S
+        if (image and then.get("image") and image != then["image"]) or (newer and not described):
+            reasons.append(f"{name} was rebuilt")
+        if then.get("database") != now.get("database"):
+            reasons.append(f"the database choice of {app_id} changed")
+        if then.get("lab", app_id) == app_id and then.get("baseline_read"):
+            if app_id not in baselines:
+                unknown = True
+            elif (then.get("baseline") or {}).get("id") != (baselines[app_id] or {}).get("id"):
+                reasons.append(
+                    f"the data baseline of {app_id} changed"
+                    if many
+                    else "the data baseline changed"
+                )
+    at = saved.get("checked_at")
+    if reasons:
+        return Freshness("stale", verdict, at, reasons)
+    return Freshness("unconfirmed" if unknown else "current", verdict, at)
+
+
+def describe(fp: dict | None) -> str:
+    """One line for `labctl conformance`: what the check was made against."""
+    if not fp:
+        return "Checked against: nothing recorded"
+    parts = []
+    for app_id, a in (fp.get("apps") or {}).items():
+        base = a.get("baseline")
+        changed = (
+            _when(datetime.fromtimestamp(a["changed_at"], UTC).isoformat())
+            if a.get("changed_at")
+            else None
+        )
+        bits = [
+            f"app files changed {changed}" if changed else "no app files",
+            f"brief {a.get('brief') or 'none'}",
+            f"schema {a.get('schema') or 'none'}",
+            f"database {a.get('database')}",
+            f"image {a['image']}" if a.get("image") else "image unknown",
+            (f"baseline {base['id']}" if base else "no baseline")
+            if a.get("baseline_read")
+            else "baseline unknown (lab not read)",
+        ]
+        parts.append(f"{a.get('lab', app_id)}: " + ", ".join(bits))
+    digest = (fp.get("automation") or {}).get("digest") or "none"
+    return (
+        f"Checked against: {'; '.join(parts) or 'no app'}; automation.yaml {digest}; "
+        f"at {_when(fp.get('checked_at'))}"
+    )
+
+
 def check(
     root: Path,
     automation: Automation,
@@ -475,6 +742,7 @@ def check(
     except bnd.BindingError as exc:
         report.verdict = "BLOCKED"
         report.errors.append(str(exc))
+        report.fingerprint = fingerprint(root, automation, labs)
         return report
     basis_by_app = {app_id: _model_basis(root, app_id) for app_id in b.apps}
     for app_id in b.apps:  # readiness is about what exists, not speed: say when a slowdown is on
@@ -505,6 +773,7 @@ def check(
         if reset:
             _reset(root, lab_ids, report, "after")
     _check_fidelity(root, automation, report, require_fidelity)
+    report.fingerprint = fingerprint(root, automation, labs)  # after the reset: the data it ends on
     if any(i.status == "failed" for i in report.items) or automation.analysis.gaps:
         report.verdict = "BLOCKED"
     if any(i.kind == "screen" and i.status == "failed" for i in report.items):
@@ -526,6 +795,7 @@ def render(report: Report) -> str:
     for error in report.errors:
         lines.append(f"  NOTE {error}")
     counts = report.counts()
+    lines.append("  " + describe(report.fingerprint))
     lines.append(
         "  "
         + ", ".join(f"{v} {k}" for k, v in counts.items())

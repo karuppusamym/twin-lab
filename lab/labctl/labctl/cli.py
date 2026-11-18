@@ -428,6 +428,7 @@ def e2e(
     inputs: Path = typer.Option(
         None, "--inputs", help="Bot runs, JSON object or list (default: e2e-inputs.json)."
     ),
+    case: str = typer.Option(None, "--case", help="Outcome case to judge (default: the first)."),
 ) -> None:
     """End to end on a lab copy: contracts, lab, copy, readiness, bot run (session, verdict,
     parity), fidelity replay, cleanup. Writes report.md; exit 1 unless every stage passed."""
@@ -438,7 +439,7 @@ def e2e(
         data = json.loads(inputs.read_text(encoding="utf-8-sig"))
         runs = data if isinstance(data, list) else [data]
     result = e2e_mod.run(_root(), automation_id, condition, golden, not no_build, keep, out,
-                         not headed, say=lambda m: typer.echo(m, err=True), inputs=runs)  # fmt: skip
+                         not headed, say=lambda m: typer.echo(m, err=True), inputs=runs, case=case)  # fmt: skip
     typer.echo(Path(result.out, "report.md").read_text(encoding="utf-8"))
     typer.echo(f"report: {Path(result.out, 'report.md')}")
     if result.status != "PASS":
@@ -477,21 +478,30 @@ def session_verdict(
     app_id: str,
     session_id: str,
     automation: str = typer.Option(None, "--automation", help="Judge against this automation."),
+    case: str = typer.Option(None, "--case", help="Outcome case to judge (default: the first)."),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """PASS when every row change is one the automation expects; FAIL otherwise (exit 1)."""
+    """PASS when every row change is one the automation expects; FAIL otherwise (exit 1). Also
+    reports whether the declared business outcome was met (NOT_MET exits 1, too)."""
+    from labctl import outcome as outcome_mod
     from labctl import verdict as verdict_mod
 
     v, _, auto = _lab_call(lambda: verdict_mod.for_session(_root(), app_id, session_id, automation))
+    oc, _ = _lab_call(
+        lambda: outcome_mod.for_session(_root(), app_id, session_id, automation, case)
+    )
     if as_json:
-        typer.echo(json.dumps({"automation": auto, **v.to_dict()}, indent=2))
+        typer.echo(
+            json.dumps({"automation": auto, **v.to_dict(), "outcome": oc.to_dict()}, indent=2)
+        )
     else:
         typer.echo(f"{v.status}  {session_id}  automation {auto or '-'}  {v.checked} change(s)")
         for reason in v.reasons:
             typer.echo(f"  {reason}")
         for c in v.unexpected[: verdict_mod.SHOWN]:
             typer.echo(f"  {c['table']} {c['op']} {c['key']}: {c['why']}")
-    if v.status == verdict_mod.FAIL:
+        typer.echo(f"Outcome: {oc.summary()}")
+    if v.status == verdict_mod.FAIL or oc.status == outcome_mod.NOT_MET:
         raise typer.Exit(1)
 
 
@@ -584,6 +594,7 @@ def harness_run(
         False, "--copy", help="Run on a copy of the lab made for the run, dropped afterwards."
     ),
     keep_copy: bool = typer.Option(False, "--keep-copy", help="With --copy: keep the copy."),
+    case: str = typer.Option(None, "--case", help="Outcome case to judge (default: the first)."),
 ) -> None:
     """Reset, apply a condition, record a session around the harness bot, import its robot log,
     judge the row changes and (with --golden) check parity. With --repeat, also check that
@@ -600,7 +611,7 @@ def harness_run(
             where = (out / f"run-{n + 1}") if (out and repeat > 1) else out
             results.append(harness.run_chain(_root(), automation_id, runs, condition,
                                              not no_reset, golden, where, not headed,
-                                             copy, keep_copy))  # fmt: skip
+                                             copy, keep_copy, case=case))  # fmt: skip
     except (harness.HarnessError, lab_mod.LabError, BindingError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc

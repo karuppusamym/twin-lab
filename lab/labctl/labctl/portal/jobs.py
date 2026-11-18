@@ -78,6 +78,9 @@ class JobRunner:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.lock = threading.Lock()
+        # Called with (kind, subject) after a job ends, however it ended: the portal uses it to
+        # forget what it had read from a lab that the job may have changed.
+        self.on_done: Callable[[str, str | None], None] | None = None
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="twinlab-job")
         # Jobs that wait on a person (a recording window) get their own worker, so they can
         # never fill the pool and leave Start, Brief and Conformance queued.
@@ -131,6 +134,11 @@ class JobRunner:
                 log.write(f"\nFAILED: {exc}\n")
                 log.write(traceback.format_exc()[-4000:])
                 self._set(job_id, status="failed", result=json.dumps({"error": str(exc)}))
+            if self.on_done is not None:
+                try:
+                    self.on_done(kind, subject)
+                except Exception:  # noqa: BLE001 - a listener never fails a finished job
+                    pass
 
         (self.interactive if kind in INTERACTIVE else self.pool).submit(run)
         return job_id

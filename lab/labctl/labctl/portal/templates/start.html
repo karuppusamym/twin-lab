@@ -14,16 +14,6 @@
 </form>
 {% endif %}
 
-<div class="flow" aria-label="How it works">
-  <div class="flowbox"><b>1. What the bots need</b><span>Register each bot. Its code says which screens, fields, APIs and tables it uses.</span></div>
-  <div class="flowarrow" aria-hidden="true">→</div>
-  <div class="flowbox"><b>2. What the real app looks like</b><span>Record the flow once in the real app, add the database schema.</span></div>
-  <div class="flowarrow" aria-hidden="true">→</div>
-  <div class="flowbox"><b>3. A copy is built</b><span>Devin builds a demo app from the brief and opens a pull request.</span></div>
-  <div class="flowarrow" aria-hidden="true">→</div>
-  <div class="flowbox"><b>4. Test the bots</b><span>Run bots from your existing tools against the lab. Review changes and confirm the intended outcome.</span></div>
-</div>
-
 {% if next %}
 <div class="card nextcard">
   <div class="nexthead">Your next step</div>
@@ -47,8 +37,21 @@
     </li>
     {% endfor %}
   </ol>
+  {% if readiness %}
+  <h3>Readiness of the bots on {{ selected_app }}</h3>
+  <ul class="small" id="readiness-list">{% for id, f in readiness %}<li><a href="/automations/{{ id }}">{{ id }}</a>: <span class="pill sentence {{ f.css }}">{{ f.text }}</span></li>{% endfor %}</ul>
+  {% endif %}
 </div>
 
+<div class="flow" aria-label="How it works">
+  <div class="flowbox"><b>1. What the bots need</b><span>Register each bot. Its code says which screens, fields, APIs and tables it uses.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>2. What the real app looks like</b><span>Record the flow once in the real app, add the database schema.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>3. A copy is built</b><span>Devin builds a demo app from the brief and opens a pull request.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>4. Test the bots</b><span>Run bots from your existing tools against the lab. Review changes and confirm the intended outcome.</span></div>
+</div>
 <div class="grid">
   <div class="card">
     <h2>Try it on the sample</h2>
@@ -65,11 +68,11 @@
   </div>
 </div>
 
-<div class="card" id="glossary">
-  <h2>Words used here</h2>
+<details class="card more" id="glossary">
+  <summary>More: Words used here</summary>
   <dl class="glossary">
     {% for term, meaning in glossary %}<dt>{{ term }}</dt><dd>{{ meaning }}</dd>{% endfor %}
   </dl>
   <p class="small muted">More: <code>docs/office-setup.md</code> (installing and daily use), <code>docs/realdata.md</code> (masked real data), <code>docs/ocp.md</code> (OpenShift).</p>
-</div>
+</details>
 {% endblock %}

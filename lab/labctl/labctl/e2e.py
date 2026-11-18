@@ -98,6 +98,7 @@ def run(
     headless: bool = True,
     say=print,
     inputs: list[dict] | None = None,
+    case: str | None = None,
 ) -> E2EResult:
     """`inputs`: the bot's runs (one dict each); default `automations/<id>/e2e-inputs.json` when
     it exists, else the automation's test_inputs."""
@@ -179,10 +180,11 @@ def run(
                                    .read_text(encoding="utf-8-sig"))  # fmt: skip
                 inputs = given if isinstance(given, list) else [given]
             chain = harness.run_chain(root, automation_id, inputs, condition=condition, golden=golden,
-                                      out=out / "harness", headless=headless, on=lab_id)  # fmt: skip
+                                      out=out / "harness", headless=headless, on=lab_id, case=case)  # fmt: skip
             v = chain.verdict or {}
             s.status = chain.status
             s.detail = (f"{len(chain.runs)} run(s), verdict {v.get('status')}"
+                        + f", {outcome_detail(chain.outcome)}"
                         + (f", parity {chain.parity}" if chain.parity else "")
                         + (f", session {chain.session_id}" if chain.session_id else ""))  # fmt: skip
             s.link = str(out / "harness" / "report.md")
@@ -225,6 +227,13 @@ def run(
                 copies.drop(root, lab_id)
                 s.status, s.detail = "PASS", f"dropped {lab_id}"
     return _finish(result, out)
+
+
+def outcome_detail(outcome: dict | None) -> str:
+    """How a stage names the business outcome next to the verdict."""
+    if not outcome or outcome.get("status") == "NOT_DECLARED":
+        return "no outcome declared"
+    return f"outcome {outcome['status']} (case {outcome.get('case')})"
 
 
 def _finish(result: E2EResult, out: Path) -> E2EResult:

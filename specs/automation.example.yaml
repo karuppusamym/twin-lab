@@ -37,6 +37,30 @@ expects:
   - {table: cases, ops: [update], columns: [status, updated_at]}
   - {table: case_audit, ops: [insert], max_rows: 5}
 
+# Business success, judged apart from `expects` (which says only what a run MAY change). Leave it
+# out until the process owner has agreed the acceptance cases. A case is chosen with `--case <name>`
+# (harness run, e2e, session verdict); without it, the case named `default`, else the first.
+# Kinds (one example of each; `when` is a label for the condition or input the case applies to):
+#
+# outcome:
+#   - name: update-case          # `changes`: at least these changes must happen
+#     kind: changes
+#     requires:
+#       - table: cases
+#         op: update             # insert | update | delete
+#         min_rows: 1            # default 1; max_rows is optional
+#         columns: [status]      # update: columns that must be among those changed
+#         set: {status: IN_PROGRESS}   # final values, compared as text; "cannot check" if the
+#                                      # session recorded no new values
+#   - name: report-only          # `read_only`: no row may change
+#     kind: read_only
+#   - name: unknown-case         # `rejected`: the run must end unsuccessfully, data unchanged
+#     kind: rejected
+#     when: in_CaseNo is not found
+#   - name: app-down             # `failed_run`: same, for a run that fails under a condition
+#     kind: failed_run
+#     when: condition outage
+
 analysis:
   by: uipath-analyser@0.1.0
   gaps: []
