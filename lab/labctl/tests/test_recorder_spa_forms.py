@@ -149,7 +149,8 @@ def test_a_slow_browser_never_says_left_without_showing_it(tmp_path):
     differs from the recording (this failed one run in CI and five of six with the CPU slowed)."""
 
     def slow(page):
-        cdp = page.context.new_cdp_session(page)
+        # the recorder hands a script a wrapper around the page; the browser wants the page
+        cdp = page.context.new_cdp_session(getattr(page, "_page", page))
         cdp.send("Emulation.setCPUThrottlingRate", {"rate": 20})
         flow(page)
 
