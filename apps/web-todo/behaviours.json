@@ -1,0 +1,32 @@
+{
+  "app": "web-todo",
+  "generated_by": "behaviour-catalog@0.1.0",
+  "recordings": [
+    "public-demo"
+  ],
+  "rules": [
+    {
+      "id": "B01",
+      "kind": "hide",
+      "screen": "/todomvc/",
+      "trigger": {
+        "element": "button.destroy",
+        "event": "click",
+        "values": [],
+        "not_values": []
+      },
+      "target": "#toggle-all",
+      "detail": {},
+      "observations": 1,
+      "single_observation": true,
+      "evidence": [
+        {
+          "recording": "public-demo",
+          "step": 17,
+          "before": "dom/0016.html",
+          "after": "dom/0017.html"
+        }
+      ]
+    }
+  ]
+}

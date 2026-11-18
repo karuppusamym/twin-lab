@@ -1,0 +1,32 @@
+id: web-form
+name: web-form public testing demo (demo copy)
+mode: reconstruction
+copies:
+  system: web-form public testing demo
+  source: null
+  ref: sha256:0920309d3886b0cb
+  analysed: '2026-11-17'
+stack:
+  data:
+    kind: browser
+    evidence:
+    - no state-changing request and no data request to the app's own origin in the whole recording
+    - the page changed after interaction (11 click/typing step(s) recorded) with no request
+    - 'storage kind: not observed (the recorder does not capture browser storage); it is inferred from
+      the absence of requests'
+  frontend:
+    framework: server-rendered
+    ui_library: Bootstrap
+    marker: pages arrive with their content; no client framework marker
+run:
+  web:
+    port: 8000
+  api:
+    port: 8000
+    health: /api/health
+db:
+  schema: db/schema.sql
+  derived_from: []
+built_for:
+- web-form-trial
+rules: []
