@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- CaseDesk demo app (Twin Lab): WinForms on .NET 6, as the brief's "Stack to pin" says.
+       No NuGet packages: SQLite through Windows' own winsqlite3.dll. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>CaseDesk</AssemblyName>
+    <RootNamespace>CaseDeskDemo</RootNamespace>
+    <Product>CaseDesk (Twin Lab demo)</Product>
+    <Version>1.2.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\db\schema.sql" Link="schema.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
