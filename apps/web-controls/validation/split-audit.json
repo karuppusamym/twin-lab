@@ -1,0 +1,52 @@
+{
+  "duration_s": 65.81,
+  "raw_steps": 31,
+  "http_steps": 30,
+  "apps": {
+    "web-controls": {
+      "steps": 15,
+      "http_pages": [
+        "/add_remove_elements/",
+        "/checkboxes",
+        "/dropdown"
+      ],
+      "broken_cause_references": [],
+      "missing_artifacts": [],
+      "har_hosts": {
+        "the-internet.herokuapp.com": 60,
+        "298279967.log.optimizely.com": 15
+      }
+    },
+    "web-form": {
+      "steps": 16,
+      "http_pages": [
+        "/selenium/web/submitted-form.html",
+        "/selenium/web/web-form.html"
+      ],
+      "broken_cause_references": [
+        {
+          "local_step": 9,
+          "global_step": 20,
+          "caused_by": 19,
+          "expected_local_cause": 8
+        },
+        {
+          "local_step": 15,
+          "global_step": 30,
+          "caused_by": 29,
+          "expected_local_cause": 14
+        }
+      ],
+      "missing_artifacts": [],
+      "har_hosts": {
+        "www.selenium.dev": 5,
+        "cdn.jsdelivr.net": 10,
+        "code.jquery.com": 5,
+        "unpkg.com": 6
+      }
+    }
+  },
+  "all_events_partitioned_exactly_once": true,
+  "sequence_events": 31,
+  "raw_har_sha256": "013d3c1964bfa00a0f4c2a917334ba1cf49627498e580e5c6022a064ea20f189"
+}

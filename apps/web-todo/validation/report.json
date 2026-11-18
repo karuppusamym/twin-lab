@@ -1,0 +1,67 @@
+[
+  {
+    "checkpoint": "empty",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "ignore blank task",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "add two tasks",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "complete first task",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "active filter",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "completed filter",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "cancel edit",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "save edit",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "reload persists",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "complete all",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "clear completed",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "delete task",
+    "business_state": "pass",
+    "dom_differences": []
+  },
+  {
+    "checkpoint": "empty edit deletes",
+    "business_state": "pass",
+    "dom_differences": []
+  }
+]

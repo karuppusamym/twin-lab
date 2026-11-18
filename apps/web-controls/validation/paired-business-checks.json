@@ -1,0 +1,62 @@
+{
+  "source": {
+    "passed": 23,
+    "checks": [
+      "checkbox initial state",
+      "check first",
+      "uncheck second",
+      "select option one",
+      "select option two",
+      "add element",
+      "add second element",
+      "delete element",
+      "disabled input",
+      "readonly input",
+      "text entry",
+      "textarea entry",
+      "form selection",
+      "form uncheck",
+      "form check",
+      "radio exclusivity",
+      "submission navigation and message",
+      "submitted query values",
+      "back restores form",
+      "return to first app resets page state",
+      "first app second visit",
+      "second app fresh navigation clears input",
+      "second cross-app submission"
+    ],
+    "external_attempts": [],
+    "page_errors": []
+  },
+  "replica": {
+    "passed": 23,
+    "checks": [
+      "checkbox initial state",
+      "check first",
+      "uncheck second",
+      "select option one",
+      "select option two",
+      "add element",
+      "add second element",
+      "delete element",
+      "disabled input",
+      "readonly input",
+      "text entry",
+      "textarea entry",
+      "form selection",
+      "form uncheck",
+      "form check",
+      "radio exclusivity",
+      "submission navigation and message",
+      "submitted query values",
+      "back restores form",
+      "return to first app resets page state",
+      "first app second visit",
+      "second app fresh navigation clears input",
+      "second cross-app submission"
+    ],
+    "external_attempts": [],
+    "page_errors": []
+  }
+}
