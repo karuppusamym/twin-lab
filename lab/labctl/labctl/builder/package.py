@@ -695,9 +695,12 @@ def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
         rows.append(f"`{app}/pages/*.html`: one snapshot per screen. The structure, ids, classes "
                     "and interface text are real; data is masked (letters x, digits 9). Build "
                     "each screen from its snapshot.")  # fmt: skip
-    rows.append(f"`{app}/look/` (style sheets, `theme.json`, one rendered picture per screen), "
-                "when the package has it: how the screens look. Without it, the styles inside "
-                "the snapshots are the reference.")  # fmt: skip
+    if any_under(f"{app}/look/"):
+        rows.append(f"`{app}/look/` (style sheets, `theme.json`, one rendered picture per screen): "
+                    "how the screens look. Match each screen to its picture.")  # fmt: skip
+    else:
+        rows.append("The package has no pictures or style sheets of the screens: the styles "
+                    "inside the snapshots are the reference.")  # fmt: skip
     if f"{app}/navigation.json" in have:
         rows.append(f"`{app}/navigation.json`: every screen, each way in and out, dialogs, tabs, "
                     "frames and popup windows, and every element of each screen with what "
