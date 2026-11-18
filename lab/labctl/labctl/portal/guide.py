@@ -38,6 +38,11 @@ def next_step(steps: list[Step]) -> Step | None:
     return next((s for s in steps if s.state == "next"), None)
 
 
+def completed_automations(sessions: list[dict]) -> list[str]:
+    """An active or anonymous session does not complete a bot's first run."""
+    return sorted({s["automation"] for s in sessions if s.get("ended") and s.get("automation")})
+
+
 def app_steps(
     app_id: str,
     *,
@@ -50,11 +55,30 @@ def app_steps(
     has_baseline: bool,
     sessions: int,
     declared: list[str],
+    recorded_automations: list[str] | None = None,
+    recheck: dict[str, str] | None = None,
 ) -> list[Step]:
-    """Progress of one app, in the order the app page is laid out."""
+    """Progress of one app, in the order the app page is laid out.
+
+    `ready` holds only bots whose READY is still current. `recheck` maps a bot whose earlier READY
+    can no longer be relied on to why (the app was rebuilt, the lab cannot be read, ...)."""
     base = f"/apps/{app_id}"
+    recheck = recheck or {}
     not_ready = [a for a in automations if a not in ready]
+    again = [a for a in not_ready if a in recheck]
+    never = [a for a in not_ready if a not in recheck]
+    if again:
+        readiness_hint = "Check readiness again: " + "; ".join(f"{a} ({recheck[a]})" for a in again)
+        readiness_hint += "." + (f" Not checked yet: {', '.join(never)}." if never else "")
+    elif not_ready:
+        readiness_hint = (
+            "Check readiness: does each bot find what it needs? Not ready yet: "
+            + ", ".join(not_ready)
+        )
+    else:
+        readiness_hint = "Check readiness for each bot."
     undeclared = [a for a in automations if a not in declared]
+    unrecorded = [a for a in automations if a not in (recorded_automations or [])]
     steps = [
         Step("evidence", "Evidence", has_evidence,
              "Add what you know about the real app: a recording of the flow is best, the "
@@ -67,16 +91,15 @@ def app_steps(
         Step("lab", "Lab", running, "Start the app's lab (the first start takes a few minutes).",
              f"{base}#lab"),
         Step("readiness", "Readiness", bool(automations) and not not_ready,
-             ("Check readiness: does each bot find what it needs? Not ready yet: "
-              + ", ".join(not_ready)) if not_ready else "Check readiness for each bot.",
-             "/mapping", optional=not automations),
+             readiness_hint, "/mapping", optional=not automations),
         Step("data", "Data", has_baseline,
              "Load data: your own Excel sheet, synthetic data, or a saved pack.", f"{base}#data"),
         Step("conditions", "Conditions", False,
              "Optional: make the app slow or flaky to see how bots cope.", f"{base}#conditions",
              optional=True),
-        Step("sessions", "Sessions", sessions > 0 and not undeclared,
+        Step("sessions", "Sessions", sessions > 0 and not undeclared and not unrecorded,
              ("Record a run of each bot and accept its changes, so later runs get PASS or FAIL."
+              + (f" Still to record: {', '.join(unrecorded)}." if unrecorded else "")
               + (f" Still to accept: {', '.join(undeclared)}." if sessions and undeclared else "")),
              f"{base}#sessions", optional=not automations),
     ]  # fmt: skip
@@ -95,8 +118,11 @@ def onboarding(
     ready: bool,
     declared: bool,
     first_app: str | None,
+    has_baseline: bool = False,
+    recheck: str = "",
 ) -> list[Step]:
-    """The whole path for someone new, ticked off from what exists."""
+    """The whole path for someone new, ticked off from what exists. `recheck` says why an earlier
+    READY can no longer be relied on, when there is one."""
     app = f"/apps/{first_app}" if first_app else "/"
     steps = [
         Step("you", "Say who you are", named,
@@ -118,10 +144,16 @@ def onboarding(
              "Start the app with its database and lab agent. You get an address bots can use.",
              f"{app}#lab"),
         Step("ready", "Check readiness", ready,
-             "Readiness tells you, per bot, READY or exactly what is missing.", "/mapping"),
+             (f"Check readiness again: {recheck}." if recheck else
+              "Readiness tells you, per bot, READY or exactly what is missing."), "/mapping",
+             optional=automations == 0),
+        Step("data", "Prepare test data", has_baseline,
+             "Load a synthetic data pack or your test workbook before recording a run.",
+             f"{app}#data"),
         Step("verdict", "Record and judge a run", declared,
              "Record a session while the bot runs, read what changed, and accept it. Every "
-             "later run is then PASS or FAIL.", f"{app}#sessions"),
+             "later run checks for unexpected database changes. Confirm the business outcome separately.",
+             f"{app}#sessions", optional=automations == 0),
     ]  # fmt: skip
     return mark(steps)
 

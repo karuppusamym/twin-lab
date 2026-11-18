@@ -2,17 +2,17 @@
 {% block title %}Start here · Twin Lab{% endblock %}
 {% block content %}
 <h1>Start here</h1>
-<p class="lead">Twin Lab builds a safe copy of a real application, so your bots can be tested on it: with your own data, when the system is slow or failing, and with a clear PASS or FAIL for every run. Nothing here touches the real application.</p>
+<p class="lead">Twin Lab builds a safe copy of a real application, so your bots can be tested on it: with your own data, when the system is slow or failing, and a check for unexpected database changes after each run. Bots run in your existing tools against the lab address. A passing check does not prove the business task completed.</p>
 
-<div class="flow" aria-label="How it works">
-  <div class="flowbox"><b>1. What the bots need</b><span>Register each bot. Its code says which screens, fields, APIs and tables it uses.</span></div>
-  <div class="flowarrow" aria-hidden="true">→</div>
-  <div class="flowbox"><b>2. What the real app looks like</b><span>Record the flow once in the real app, add the database schema.</span></div>
-  <div class="flowarrow" aria-hidden="true">→</div>
-  <div class="flowbox"><b>3. A copy is built</b><span>Devin builds a demo app from the brief and opens a pull request.</span></div>
-  <div class="flowarrow" aria-hidden="true">→</div>
-  <div class="flowbox"><b>4. Test the bots</b><span>Run them in the lab: data, slowness, sessions, PASS or FAIL.</span></div>
-</div>
+{% if app_ids %}
+<form method="get" action="/start" class="card row">
+  <div><label for="onboarding-app">Application to set up</label>
+    <select id="onboarding-app" name="app">{% for id in app_ids %}<option value="{{ id }}" {{ 'selected' if id == selected_app }}>{{ id }}</option>{% endfor %}</select>
+  </div>
+  <div><button type="submit">Show next steps</button></div>
+  <p class="small muted">Progress below belongs to this application. Choose another app to see its remaining work.</p>
+</form>
+{% endif %}
 
 {% if next %}
 <div class="card nextcard">
@@ -32,13 +32,26 @@
     {% for s in steps %}
     <li class="{{ s.state }}">
       <span class="tick" aria-hidden="true">{{ "✓" if s.state == "done" else "→" if s.state == "next" else "" }}</span>
-      <div><b><a href="{{ s.href }}">{{ s.title }}</a></b>{% if s.state == "done" %} <span class="pill ok">done</span>{% elif s.state == "next" %} <span class="pill warn">next</span>{% endif %}
+      <div><b><a href="{{ s.href }}">{{ s.title }}</a></b>{% if s.state == "done" %} <span class="pill ok">done</span>{% elif s.state == "next" %} <span class="pill warn">next</span>{% elif s.optional %} <span class="pill">optional until a bot is registered</span>{% endif %}
         <div class="small muted">{{ s.hint }}</div></div>
     </li>
     {% endfor %}
   </ol>
+  {% if readiness %}
+  <h3>Readiness of the bots on {{ selected_app }}</h3>
+  <ul class="small" id="readiness-list">{% for id, f in readiness %}<li><a href="/automations/{{ id }}">{{ id }}</a>: <span class="pill sentence {{ f.css }}">{{ f.text }}</span></li>{% endfor %}</ul>
+  {% endif %}
 </div>
 
+<div class="flow" aria-label="How it works">
+  <div class="flowbox"><b>1. What the bots need</b><span>Register each bot. Its code says which screens, fields, APIs and tables it uses.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>2. What the real app looks like</b><span>Record the flow once in the real app, add the database schema.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>3. A copy is built</b><span>Devin builds a demo app from the brief and opens a pull request.</span></div>
+  <div class="flowarrow" aria-hidden="true">→</div>
+  <div class="flowbox"><b>4. Test the bots</b><span>Run bots from your existing tools against the lab. Review changes and confirm the intended outcome.</span></div>
+</div>
 <div class="grid">
   <div class="card">
     <h2>Try it on the sample</h2>
@@ -47,7 +60,7 @@
   <div class="card">
     <h2>Rules that keep you safe</h2>
     <ul class="small">
-      <li>Evidence, robot logs and data packs stay on this machine; they are never committed.</li>
+      <li>Evidence, robot logs and data packs are stored locally. Review build packages before sharing them with a builder.</li>
       <li>Only synthetic or masked data goes into a lab. Real data needs a mask receipt.</li>
       <li>Bots get a database login that can change rows only, never the database itself.</li>
       <li>A lab someone has reserved can be looked at, not changed.</li>
@@ -55,11 +68,11 @@
   </div>
 </div>
 
-<div class="card" id="glossary">
-  <h2>Words used here</h2>
+<details class="card more" id="glossary">
+  <summary>More: Words used here</summary>
   <dl class="glossary">
     {% for term, meaning in glossary %}<dt>{{ term }}</dt><dd>{{ meaning }}</dd>{% endfor %}
   </dl>
   <p class="small muted">More: <code>docs/office-setup.md</code> (installing and daily use), <code>docs/realdata.md</code> (masked real data), <code>docs/ocp.md</code> (OpenShift).</p>
-</div>
+</details>
 {% endblock %}

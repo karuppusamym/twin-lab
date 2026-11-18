@@ -17,11 +17,24 @@
 
 {% if verdict %}
 <div class="card" id="verdict">
-  <h2>Verdict:
+  <h2>Database change check:
     <span class="pill {{ 'ok' if verdict.status == 'PASS' else 'err' if verdict.status == 'FAIL' else 'warn' }}">{{ verdict.status | replace('_', ' ') }}</span></h2>
-  {% if verdict.status == 'PASS' %}<p>Every row change is one <code>{{ verdict_automation }}</code> is expected to make.</p>
+  {% if verdict.status == 'PASS' %}<p>All {{ verdict.checked }} recorded row changes are allowed for <code>{{ verdict_automation }}</code>.</p>
   {% elif verdict.status == 'FAIL' %}<p>{{ verdict.reasons | join("; ") }}. Unexpected changes are marked below.</p>
   {% else %}<p class="muted">{{ verdict.reasons | join("; ") }}.</p>{% endif %}
+  <p class="small muted">This check covers allowed tables, operations, update columns and configured row limits. It does not verify that required work happened, that saved values are correct, or that the bot completed successfully. Confirm the business outcome separately.</p>
+  {% set declared = outcome and outcome.status != 'NOT_DECLARED' %}
+  {% if outcome %}
+  <p id="outcome"><b>Business outcome:</b>
+    <span class="pill {{ 'ok' if outcome.status == 'MET' else 'err' if outcome.status == 'NOT_MET' else 'warn' }}">{{ outcome.status | replace('_', ' ') }}</span>
+    {% if declared and outcome.case %}case <code>{{ outcome.case }}</code> ({{ outcome.kind | replace('_', ' ') }}){% if outcome.when %}, for {{ outcome.when }}{% endif %}{% elif not declared %}<span class="muted">no outcome declared for this automation{% if outcome.notes %}: {{ outcome.notes | join("; ") }}{% endif %}</span>{% endif %}</p>
+  {% if declared and outcome.status == 'MET' %}<p class="small">The session did what the case requires.</p>{% endif %}
+  {% for u in outcome.unmet %}<p class="small"><span class="pill err">not met</span> {{ u }}</p>{% endfor %}
+  {% for u in outcome.unchecked %}<p class="small"><span class="pill warn">cannot check</span> {{ u }}</p>{% endfor %}
+  {% if declared and outcome.status == 'CANNOT_CHECK' and not outcome.unchecked %}<p class="small muted">{{ outcome.notes | join("; ") }}</p>{% endif %}
+  <p class="small muted">The outcome is judged apart from the change check above and never changes it.</p>
+  {% endif %}
+  {% if verdict.status == 'PASS' and verdict.checked == 0 and not declared %}<p class="flash">No database changes were recorded. This may be expected for a read-only bot; for an update task, check that the bot actually completed its work.</p>{% endif %}
   {% if verdict_automation and verdict.status != 'PASS' %}
   <form method="post" action="/apps/{{ app_id }}/sessions/{{ s.session_id }}/accept" class="row"
         data-confirm="Write these changes into automations/{{ verdict_automation }}/automation.yaml as expected? Only do this after checking them.">

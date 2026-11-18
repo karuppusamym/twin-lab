@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Slug = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]*$")]
 
@@ -131,6 +131,56 @@ class ExpectedChange(Contract):
     max_rows: int | None = Field(default=None, ge=1)  # per op; None means any number
 
 
+OutcomeKind = Literal["changes", "read_only", "rejected", "failed_run"]
+
+
+class OutcomeRequire(Contract):
+    """Changes a run must make: at least `min_rows` rows of `table` changed by `op`."""
+
+    table: str = Field(min_length=1)
+    op: ChangeOp
+    min_rows: int = Field(default=1, ge=1)
+    max_rows: int | None = Field(default=None, ge=1)
+    columns: list[str] = []  # update: columns that must be among those changed
+    set: dict[str, str] = {}  # column -> expected final value, compared as strings
+
+    @field_validator("set", mode="before")
+    @classmethod
+    def _values_as_text(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: v if isinstance(v, str) else str(v) for k, v in value.items()}
+        return value
+
+    @model_validator(mode="after")
+    def _consistent(self) -> OutcomeRequire:
+        if self.max_rows is not None and self.max_rows < self.min_rows:
+            raise ValueError("max_rows is below min_rows")
+        if self.columns and self.op != "update":
+            raise ValueError("columns applies to update only")
+        if self.set and self.op == "delete":
+            raise ValueError("set cannot be checked on a delete")
+        return self
+
+
+class OutcomeCase(Contract):
+    """One acceptance case: what business success means for a run. Kept apart from `expects:`
+    (what a run may change); it never alters that verdict."""
+
+    name: Slug
+    kind: OutcomeKind
+    when: str | None = None  # the harness condition or input label this case applies to
+    description: str | None = None
+    requires: list[OutcomeRequire] = []  # kind `changes` only
+
+    @model_validator(mode="after")
+    def _requires_match_kind(self) -> OutcomeCase:
+        if self.kind == "changes" and not self.requires:
+            raise ValueError("a `changes` case needs `requires:`")
+        if self.kind != "changes" and self.requires:
+            raise ValueError(f"a `{self.kind}` case takes no `requires:`")
+        return self
+
+
 class Automation(Contract):
     id: Slug
     name: str
@@ -146,6 +196,8 @@ class Automation(Contract):
     test_inputs: dict[str, str] = {}  # values for the conformance check, e.g. in_CaseNo: C-1003
     # The row changes a run may make. None: not declared yet (no verdict). []: changes nothing.
     expects: list[ExpectedChange] | None = None
+    # What business success means: acceptance cases judged apart from `expects`. None: not declared.
+    outcome: list[OutcomeCase] | None = None
     analysis: Analysis = Analysis()
 
     @model_validator(mode="after")
@@ -155,6 +207,13 @@ class Automation(Contract):
             raise ValueError("surface is 'backend' but touches include a web screen")
         if self.surface is Surface.frontend and vias - {"web"}:
             raise ValueError("surface is 'frontend' but touches include non-web interfaces")
+        return self
+
+    @model_validator(mode="after")
+    def _outcome_names_unique(self) -> Automation:
+        names = [c.name for c in self.outcome or []]
+        if len(names) != len(set(names)):
+            raise ValueError("outcome case names must be unique")
         return self
 
     def apps(self) -> list[str]:

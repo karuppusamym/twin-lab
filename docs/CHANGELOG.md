@@ -2,6 +2,25 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-17 — Product review: business outcome, readiness freshness, guided pages
+From `docs/product-review-2026-11-17.md`.
+- **Setup per application** with a test-data step; progress reads the lab's baseline and
+  sessions; an update with no recorded columns fails a column-restricted rule.
+- **Business outcome per automation.** `outcome:` in `automation.yaml` lists acceptance cases:
+  `changes` (the run must make these changes, optionally `set:` final values), `read_only`,
+  `rejected` and `failed_run` (the run ends unsuccessfully and leaves data unchanged). It is
+  judged apart from `expects:`, which still says only what a run may change. `--case` picks one
+  on `harness run`, `e2e` and `session verdict`; NOT_MET fails the run; values are checked only
+  when the lab recorded them, otherwise the case is CANNOT_CHECK. `uipath-case-update` declares one.
+- **Readiness says whether it is still current.** A check records what it was checked against
+  (app files, brief, schema, database choice, data baseline, automation). Pages show "still
+  current", "out of date" with the reason, or "cannot be confirmed" when the lab is stopped; only
+  a current READY counts. A rebuild done outside the portal is caught through changed files.
+- **Guided path first.** App-page controls for later (reservations, copies, fidelity, database,
+  Excel data, packs, baselines, parity) sit under "More"; a "Next step" line shows until the
+  first rehearsal is done. The dashboard reads labs concurrently with a 5-second cache.
+- Left open: proving fidelity with real UAT evidence needs recordings from the office.
+
 ## 2026-11-17 — First build by a Claude agent; replay of a person's recording
 - A Claude (Sonnet) agent built `loandesk`, a loan search on SQLite, from the build package
   alone. What the trial showed is fixed here: the task names the database chosen for the demo

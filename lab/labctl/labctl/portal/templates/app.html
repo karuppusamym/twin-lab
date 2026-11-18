@@ -3,6 +3,23 @@
 {% block content %}
 <p class="small"><a href="/">← Apps</a></p>
 <h1>{{ app.name if app else app_id }}</h1>
+{% macro ports_form() %}
+      <form method="post" action="/apps/{{ app_id }}/lab-settings">
+        <div class="row">
+          <div><label for="lport">Front door port</label><input id="lport" type="number" name="port" value="{{ app.lab.port if app.lab else '' }}" required></div>
+          <div><label for="dport">Database port</label><input id="dport" type="number" name="db_port" value="{{ app.lab.db_port if app.lab and app.lab.db_port else '' }}"></div>
+          <div><label for="luser">Test user</label><input id="luser" type="text" name="username" value="{{ app.lab.credentials.username if app.lab else '' }}"></div>
+          <div><label for="lpass">Test password</label><input id="lpass" type="text" name="password" value="{{ app.lab.credentials.password if app.lab else '' }}"></div>
+        </div>
+        <button type="submit" class="secondary">Save</button>
+      </form>
+{% endmacro %}
+{% if guided %}
+<p class="guided" id="guided-next">
+  {% if next %}First rehearsal not done yet. <b>Next step:</b> <a href="{{ next.href }}">{{ next.title }}</a>. {{ next.hint }}
+  {% else %}First rehearsal not done yet. <b>Next step:</b> <a href="/automations">register a bot</a>, check its readiness, then record a session. The other controls below are for afterwards.{% endif %}
+</p>
+{% endif %}
 <p class="lead">
   Needed by {{ (needed_by + flows) | join(", ") or "nothing yet" }}
   {% if app and app.mode %} · built as <b>{{ app.mode }}</b>{% endif %}
@@ -16,10 +33,17 @@
 {% elif lease %}
 <div class="flash ok" role="status">You have reserved this lab until {{ lease.until[:16] | replace("T", " ") }} UTC. Others can look but not change it.</div>
 {% endif %}
-{% if next %}
+{% if next and not guided %}
 <div class="card nextcard">
   <div class="nexthead">Next step</div>
   <p><b>{{ next.title }}:</b> {{ next.hint }} <a class="button" href="{{ next.href }}">Go</a></p>
+</div>
+{% endif %}
+{% if readiness %}
+<div class="card" id="readiness">
+  <h2>Readiness of the bots</h2>
+  <ul class="small">{% for id, f in readiness %}<li><a href="/automations/{{ id }}">{{ id }}</a>: <span class="pill sentence {{ f.css }}">{{ f.text }}</span></li>{% endfor %}</ul>
+  <p class="small muted">Readiness is checked on the <a href="/mapping">Readiness</a> page or a bot's own page. A result counts only while the app, its brief, its database choice, its data baseline and the bot are as they were when it was checked.</p>
 </div>
 {% endif %}
 
@@ -37,8 +61,7 @@
     {% endfor %}
     {% if not evidence.kinds() %}<tr><td colspan="3" class="muted">No evidence yet. Automation code and flows count as evidence too.</td></tr>{% endif %}
   </tbody></table></div>
-  <div class="grid">
-    <form method="post" action="/apps/{{ app_id }}/evidence" enctype="multipart/form-data">
+  <form method="post" action="/apps/{{ app_id }}/evidence" enctype="multipart/form-data">
       <h3>Add a file</h3>
       <label for="ekind">Kind</label>
       <select id="ekind" name="kind">
@@ -51,7 +74,11 @@
       <input type="file" name="file" required>
       <label><input type="checkbox" name="replace" value="1"> Replace a file with the same name</label>
       <button type="submit">Upload</button>
-    </form>
+  </form>
+  <details class="more" id="more-evidence">
+  <summary>More: record the flow in a browser, stop a recording, compare UAT with production</summary>
+  <p class="small muted">A recording of the real application's flow is the best evidence there is. The kinds above are what you may already have.</p>
+  <div class="grid">
     <form method="post" action="/apps/{{ app_id }}/record">
       <h3>Record a flow</h3>
       <p class="small muted">Opens a browser on this machine. Sign in and go through the flow once; close the window to finish. Each step keeps the page before the action, the page after it, and a picture.</p>
@@ -83,6 +110,7 @@
     </form>
   </details>
   {% endif %}
+  </details>
 </section>
 
 <section class="card" id="brief">
@@ -106,9 +134,9 @@
   <h2>3 · Build</h2>
   {% if built %}<p><span class="pill ok">built</span> <code>apps/{{ app_id }}/Dockerfile</code> exists.</p>{% endif %}
   {% if not has_brief %}<p class="muted">Generate the brief first.</p>{% else %}
-  <div class="grid">
+  <div>
     <div>
-      <h3>By hand in a coding agent</h3>
+      <h3>Get the app built</h3>
       <p class="small muted">Download the package, open your coding agent (Claude, Copilot or Devin), attach the zip and paste <code>BUILD_TASK.md</code> as the task. The agent opens a pull request in {{ repo_name or "the repository" }}. Then record the pull request below. To start a Claude session from this machine: <code>labctl build start {{ app_id }} --builder claude</code>.</p>
       <a class="button" href="/apps/{{ app_id }}/package">Download the build package</a>
       <form method="post" action="/apps/{{ app_id }}/devin/manual" class="row">
@@ -116,8 +144,10 @@
         <div><button type="submit" class="secondary">Record it</button></div>
       </form>
     </div>
+  </div>
+  <details class="more" id="more-build" {{ 'open' if devin_jobs }}>
+    <summary>More: build directly through the Devin API</summary>
     <div>
-      <h3>Directly through the Devin API</h3>
       {% if devin_ok %}
         <form method="post" action="/apps/{{ app_id }}/devin/start" data-confirm="Start a Devin session? It consumes Devin credits.">
           <label for="acu">Credit limit (ACUs, optional)</label><input id="acu" type="number" name="max_acu" min="1" placeholder="no limit">
@@ -125,7 +155,7 @@
         </form>
       {% else %}<p class="small muted">Not configured. Add the Devin key and organization in <a href="/settings">Settings</a>.</p>{% endif %}
     </div>
-  </div>
+  </details>
   {% endif %}
   {% if devin_jobs %}
   <h3>Builds</h3>
@@ -165,11 +195,20 @@
           {% for svc, st in status.services.items() %}<span class="pill">{{ svc }}: {{ st }}</span> {% endfor %}
           {% if status.health %}<span class="pill {{ 'ok' if status.health.app == 'ok' and status.health.db == 'ok' else 'err' }}">app {{ status.health.app }}, db {{ status.health.db }}</span>{% endif %}</p>
         {% if status.error %}<p class="small muted">{{ status.error }}</p>{% endif %}
+        {% if lab_unreachable %}<p><span class="pill err">lab not reachable</span> <span class="small muted">its lab agent did not answer; whether readiness is still current cannot be confirmed.</span></p>{% endif %}
       {% endif %}
       {% if built %}
       <form method="post" action="/apps/{{ app_id }}/lab/up" class="inline"><button type="submit">{{ "Rebuild and restart" if status and status.running else "Start" }}</button></form>
       <form method="post" action="/apps/{{ app_id }}/lab/down" class="inline" data-confirm="Stop {{ app_id }}? Its data is kept."><button type="submit" class="secondary">Stop</button></form>
-      {% if status and status.running %}
+      {% else %}<p class="muted">Not built yet: the app's code arrives with the build's pull request.</p>{% endif %}
+    {% else %}
+      <p>Set the ports the lab uses, and the test sign-in, to get started.</p>
+      {{ ports_form() }}
+    {% endif %}
+    {% if app.lab %}
+    <details class="more" id="more-lab" {{ 'open' if lease or lab_copies or db_current != 'postgres' }}>
+    <summary>More: reserve the lab, copies for a run, fidelity replay, database, ports</summary>
+      {% if built and status and status.running %}
       <details {{ 'open' if lease }}><summary>Reserve this lab ({{ "reserved by " ~ lease.holder if lease else "free" }})</summary>
         <p class="small muted">Everyone shares one copy of each app. Reserve it while you run something that must not be disturbed: others can look, but their changes (data, conditions, sessions) are refused until it ends.</p>
         {% if not lease or lease_mine %}
@@ -194,7 +233,6 @@
         </form>
       </details>
       {% endif %}
-      {% else %}<p class="muted">Not built yet: the app's code arrives with the build's pull request.</p>{% endif %}
       {% if status and status.running and replayable %}
       <details><summary>Fidelity replay: does the demo app behave like the recording?</summary>
         <p class="small muted">Replays a recording of the real application against this demo app, step by step, and compares each page: elements, enabled state, options and value formats. Typed values are not recorded; the test password is filled in, give others as <code>selector=value</code>.</p>
@@ -205,28 +243,19 @@
         </form>
       </details>
       {% endif %}
-    {% endif %}
-    {% if app.lab %}
-    <details><summary>Database: {{ db_label }}</summary>
-      <p class="small muted">The engine the real application uses, so bots that query the database directly get the same SQL. Twin Lab creates the app's tables there from its schema (views become tables you can load sample data into). Servers your DBA provides are listed under <a href="/settings#databases">Settings</a>.</p>
-      <form method="post" action="/apps/{{ app_id }}/database" class="row" data-confirm="Change the database of {{ app_id }}? Rebuild and restart afterwards; data in the old database stays there.">
-        <div><label for="dbname">Database</label><select id="dbname" name="name">{% for v, label in db_choices %}<option value="{{ v }}" {{ 'selected' if v == db_current }}>{{ label }}</option>{% endfor %}</select></div>
-        <div><button type="submit" class="secondary">Use this database</button></div>
-      </form>
-      {% if app.stack and app.stack.db and app.stack.db.engine %}<p class="small muted">The brief says the real application runs on <b>{{ app.stack.db.engine }}</b>.</p>{% endif %}
+      <details {{ 'open' if db_current != 'postgres' }}><summary>Database: {{ db_label }}</summary>
+        <p class="small muted">The engine the real application uses, so bots that query the database directly get the same SQL. Twin Lab creates the app's tables there from its schema (views become tables you can load sample data into). Servers your DBA provides are listed under <a href="/settings#databases">Settings</a>.</p>
+        <form method="post" action="/apps/{{ app_id }}/database" class="row" data-confirm="Change the database of {{ app_id }}? Rebuild and restart afterwards; data in the old database stays there.">
+          <div><label for="dbname">Database</label><select id="dbname" name="name">{% for v, label in db_choices %}<option value="{{ v }}" {{ 'selected' if v == db_current }}>{{ label }}</option>{% endfor %}</select></div>
+          <div><button type="submit" class="secondary">Use this database</button></div>
+        </form>
+        {% if app.stack and app.stack.db and app.stack.db.engine %}<p class="small muted">The brief says the real application runs on <b>{{ app.stack.db.engine }}</b>.</p>{% endif %}
+      </details>
+      <details><summary>Ports and test sign-in</summary>
+        {{ ports_form() }}
+      </details>
     </details>
     {% endif %}
-    <details {{ 'open' if not app.lab }}><summary>Ports and test sign-in</summary>
-      <form method="post" action="/apps/{{ app_id }}/lab-settings">
-        <div class="row">
-          <div><label for="lport">Front door port</label><input id="lport" type="number" name="port" value="{{ app.lab.port if app.lab else '' }}" required></div>
-          <div><label for="dport">Database port</label><input id="dport" type="number" name="db_port" value="{{ app.lab.db_port if app.lab and app.lab.db_port else '' }}"></div>
-          <div><label for="luser">Test user</label><input id="luser" type="text" name="username" value="{{ app.lab.credentials.username if app.lab else '' }}"></div>
-          <div><label for="lpass">Test password</label><input id="lpass" type="text" name="password" value="{{ app.lab.credentials.password if app.lab else '' }}"></div>
-        </div>
-        <button type="submit" class="secondary">Save</button>
-      </form>
-    </details>
   {% endif %}
 </section>
 
@@ -235,6 +264,21 @@
   <h2>5 · Data</h2>
   {% if not running %}<p class="muted">Start the app to load data.</p>{% else %}
   {% if lab_info and lab_info.baseline %}<p class="small">Baseline: <b>{{ lab_info.baseline.label or lab_info.baseline.id }}</b> <span class="muted">{{ lab_info.baseline.loaded_at }}</span></p>{% endif %}
+  <div>
+    <h3>Load test data</h3>
+    <p class="small muted">Generated from the schema; the app's own code lists (statuses, types) are reused. The same seed gives the same data.</p>
+    <form method="post" action="/apps/{{ app_id }}/data/generate">
+      <div class="row"><div><label for="seed">Seed</label><input id="seed" type="number" name="seed" value="20261115"></div></div>
+      <label for="counts">Rows per table</label>
+      <textarea id="counts" name="counts" rows="4" placeholder="customer=50&#10;cases=200"></textarea>
+      <p class="small muted">Only the tables you name are replaced (and their child rows are cleared). Leave out the users table to keep the test sign-in working.{% if lab_info and lab_info.tables %} Tables: {{ lab_info.tables | map(attribute='name') | join(', ') }}.{% endif %}</p>
+      <button type="submit">Generate and load</button>
+    </form>
+    <p class="small muted">Reset puts every table back exactly as the baseline. Do it before each run.</p>
+    <form method="post" action="/apps/{{ app_id }}/data/reset"><button type="submit" class="secondary">Reset to baseline</button></form>
+  </div>
+  <details class="more" id="more-data">
+  <summary>More: your own Excel data, a new baseline, named data packs, earlier baselines</summary>
   <div class="grid">
     <div>
       <h3>Your own data (Excel)</h3>
@@ -248,20 +292,8 @@
       </form>
     </div>
     <div>
-      <h3>Synthetic data</h3>
-      <p class="small muted">Generated from the schema; the app's own code lists (statuses, types) are reused. The same seed gives the same data.</p>
-      <form method="post" action="/apps/{{ app_id }}/data/generate">
-        <div class="row"><div><label for="seed">Seed</label><input id="seed" type="number" name="seed" value="20261115"></div></div>
-        <label for="counts">Rows per table</label>
-        <textarea id="counts" name="counts" rows="4" placeholder="customer=50&#10;cases=200"></textarea>
-        <p class="small muted">Only the tables you name are replaced (and their child rows are cleared). Leave out the users table to keep the test sign-in working.{% if lab_info and lab_info.tables %} Tables: {{ lab_info.tables | map(attribute='name') | join(', ') }}.{% endif %}</p>
-        <button type="submit">Generate and load</button>
-      </form>
-    </div>
-    <div>
       <h3>Baseline</h3>
-      <p class="small muted">Reset puts every table back exactly as the baseline. Do it before each run.</p>
-      <form method="post" action="/apps/{{ app_id }}/data/reset"><button type="submit">Reset to baseline</button></form>
+      <p class="small muted">The baseline is the data Reset returns to.</p>
       <form method="post" action="/apps/{{ app_id }}/data/baseline" data-confirm="Make the current data the new baseline?"><button type="submit" class="secondary">Current data becomes the baseline</button></form>
     </div>
     <div>
@@ -294,6 +326,7 @@
   <details><summary>Tables ({{ lab_info.tables | length }})</summary>
     <ul class="small">{% for t in lab_info.tables %}<li><code>{{ t.name }}</code>{% if t.rows is defined %} · {{ t.rows }} row(s){% endif %}</li>{% endfor %}</ul>
   </details>{% endif %}
+  </details>
   {% endif %}
 </section>
 

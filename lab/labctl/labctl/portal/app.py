@@ -31,6 +31,7 @@ from labctl import conformance as conf
 from labctl import copies as copies_mod
 from labctl import factory, repo
 from labctl import lab as lab_mod
+from labctl import outcome as outcome_mod
 from labctl import packs as packs_mod
 from labctl import verdict as verdict_mod
 from labctl.analyse import run as analysis
@@ -40,6 +41,7 @@ from labctl.botlog import runs as botruns
 from labctl.models import App, Automation, Condition
 from labctl.portal import guide
 from labctl.portal.jobs import JobRunner
+from labctl.portal.labreads import AGENT_TIMEOUT_S, LabReads, Reading
 
 HERE = Path(__file__).parent
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -93,6 +95,30 @@ def create_app(root: Path) -> FastAPI:
     templates.env.filters["tojson_pretty"] = lambda v: json.dumps(v, indent=2, default=str)
     password = os.environ.get("TWINLAB_PORTAL_PASSWORD")
     hosts = allowed_hosts()
+    reads = LabReads()  # what the pages know about each lab, for a few seconds
+
+    def forget_reads(kind: str, subject: str | None) -> None:
+        """A job that may have changed a lab (start, stop, copies, loads) has ended."""
+        reads.invalidate(subject)
+        if kind == "lab" and subject:  # the image may be new: one Docker call, in the job's thread
+            image = conf.image_id(subject)
+            if image:
+                reads.images[subject] = image
+
+    jobs.on_done = forget_reads
+
+    @portal.middleware("http")
+    async def forget_after_actions(request: Request, call_next):
+        """Anything this portal posts about an app (load, reset, reserve, condition, session,
+        database choice) may change what its lab says: the next page reads it afresh."""
+        response = await call_next(request)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            parts = request.url.path.split("/")
+            if len(parts) > 2 and parts[1] == "apps":
+                reads.invalidate(parts[2])
+            elif parts[1:2] == ["settings"]:  # git pull, database servers: files may differ
+                reads.invalidate()
+        return response
 
     @portal.middleware("http")
     async def known_host_only(request: Request, call_next):
@@ -285,25 +311,93 @@ def create_app(root: Path) -> FastAPI:
 
     # --- overview --------------------------------------------------------------------------------
 
+    def load_lab(app_id: str) -> Reading:
+        """One lab agent's metadata and sessions, with a short timeout of its own."""
+        agent = lab_mod.agent(root, app_id)
+        if getattr(agent, "http", None) is not None:
+            agent.http.timeout = AGENT_TIMEOUT_S
+        info, sessions = agent.info(), agent.sessions()
+        listed = sessions if isinstance(sessions, list) else sessions.get("sessions", [])
+        return Reading(True, info or {}, listed or [])
+
+    def run_progress(app_id, status):
+        """Use recorded facts, never configuration, as evidence that a run happened.
+        Read through the short-lived cache: a lab that is slow or dead reads as nothing."""
+        if not status or not status.running:
+            return {}, []
+        reading = reads.get(app_id, load_lab)
+        return (reading.info, reading.sessions) if reading.ok else ({}, [])
+
+    def lab_unreachable(app_id, status) -> bool:
+        """A running lab whose agent could not be read just now (failed or timed out)."""
+        return bool(status and status.running and not reads.get(app_id, load_lab).ok)
+
+    def freshness_for(
+        models: list[Automation], known: dict | None = None
+    ) -> dict[str, conf.Freshness]:
+        """For each automation: is its latest saved readiness result still true? `known` maps an
+        app id to a baseline already read this request. Reads only the labs of results that
+        recorded a baseline; a lab that cannot be read leaves the answer 'unconfirmed'."""
+        results = latest_verdicts()
+        known = dict(known or {})
+        wanted = sorted({
+            app_id
+            for m in models
+            for app_id, then in ((results.get(m.id) or {}).get("fingerprint") or {}).get("apps", {}).items()
+            if then.get("baseline_read") and then.get("lab", app_id) == app_id and app_id not in known
+        })  # fmt: skip
+        if wanted:
+            for app_id, reading in reads.get_many(wanted, load_lab).items():
+                if reading.ok:
+                    known[app_id] = conf.baseline_of(reading.info)
+
+        def facts(root_, app_id):
+            return reads.facts(root_, app_id, conf.app_facts)
+
+        return {
+            m.id: conf.assess(root, results.get(m.id), m, known, facts, reads.images)
+            for m in models
+        }
+
+    def recheck_reasons(users: list[Automation], fresh: dict) -> dict[str, str]:
+        return {a.id: fresh[a.id].reason for a in users if fresh[a.id].needs_recheck}
+
     @portal.get("/", response_class=HTMLResponse)
     def overview(request: Request):
         apps = []
-        verdicts = latest_verdicts()
-        for app_id in sorted(
+        app_ids = sorted(
             set(factory.needed_apps(root))
             | {p.parent.name for p in (root / "apps").glob("*/app.yaml")}
-        ):
+        )
+
+        def has_lab(app_id: str) -> bool:
+            model = app_model(app_id)
+            return bool((root / "apps" / app_id / "Dockerfile").exists() and model and model.lab)
+
+        # Every app's lab is asked at the same time, each with a short limit, so one slow or dead
+        # lab cannot hold the page up.
+        statuses = reads.run_all(
+            [a for a in app_ids if has_lab(a)], lambda a: lab_mod.status(root, a), wait=8
+        )
+        running = [a for a, st in statuses.items() if st.running]
+        reads.get_many(running, load_lab)  # fills the cache the loop below reads
+        users_of = {a: factory.automations(root, a) for a in app_ids}
+        models = {u.id: u for us in users_of.values() for u in us}
+        fresh = freshness_for(list(models.values()))
+        for app_id in app_ids:
             folder = root / "apps" / app_id
             ev = factory.discover(root, app_id)
             built = (folder / "Dockerfile").exists()
-            users = factory.automations(root, app_id)
-            lab = (
-                lab_mod.status(root, app_id)
-                if built and app_model(app_id) and app_model(app_id).lab
+            users = users_of[app_id]
+            timed_out = has_lab(app_id) and app_id not in statuses
+            lab = statuses.get(app_id) or (
+                lab_mod.Status(app_id, False, {}, error="the lab did not answer in time")
+                if timed_out
                 else None
             )
-            ready = [a.id for a in users if verdicts.get(a.id, {}).get("verdict") == "READY"]
+            ready = [a.id for a in users if fresh[a.id].ready]
             declared = [a.id for a in users if a.expects is not None]
+            info, recorded = run_progress(app_id, lab)
             steps = guide.app_steps(
                 app_id,
                 has_evidence=bool(ev.kinds() or users or factory.flows(root, app_id)),
@@ -312,9 +406,11 @@ def create_app(root: Path) -> FastAPI:
                 running=bool(lab and lab.running),
                 automations=[a.id for a in users],
                 ready=ready,
-                has_baseline=bool(lab and lab.running),
-                sessions=len(declared),
+                has_baseline=bool(info.get("baseline")),
+                sessions=len(recorded),
+                recorded_automations=guide.completed_automations(recorded),
                 declared=declared,
+                recheck=recheck_reasons(users, fresh),
             )
             apps.append({
                 "id": app_id,
@@ -323,7 +419,9 @@ def create_app(root: Path) -> FastAPI:
                 "built": built,
                 "automations": [a.id for a in users],
                 "ready": ready,
+                "out_of_date": [a.id for a in users if fresh[a.id].needs_recheck],
                 "lab": lab,
+                "unreachable": timed_out or lab_unreachable(app_id, lab),
                 "steps": steps,
                 "next": guide.next_step(steps),
             })  # fmt: skip
@@ -331,34 +429,54 @@ def create_app(root: Path) -> FastAPI:
 
     @portal.get("/start", response_class=HTMLResponse)
     def start(request: Request):
-        autos = [m for _, m, _ in all_automations() if m is not None]
         app_ids = sorted({p.parent.name for p in (root / "apps").glob("*/app.yaml")}
                          | set(factory.needed_apps(root)))  # fmt: skip
-        verdicts = latest_verdicts()
-        running = False
-        for app_id in app_ids:
-            model = app_model(app_id)
-            if model and model.lab and (root / "apps" / app_id / "Dockerfile").exists():
-                running = running or lab_mod.status(root, app_id).running
-        first = next((a for a in app_ids if (root / "apps" / a / "Dockerfile").exists()), None)
+        selected = request.query_params.get("app")
+        if selected and selected not in app_ids:
+            raise HTTPException(404, "Choose an application from the list")
+        first = selected or next(
+            (a for a in app_ids if (root / "apps" / a / "Dockerfile").exists()),
+            app_ids[0] if app_ids else None,
+        )
+        folder = root / "apps" / first if first else None
+        model = app_model(first) if first else None
+        built = bool(folder and (folder / "Dockerfile").exists())
+        status = lab_mod.status(root, first) if built and model and model.lab else None
+        info, recorded = run_progress(first, status)
+        users = factory.automations(root, first) if first else []
+        completed = guide.completed_automations(recorded)
+        fresh = freshness_for(users)
+        again = recheck_reasons(users, fresh)
         steps = guide.onboarding(
-            named=bool(_me(request)), automations=len(autos),
-            flows=len(list(repo.files_of(root, "flow"))),
-            evidence=any(factory.discover(root, a).kinds() for a in app_ids),
-            briefs=any((root / "apps" / a / "BRIEF.md").exists() for a in app_ids),
-            built=first is not None, running=running,
-            ready=any(v.get("verdict") == "READY" for v in verdicts.values()),
-            declared=any(a.expects is not None for a in autos),
-            first_app=first or (app_ids[0] if app_ids else None),
-        )  # fmt: skip
+            named=bool(_me(request)),
+            automations=len(users),
+            flows=len(factory.flows(root, first)) if first else 0,
+            evidence=bool(
+                first
+                and (factory.discover(root, first).kinds() or users or factory.flows(root, first))
+            ),
+            briefs=bool(folder and (folder / "BRIEF.md").exists()),
+            built=built,
+            running=bool(status and status.running),
+            ready=bool(users) and all(fresh[a.id].ready for a in users),
+            declared=bool(users)
+            and all(a.expects is not None and a.id in completed for a in users),
+            first_app=first,
+            has_baseline=bool(info.get("baseline")),
+            recheck="; ".join(f"{a} ({why})" for a, why in again.items()),
+        )
         return page(request, "start.html", steps=steps, next=guide.next_step(steps),
-                    glossary=guide.GLOSSARY)  # fmt: skip
+                    glossary=guide.GLOSSARY, app_ids=app_ids, selected_app=first,
+                    readiness=[(a.id, fresh[a.id]) for a in users])  # fmt: skip
 
     @portal.post("/me")
     def set_me(request: Request, name: str = Form("")):
         from urllib.parse import quote, urlsplit
 
-        target = urlsplit(request.headers.get("referer") or "/").path or "/"
+        referrer = urlsplit(request.headers.get("referer") or "/")
+        target = referrer.path or "/"
+        if referrer.query:
+            target += "?" + referrer.query
         clean = " ".join(name.split())[:60]
         if clean and not re.fullmatch(r"[\w .'-]+", clean):
             return back(target, "Use letters, digits, spaces, dots, dashes or apostrophes", "error")
@@ -374,8 +492,13 @@ def create_app(root: Path) -> FastAPI:
 
     @portal.get("/automations", response_class=HTMLResponse)
     def automations_page(request: Request):
+        listed = all_automations()
         return page(
-            request, "automations.html", automations=all_automations(), verdicts=latest_verdicts()
+            request,
+            "automations.html",
+            automations=listed,
+            verdicts=latest_verdicts(),
+            fresh=freshness_for([m for _, m, _ in listed if m is not None]),
         )
 
     @portal.post("/automations")
@@ -463,6 +586,7 @@ def create_app(root: Path) -> FastAPI:
             binding_error=binding_error,
             settings_yaml=yaml.safe_dump({"bindings": model.bindings, "test_inputs": model.test_inputs}, sort_keys=False),
             conformance=jobs.list("conformance", model.id, 5),
+            freshness=freshness_for([model])[model.id],
             botruns=botruns.uploads(state, model.id),
             lab_sessions=_sessions_for(model),
         )  # fmt: skip
@@ -651,6 +775,7 @@ def create_app(root: Path) -> FastAPI:
                 baselines = agent.baselines()
             except lab_mod.LabError as exc:
                 lab_info = lab_info or {"error": str(exc)}
+        lab_read = bool(lab_info) and "error" not in lab_info  # the lab answered just now
         try:
             cfg = devin()
             devin_ok, devin_list = (
@@ -662,17 +787,22 @@ def create_app(root: Path) -> FastAPI:
             lab_info = lab_info or {}
             lab_info["devin_error"] = str(exc)
         users = factory.automations(root, app_id)
-        verdicts = latest_verdicts()
+        fresh = freshness_for(users, {app_id: conf.baseline_of(lab_info)} if lab_read else None)
         listed = sessions if isinstance(sessions, list) else (sessions or {}).get("sessions", [])
+        ready_now = [a.id for a in users if fresh[a.id].ready]
         steps = guide.app_steps(
             app_id,
             has_evidence=bool(ev.kinds() or users or factory.flows(root, app_id)),
             has_brief=(folder / "BRIEF.md").exists(), built=(folder / "Dockerfile").exists(),
             running=bool(status and status.running), automations=[a.id for a in users],
-            ready=[a.id for a in users if verdicts.get(a.id, {}).get("verdict") == "READY"],
+            ready=ready_now,
             has_baseline=bool((lab_info or {}).get("baseline")), sessions=len(listed or []),
+            recorded_automations=guide.completed_automations(listed or []),
             declared=[a.id for a in users if a.expects is not None],
+            recheck=recheck_reasons(users, fresh),
         )  # fmt: skip
+        # Guided until a named session has completed for a bot whose readiness is current.
+        first_done = bool(set(guide.completed_automations(listed or [])) & set(ready_now))
         lease = (lab_info or {}).get("lease")
         me = _me(request)
         from labctl import dbservers
@@ -693,6 +823,9 @@ def create_app(root: Path) -> FastAPI:
             app=model,
             steps=steps,
             next=guide.next_step(steps),
+            guided=not first_done,
+            readiness=[(a.id, fresh[a.id]) for a in users],
+            lab_unreachable=bool(status and status.running and not lab_read),
             db_choices=db_choices,
             db_current=db_current,
             db_label=dict(db_choices).get(db_current, f"{db_current} (not configured)"),
@@ -1358,7 +1491,7 @@ def create_app(root: Path) -> FastAPI:
         return RedirectResponse(f"/apps/{app_id}/sessions/{session['session_id']}", status_code=303)
 
     @portal.get("/apps/{app_id}/sessions/{session_id}", response_class=HTMLResponse)
-    def session_page(request: Request, app_id: str, session_id: str):
+    def session_page(request: Request, app_id: str, session_id: str, case: str = ""):
         app_id = slug(app_id, "app id")
         try:
             verdict, session, auto = verdict_mod.for_session(root, app_id, session_id)
@@ -1372,10 +1505,19 @@ def create_app(root: Path) -> FastAPI:
             )
         except lab_mod.LabError:
             tables_used = None
+        try:
+            outcome = outcome_mod.for_session(root, app_id, session_id, auto, case or None)[0]
+            outcome_info = {**outcome.to_dict(), "line": outcome.summary()}
+        except (lab_mod.LabError, ValueError) as exc:
+            outcome_info = {
+                "status": "CANNOT_CHECK",
+                "line": f"the outcome could not be judged: {exc}",
+                "unmet": [], "unchecked": [], "notes": [],
+            }  # fmt: skip
         return page(
             request, "session.html", app_id=app_id, s=session, others=others,
             verdict=verdict.to_dict(), verdict_automation=auto, unexpected=unexpected,
-            tables_used=tables_used,
+            tables_used=tables_used, outcome=outcome_info,
         )  # fmt: skip
 
     @portal.post("/apps/{app_id}/sessions/{session_id}/accept")
@@ -1418,7 +1560,12 @@ def create_app(root: Path) -> FastAPI:
         autos = [m for _, m, _ in all_automations() if m is not None]
         app_ids = sorted({app for a in autos for app in a.apps()})
         return page(
-            request, "mapping.html", automations=autos, apps=app_ids, verdicts=latest_verdicts()
+            request,
+            "mapping.html",
+            automations=autos,
+            apps=app_ids,
+            verdicts=latest_verdicts(),
+            fresh=freshness_for(autos),
         )
 
     @portal.post("/mapping/run")
@@ -1560,6 +1707,7 @@ def create_app(root: Path) -> FastAPI:
                                           status_code=exc.status_code)  # fmt: skip
 
     portal.state.jobs = jobs
+    portal.state.reads = reads
     portal.state.root = root
     return portal
 

@@ -118,6 +118,20 @@ expects:
   - status
   - subcategory_id
   - updated_at
+outcome:
+- name: set-in-progress
+  kind: changes
+  when: e2e-inputs.json (C-1013 set to IN_PROGRESS, Payments / Delayed)
+  description: The bot saves the case with the status chosen in the run's inputs.
+  requires:
+  - table: cases
+    op: update
+    min_rows: 1
+    max_rows: 1
+    columns:
+    - status
+    set:
+      status: IN_PROGRESS
 analysis:
   by: uipath-analyser@0.1.0
   gaps: []

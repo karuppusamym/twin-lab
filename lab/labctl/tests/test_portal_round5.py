@@ -116,6 +116,90 @@ def test_steps_mark_next_and_optional():
     assert states["readiness"] == "optional" and states["conditions"] == "optional"
     done = guide.app_steps(
         "x", has_evidence=True, has_brief=True, built=True, running=True, automations=["b"],
-        ready=["b"], has_baseline=True, sessions=2, declared=["b"],
+        ready=["b"], has_baseline=True, sessions=2, declared=["b"], recorded_automations=["b"],
     )  # fmt: skip
     assert guide.next_step(done) is None
+
+
+def test_each_bot_needs_a_completed_recording():
+    recorded = guide.completed_automations(
+        [
+            {"automation": "a", "ended": "2026-11-17T10:00:00Z"},
+            {"automation": "b", "ended": None},
+            {"ended": "2026-11-17T10:00:00Z"},
+        ]
+    )
+    steps = guide.app_steps(
+        "x",
+        has_evidence=True,
+        has_brief=True,
+        built=True,
+        running=True,
+        automations=["a", "b"],
+        ready=["a", "b"],
+        has_baseline=True,
+        sessions=3,
+        declared=["a", "b"],
+        recorded_automations=recorded,
+    )
+    assert guide.next_step(steps).id == "sessions"
+    assert "Still to record: b" in guide.next_step(steps).hint
+
+
+def test_overview_does_not_invent_data_or_sessions(repo, monkeypatch):  # noqa: F811
+    fake, client = start(repo, monkeypatch)
+    monkeypatch.setattr(fake, "info", lambda: {})
+    monkeypatch.setattr(fake, "sessions", lambda: [])
+    overview = client.get("/").text
+    assert 'title="Data: todo"' in overview or 'title="Data: next"' in overview
+    assert 'title="Sessions: done"' not in overview
+    assert 'title="Data: done"' not in overview
+
+
+def test_start_uses_only_selected_app_and_rejects_unknown(repo, monkeypatch):  # noqa: F811
+    _, client = start(repo, monkeypatch)
+    # showcase is running, but qtt has not been built in this repository.
+    page = client.get("/start?app=qtt").text
+    assert 'value="qtt" selected' in page
+    assert 'href="/apps/qtt#build"' in page
+    assert 'href="/apps/showcase#build"' not in page
+    assert "Prepare test data" in page
+    assert client.get("/start?app=missing").status_code == 404
+
+
+def test_agent_failure_keeps_overview_available(repo, monkeypatch):  # noqa: F811
+    fake, client = start(repo, monkeypatch)
+
+    def unavailable():
+        raise lab_mod.LabError("agent unavailable")
+
+    monkeypatch.setattr(fake, "info", unavailable)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'title="Data: done"' not in response.text
+
+
+def test_saving_name_preserves_selected_application(repo, monkeypatch):  # noqa: F811
+    _, client = start(repo, monkeypatch)
+    response = client.post(
+        "/me", data={"name": "Priya"}, headers={"referer": "http://testserver/start?app=qtt"}
+    )
+    assert 'value="qtt" selected' in response.text
+
+
+def test_flow_only_setup_does_not_require_bot_checks():
+    steps = guide.onboarding(
+        named=True,
+        automations=0,
+        flows=1,
+        evidence=True,
+        briefs=True,
+        built=True,
+        running=True,
+        ready=False,
+        declared=False,
+        first_app="sample",
+        has_baseline=True,
+    )
+    assert guide.next_step(steps) is None
+    assert {s.id for s in steps if s.optional} == {"ready", "verdict"}

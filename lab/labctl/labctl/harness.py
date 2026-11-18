@@ -27,6 +27,7 @@ from typing import Any
 
 from labctl import bindings as bindings_mod
 from labctl import lab as lab_mod
+from labctl import outcome as outcome_mod
 from labctl import provenance, repo
 from labctl import verdict as verdict_mod
 from labctl.botlog import runs as botruns
@@ -46,6 +47,7 @@ class ChainResult:
     runs: list[dict] = field(default_factory=list)
     session_id: str | None = None
     verdict: dict | None = None
+    outcome: dict | None = None  # business result against the declared case; not the verdict
     upload: str | None = None
     parity: str | None = None
     notes: list[str] = field(default_factory=list)
@@ -121,6 +123,7 @@ def run_chain(
     copy: bool = False,
     keep_copy: bool = False,
     on: str | None = None,
+    case: str | None = None,
 ) -> ChainResult:
     """With `copy`, the chain runs on a copy of the app's lab made for this run (labctl lab copy),
     started from the app lab's baseline and dropped afterwards unless `keep_copy`: nobody else's
@@ -130,6 +133,10 @@ def run_chain(
     if not isinstance(automation, Automation):
         raise HarnessError(f"automation {automation_id}: " + "; ".join(map(str, problems)))
     app_id = _web_app(automation)
+    try:
+        outcome_mod.select_case(automation.outcome, case)  # an unknown case stops before any run
+    except ValueError as exc:
+        raise HarnessError(str(exc)) from exc
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out = Path(out or lab_mod.state_dir(root) / "harness" / automation_id / stamp)
     out.mkdir(parents=True, exist_ok=True)
@@ -151,7 +158,7 @@ def run_chain(
         result.notes.append(f"ran on its own copy {lab_id} (data: {rec['data']})")
     try:
         return _run(root, automation, automation_id, app_id, lab_id, inputs, condition, reset,
-                    golden, out, stamp, result, headless)  # fmt: skip
+                    golden, out, stamp, result, headless, case)  # fmt: skip
     finally:
         if copy and not keep_copy:
             from labctl import copies
@@ -170,7 +177,7 @@ def _rewrite(out: Path, result: ChainResult) -> None:
 
 
 def _run(root, automation, automation_id, app_id, lab_id, inputs, condition, reset, golden, out,
-         stamp, result, headless) -> ChainResult:  # fmt: skip
+         stamp, result, headless, case=None) -> ChainResult:  # fmt: skip
     agent = lab_mod.agent(root, lab_id)
     agent.health()  # unreachable lab -> LabError before anything changes
 
@@ -182,7 +189,7 @@ def _run(root, automation, automation_id, app_id, lab_id, inputs, condition, res
     agent.set_condition(condition_body(root, condition, app_id) if condition else None)
     try:
         return _chain(root, automation, automation_id, app_id, agent, inputs, condition, golden,
-                      out, stamp, result, headless, lab_id)  # fmt: skip
+                      out, stamp, result, headless, lab_id, case)  # fmt: skip
     finally:
         try:
             agent.set_condition(before)
@@ -191,7 +198,7 @@ def _run(root, automation, automation_id, app_id, lab_id, inputs, condition, res
 
 
 def _chain(root, automation, automation_id, app_id, agent, inputs, condition, golden, out, stamp,
-           result, headless, lab_id=None) -> ChainResult:  # fmt: skip
+           result, headless, lab_id=None, case=None) -> ChainResult:  # fmt: skip
     # 2-4. session around the bot
     lab_id = lab_id or app_id
     labs = {app_id: lab_id} if lab_id != app_id else None
@@ -263,15 +270,37 @@ def _chain(root, automation, automation_id, app_id, agent, inputs, condition, go
         except (botruns.RunsError, lab_mod.LabError) as exc:
             result.notes.append(f"provenance skipped: {exc}")
     ok_runs = bool(result.runs) and all(r.get("state") == "Successful" for r in result.runs)
-    if not ok_runs:
+    try:
+        outcome = outcome_mod.for_session(
+            root, lab_id, result.session_id, automation_id, case, ok_runs
+        )[0]
+    except (lab_mod.LabError, ValueError) as exc:
+        outcome = outcome_mod.Outcome(
+            outcome_mod.CANNOT_CHECK, notes=[f"the outcome could not be judged: {exc}"]
+        )
+    result.outcome = outcome.to_dict()
+    # a run declared to fail (`rejected`, `failed_run`) is expected to end unsuccessfully
+    expect_failure = outcome.kind in ("rejected", "failed_run")
+    if not ok_runs and not expect_failure:
         result.notes.append("a bot run did not succeed")
-    failed = not ok_runs or v.status == verdict_mod.FAIL or (result.parity or "").lower() == "fail"
+    failed = (
+        (not ok_runs and not expect_failure)
+        or v.status == verdict_mod.FAIL
+        or outcome.status == outcome_mod.NOT_MET
+        or (result.parity or "").lower() == "fail"
+    )
     result.status = "FAIL" if failed else "PASS"
     (out / "report.md").write_text(
         render(result, session, parity_md, provenance_md), encoding="utf-8", newline="\n"
     )
     (out / "result.json").write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
     return result
+
+
+def _outcome_line(o: dict) -> str:
+    if o.get("status") == outcome_mod.NOT_DECLARED:
+        return "no outcome declared"
+    return f"{str(o['status']).replace('_', ' ')} (case {o.get('case')}, {o.get('kind')})"
 
 
 def render(
@@ -302,6 +331,11 @@ def render(
     ]
     for c in v.get("unexpected") or []:
         lines.append(f"- `{c['table']}` {c['op']} `{c['key']}`: {c['why']}")
+    if result.outcome is not None:
+        o = result.outcome
+        text = _outcome_line(o)
+        lines += ["", f"**Business outcome: {text}**"]
+        lines += [f"- {u}" for u in (o.get("unmet") or []) + (o.get("unchecked") or [])]
     if result.upload:
         lines += ["", f"Robot log imported as harness upload `{result.upload}` (Robot runs)."]
     if provenance_md:
