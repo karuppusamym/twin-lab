@@ -32,6 +32,7 @@ jint = ctypes.c_int
 JOBJECT = ctypes.c_int64  # windowsaccessbridge-64: JOBJECT64 is a jlong
 VMID = ctypes.c_long
 MAX_NODES, MAX_ROWS, MAX_DEPTH = 1500, 25, 30
+CAPTURE_TRIES = 3  # readings of a window's tree before a torn one is accepted
 JVM_FLAG = "-Djavax.accessibility.assistive_technologies=com.sun.java.accessibility.AccessBridge"
 
 ROLE_TYPE = {
@@ -101,6 +102,7 @@ class Bridge:
             raise BridgeUnavailable("WindowsAccessBridge-64.dll not found (install a JDK/JRE, or "
                                     "set TWINLAB_JAVA_HOME to one)")  # fmt: skip
         self.q: queue.Queue = queue.Queue()
+        self.urgent: queue.Queue = queue.Queue()  # calls that go before the waiting ones
         self.ready = threading.Event()
         self.error: str | None = None
         self.stopping = False
@@ -130,9 +132,12 @@ class Bridge:
                 user32.TranslateMessage(ctypes.byref(msg))
                 user32.DispatchMessageW(ctypes.byref(msg))
             try:
-                fn, args, fut = self.q.get(timeout=0.01)
+                fn, args, fut = self.urgent.get_nowait()
             except queue.Empty:
-                continue
+                try:
+                    fn, args, fut = self.q.get(timeout=0.01)
+                except queue.Empty:
+                    continue
             if fut.set_running_or_notify_cancel():
                 try:
                     fut.set_result(fn(self, *args))
@@ -173,9 +178,12 @@ class Bridge:
         d.getAccessibleSelectionFromContext.argtypes = [VMID, JOBJECT, ctypes.c_int]
         d.getAccessibleSelectionFromContext.restype = JOBJECT
 
-    def submit(self, fn, *args) -> Future:
+    def submit(self, fn, *args, urgent: bool = False) -> Future:
+        """Queue a call for the bridge thread. `urgent` calls run before the waiting ones (the
+        mouse hook asking what is under a click, while the window is still there); a call
+        already running is never interrupted."""
         fut: Future = Future()
-        self.q.put((fn, args, fut))
+        (self.urgent if urgent else self.q).put((fn, args, fut))
         return fut
 
     def call(self, fn, *args, timeout: float = 15.0):
@@ -287,19 +295,38 @@ def _node(b: Bridge, vm: int, ac: int, info: AccessibleContextInfo, rid: tuple, 
 
 def capture(b: Bridge, hwnd: int) -> dict | None:
     """The raw accessible tree of a Java window (names and values as shown: pass it to
-    privacy.clean at once). Rows beyond MAX_ROWS are left out and counted."""
+    privacy.clean at once). Rows beyond MAX_ROWS are left out and counted. None when the
+    window is not showing, also when it stopped showing while it was read.
+
+    The tree is read control by control while the application goes on: when a parent's child
+    could not be read (the children changed in between: a menu opening, a dialog closing) the
+    tree is torn and is read again, at most CAPTURE_TRIES times; the last one is returned as
+    it is (a component may announce children it does not give)."""
+    tree = None
+    for attempt in range(CAPTURE_TRIES):
+        if attempt:
+            time.sleep(0.05)
+        tree, torn = _capture(b, hwnd)
+        if tree is None or not torn:
+            break
+    return tree
+
+
+def _capture(b: Bridge, hwnd: int) -> tuple[dict | None, bool]:
+    """One reading of a window's tree, and whether it is torn (see `capture`)."""
     from labctl.desktop import win
 
     root = _root(b, hwnd)
     if root is None:
-        return None
+        return None, False
     vm, ac = root
     info = _info(b, vm, ac)
     if info is None:
-        return None
+        return None, False
     origin = (info.x, info.y)
     scale = _scale(hwnd, info)[0]
-    count = [0]
+    cls = win.class_name(hwnd)  # now: the window may be gone when the walk below ends
+    count, torn = [0], [False]
 
     def walk(obj: int, info, rid: tuple, depth: int) -> dict:
         node = _node(b, vm, obj, info, rid, origin, scale)
@@ -315,24 +342,32 @@ def capture(b: Bridge, hwnd: int) -> dict | None:
         for i in range(n):
             child = b.dll.getAccessibleChildFromContext(vm, obj, i)
             if not child:
+                torn[0] = True
                 continue
             ci = _info(b, vm, child)
             if ci is not None:
                 kids.append(walk(child, ci, (*rid, i), depth + 1))
+            else:
+                torn[0] = True
             b.dll.releaseJavaObject(vm, child)
         if kids:
             node["children"] = kids
         return node
 
     tree = walk(ac, info, (), 0)
+    end = _info(b, vm, ac)
     b.dll.releaseJavaObject(vm, ac)
-    tree["cls"] = win.class_name(hwnd)
+    if end is None or "showing" not in (end.states_en_US or "").split(","):
+        # The window closed while it was read: the controls read after that say they are not
+        # showing and have no place on the screen. Such a tree is no picture of the window.
+        return None, False
+    tree["cls"] = cls
     # A JOptionPane: role "alert" for warnings and errors, "option pane" otherwise.
     box = next((n.get("role") for n, _a, _i in locator.walk(tree)
                 if n.get("role") in ("alert", "option pane")), None)  # fmt: skip
     if box:
         tree["message_box"] = box
-    return tree
+    return tree, torn[0]
 
 
 def _path_of(b: Bridge, vm: int, ac: int, root_ac: int) -> tuple | None:

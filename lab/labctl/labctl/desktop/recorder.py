@@ -14,7 +14,9 @@ A desktop recording is a folder holding:
 A step: `{"seq", "ts", "surface": "desktop", "action", "process", "pid", "window": {"selector",
 "title", "props"}, "target": {"selector", "matches", "path", "candidates", "props", "index"},
 "selector", "via", "tree", "screenshot", "url": null, "dom": null}` plus, by action,
-`typed_shape`, `item`, `state`, `key`, `menu_path`, `focus_after`, `invoked`. `action` is one of
+`typed_shape`, `item`, `state`, `key`, `menu_path`, `focus_after`, `invoked`, `effects` (what the
+application did by itself because of the step: `[{"action": "select", "selector", "container",
+"item_is": "data", "window", "via", "ts"}]`; seen, not a user step). `action` is one of
 `click`, `double_click`, `right_click`, `type`, `select`, `toggle`, `expand`, `collapse`, `menu`,
 `key`, `window_open`, `window_close`, `menu_open`, `focus`. `url` and `dom` are the web recorder's fields,
 kept empty, so desktop and web steps can share one timeline (`labctl.desktop.split.interleave`).
@@ -23,10 +25,10 @@ How each action is seen (and where UI Automation events were not enough):
 
 | Action | Source |
 |---|---|
-| click, double_click, right_click | low-level mouse hook (WH_MOUSE_LL) on a thread of its own, then `ElementFromPoint` (the caption a WPF button, check box or menu item draws is taken as the control); dropped when a pattern event for the same control follows within 0.8 s |
+| click, double_click, right_click | low-level mouse hook (WH_MOUSE_LL) on a thread of its own, then `ElementFromPoint` (the caption a WPF button, check box or menu item draws is taken as the control); replaced by the pattern event for the same control that follows within 0.8 s; the step keeps the time of the mouse press, so a window the click opens comes after it |
 | click on a button by a pattern (a script, an accessibility tool) | `Invoke_Invoked` event, when the toolkit raises it; one that follows a key press within 0.4 s is what the key did (Enter on the default button) and is noted on the key step as `invoked` |
 | type | `ValueProperty` change events (shape only, computed in the handler); also read once when focus leaves an edit control, for toolkits that raise no value events; in a password field, a character key pressed while it has the focus (WPF's PasswordBox raises no value event; the key itself is not kept) |
-| select | `SelectionItem_ElementSelected` event |
+| select | `SelectionItem_ElementSelected` event. One the application raises by itself (a grid that selects its row again after Save: the user's last input was not on that item, in its list, grid, tree, combo box or tab control) is no step: it is an `effects` entry of the step that caused it (`self_made_selection`) |
 | toggle, expand, collapse | `ToggleState` / `ExpandCollapseState` property change events |
 | menu | `Invoke_Invoked` on a MenuItem; `menu_open` when a menu window appears (polled; a WPF `Popup` window that holds menu items is one) |
 | key (Enter, Tab, Esc, F-keys, Delete, chords with Ctrl or Alt) | low-level keyboard hook; plain characters are never recorded |
@@ -73,6 +75,58 @@ POPUP_CLASSES = (
 # further: the hook only says "a key was typed", for password fields that raise no value event.
 TYPING_KEYS = {0x08, 0x20, 0xE7, *range(0x30, 0x3A), *range(0x41, 0x5B), *range(0x60, 0x70),
                *range(0xBA, 0xC1), *range(0xDB, 0xE0), 0xE2}  # fmt: skip
+MODIFIER_KEYS = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C}
+# Controls that hold selectable items: a selection in one belongs to the user when the user's
+# last action was anywhere in it.
+ITEM_CONTAINERS = {"ComboBox", "List", "DataGrid", "Table", "Tree", "Tab"}
+
+
+def self_made_selection(sel: dict, last: dict | None, popup: bool = False) -> bool:
+    """Whether a selection event is the application's own doing and not a user step.
+
+    `sel` is the selected item (`rid`, `ancestors`: runtime ids from its parent up,
+    `ancestor_types`), `last` the control of the user's last action: the control a mouse button
+    was pressed on, the control that had the keyboard focus when a key was pressed, or the
+    control of the last pattern action recorded (a script expanding a combo box before it
+    selects in it). The selection is the user's when that control is the item, is inside it,
+    holds it, is its sibling (the next radio button reached with an arrow key) or is in the
+    same list, grid, tree, combo box or tab control. It is the application's own (a grid filled
+    again with its first row selected after Save) only when both are known and unrelated.
+    Anything unknown, and every selection in a drop-down list, stays a user step."""
+    if last is None or popup:
+        return False
+    rid, a_rid = tuple(sel.get("rid") or ()), tuple(last.get("rid") or ())
+    ancestors = [tuple(r) for r in sel.get("ancestors") or ()]
+    a_ancestors = [tuple(r) for r in last.get("ancestors") or ()]
+    if not rid or not a_rid or not ancestors:
+        return False
+    if a_rid == rid or a_rid in ancestors or rid in a_ancestors:
+        return False
+    if a_ancestors and a_ancestors[0] == ancestors[0]:
+        return False
+    types = sel.get("ancestor_types") or []
+    containers = {r for r, t in zip(ancestors, types, strict=False) if t in ITEM_CONTAINERS}
+    return not (containers & {a_rid, *a_ancestors})
+
+
+def order_batch(batch: list[dict]) -> list[dict]:
+    """The actions of one batch in the order they happened: by time, where the time of an
+    action is the user's input (the mouse press, the key press) when there was one.
+
+    A click known only from its Invoke event (a pattern call: no mouse press gave it a time)
+    carries the time its event handler ran, which can be after the window poll already saw the
+    modal window the click opened. The window's owner cannot be clicked once that window is
+    up, so such a click in the owner within CLICK_GRACE_S after the window opened is put before
+    it."""
+    for w in batch:
+        if w["kind"] != "window_open" or not w.get("owner"):
+            continue
+        for a in batch:
+            if (a["kind"] in ("click", "menu") and a.get("via") == "uia-invoke"
+                    and not a.get("mouse") and (a.get("desc") or {}).get("window") == w["owner"]
+                    and 0 <= a["t"] - w["t"] < CLICK_GRACE_S):  # fmt: skip
+                a["t"] = w["t"] - 0.001
+    return sorted(batch, key=lambda a: a["t"])
 
 
 def popup_content(raw: dict | None) -> set[str]:
@@ -97,9 +151,10 @@ class _Hooks(threading.Thread):
     run here and only queue (x, y) or the chord; the recorder reads the element afterwards."""
 
     def __init__(self, out: queue.Queue, wanted: Callable[[int], bool],
-                 resolve: Callable[[int, int], object] | None = None):  # fmt: skip
+                 resolve: Callable[[int, int], object] | None = None,
+                 on_key: Callable[[int], object] | None = None):  # fmt: skip
         super().__init__(daemon=True, name="twinlab-desktop-hooks")
-        self.out, self.wanted, self.resolve = out, wanted, resolve
+        self.out, self.wanted, self.resolve, self.on_key = out, wanted, resolve, on_key
         self.thread_id = 0
         self.ready = threading.Event()
         self.failed: str | None = None
@@ -187,14 +242,26 @@ class _Hooks(threading.Thread):
             try:
                 if code == 0 and wparam in (0x100, 0x104):
                     info = ctypes.cast(lparam, ctypes.POINTER(KBDLL)).contents
-                    if self.wanted(pid_of(user32.GetForegroundWindow())):
+                    fg = user32.GetForegroundWindow()
+                    if self.wanted(pid_of(fg)):
+                        t = time.time()
                         chord = self._chord(info.vk, user32)
                         if chord:
-                            self.out.put({"kind": "key", "key": chord, "t": time.time(),
+                            quick = None
+                            if self.on_key is not None:
+                                try:
+                                    quick = self.on_key(fg)
+                                except Exception:  # noqa: BLE001
+                                    quick = None
+                            self.out.put({"kind": "key", "key": chord, "t": t, "quick": quick,
                                           "injected": bool(info.flags & 0x10)})  # fmt: skip
                         elif info.vk in TYPING_KEYS:
                             # Not which key: only that one was typed (see Recorder._typing).
-                            self.out.put({"kind": "typing", "t": time.time()})
+                            self.out.put({"kind": "typing", "t": t})
+                        elif info.vk not in MODIFIER_KEYS:
+                            # An arrow, a navigation key: only that the user pressed a key
+                            # (a selection that follows in the focused control is the user's).
+                            self.out.put({"kind": "input", "t": t})
             except Exception:  # noqa: BLE001
                 pass
             return user32.CallNextHookEx(None, code, wparam, lparam)
@@ -223,7 +290,7 @@ class _Hooks(threading.Thread):
     def _chord(vk: int, user32) -> str | None:
         down = lambda k: bool(user32.GetAsyncKeyState(k) & 0x8000)  # noqa: E731
         ctrl, alt, shift = down(0x11), down(0x12), down(0x10)
-        if vk in (0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C):
+        if vk in MODIFIER_KEYS:
             return None  # a modifier on its own
         name = NAMED_KEYS.get(vk)
         if name is None and (ctrl or alt) and vk in ARROWS:
@@ -248,6 +315,9 @@ class _Hooks(threading.Thread):
 class Recorder:
     """Records the windows of a set of processes until they exit, `stop()` says so, Ctrl+C, or
     `max_seconds`."""
+
+    last_user: dict | None = None  # the user's last action: {"desc", "t", "action"}
+    effects_unplaced = 0  # selections the application made, their cause already written
 
     def __init__(self, out_dir: Path, pids: set[int], *, screenshots: bool = False,
                  settle_ms: int = 400, max_seconds: float = 1800, hooks: bool = True,
@@ -309,10 +379,11 @@ class Recorder:
             def HandleAutomationEvent(self, sender, event_id):
                 if not rec._ours(sender):
                     return
+                t = time.time()  # when it came: reading the element takes a while
                 kind = {win.E_INVOKED: "invoke", win.E_SELECTED: "select"}.get(event_id)
                 desc = win.describe(sender)
                 if kind and desc:
-                    rec.q.put({"kind": kind, "desc": desc, "t": time.time()})
+                    rec.q.put({"kind": kind, "desc": desc, "t": t})
 
         class Prop(comtypes.COMObject):
             _com_interfaces_ = [win.UIA.IUIAutomationPropertyChangedEventHandler]
@@ -363,9 +434,10 @@ class Recorder:
 
             def HandleFocusChangedEvent(self, sender):
                 if rec._ours(sender):
+                    t = time.time()
                     desc = win.describe(sender)
                     if desc:
-                        rec.q.put({"kind": "focus", "desc": desc, "t": time.time()})
+                        rec.q.put({"kind": "focus", "desc": desc, "t": t})
 
         return Event(), Prop(), Focus()
 
@@ -489,7 +561,8 @@ class Recorder:
             if snap is not None:
                 self.trees[hwnd] = snap
                 self._window_info(hwnd, snap)
-            self._add({"kind": "window_open", "hwnd": hwnd, "t": time.time(), "snap": snap})
+            self._add({"kind": "window_open", "hwnd": hwnd, "t": time.time(), "snap": snap,
+                       "owner": win.owner(hwnd)})  # fmt: skip
         for hwnd in list(self.windows - current):
             self.windows.discard(hwnd)
             self._add({"kind": "window_close", "hwnd": hwnd, "t": time.time()})
@@ -570,13 +643,19 @@ class Recorder:
                     kind = "menu"
                 self._add({"kind": kind, "desc": desc, "t": ev["t"], "via": "mouse-hook",
                            "provisional": kind == "click", "injected": ev.get("injected")})  # fmt: skip
+                self._user(desc, ev["t"], self.pending[-1])
             elif kind == "key":
                 self._add({"kind": "key", "key": ev["key"], "t": ev["t"], "via": "keyboard-hook",
                            "injected": ev.get("injected"), "hwnd": win.foreground()})  # fmt: skip
+                self._user(self.focus, ev["t"], self.pending[-1])
             elif kind == "value":
                 self._typed(ev)
+                self._user(ev["desc"], ev["t"])
             elif kind == "typing":
                 self._typing(ev)
+                self._user(self.focus, ev["t"])
+            elif kind == "input":
+                self._user(self.focus, ev["t"])
             elif kind == "focus":
                 self._focus(ev)
             elif kind in ("invoke", "select", "toggle", "expand"):
@@ -588,17 +667,44 @@ class Recorder:
             ra == rb or ra in b.get("ancestors", ()) or rb in a.get("ancestors", ())
         )
 
+    def _user(self, desc: dict | None, t: float, action: dict | None = None) -> None:
+        """Note the user's last action: the control it was on (for a key, the control that had
+        the keyboard focus) and, when it is a step, the pending step itself."""
+        self.last_user = {"desc": desc or {}, "t": t, "action": action}
+
+    def _own_selection(self, ev: dict) -> bool:
+        """A selection the application made by itself (see `self_made_selection`): no step. It
+        is kept as an effect on the step that caused it, the user's last action, while that
+        step is not written yet; later ones are only counted (a note in `desktop.json`)."""
+        desc, last = ev["desc"], self.last_user
+        types = desc.get("ancestor_types") or []
+        popup = desc.get("window") in getattr(self, "popup_owner", {}) or not types
+        if last is None or not self_made_selection(desc, last["desc"], popup):
+            return False
+        cause = last.get("action")
+        if cause is None or not any(a is cause for a in self.pending):
+            self.effects_unplaced += 1
+            return True
+        effects = cause.setdefault("effects", [])
+        if not any(e["desc"].get("rid") == desc.get("rid") for e in effects):
+            effects.append({"kind": "select", "desc": desc, "t": ev["t"], "via": "uia-selection"})
+        return True
+
     def _semantic(self, ev: dict) -> None:
         desc, kind, state = ev["desc"], ev["kind"], ev.get("state")
         for a in reversed(self.pending[-4:]):  # the same event raised twice (toolkits do)
             if (a.get("raw_kind") == kind and (a.get("desc") or {}).get("rid") == desc.get("rid")
-                    and a.get("state") == state and ev["t"] - a["t"] < 0.6):  # fmt: skip
+                    and a.get("state") == state
+                    and ev["t"] - a.get("t_event", a["t"]) < 0.6):  # fmt: skip
                 return
+        if kind == "select" and self._own_selection(ev):
+            return
         # A mouse click on the same control a moment before was this action.
         before = len(self.pending)
-        self.pending = [a for a in self.pending if not (
+        clicks = [a for a in self.pending if (
             a.get("provisional") and a.get("desc") and self._same(a["desc"], desc)
             and 0 <= ev["t"] - a["t"] < CLICK_GRACE_S)]  # fmt: skip
+        self.pending = [a for a in self.pending if not any(a is c for c in clicks)]
         if kind == "invoke" and len(self.pending) == before:
             # No click on it: a key pressed a moment before did this (Enter presses the default
             # button, Esc the cancel button, an access key its control; WPF raises Invoke for
@@ -607,7 +713,23 @@ class Recorder:
                 if a["kind"] == "key" and 0 <= ev["t"] - a["t"] < KEY_GRACE_S:
                     a.setdefault("invoked_desc", desc)
                     return
-        base = {"desc": desc, "t": ev["t"], "raw_kind": kind, "state": state}
+        # The action happened when the mouse button was pressed: its event came later, and the
+        # window poll may already have seen a window the click opened.
+        base = {"desc": desc, "t": min([ev["t"], *(c["t"] for c in clicks)]), "t_event": ev["t"],
+                "raw_kind": kind, "state": state}  # fmt: skip
+        if clicks:
+            base["mouse"] = True
+            if any(c.get("injected") for c in clicks):
+                base["injected"] = True
+            for c in clicks:
+                if c.get("effects"):
+                    base.setdefault("effects", []).extend(c["effects"])
+        n = len(self.pending)
+        self._semantic_add(kind, state, desc, base, ev)
+        if len(self.pending) > n:
+            self._user(desc, base["t"], self.pending[-1])
+
+    def _semantic_add(self, kind: str, state, desc: dict, base: dict, ev: dict) -> None:
         if kind == "invoke":
             menu = desc.get("type") == "MenuItem"
             self._add({**base, "kind": "menu" if menu else "click", "via": "uia-invoke"})
@@ -729,13 +851,14 @@ class Recorder:
         if not force and any(a.get("provisional") and time.time() - a["t"] < CLICK_GRACE_S
                              for a in self.pending):  # fmt: skip
             return
-        batch = sorted(self.pending, key=lambda a: a["t"])
+        batch = order_batch(self.pending)
         self.pending = []
         after: dict[int, tuple[dict, dict] | None] = {}
         for a in batch:
-            hwnd = self._window_of(a)
-            if hwnd and hwnd not in after:
-                after[hwnd] = self._snapshot(hwnd)
+            for b in (a, *(a.get("effects") or ())):  # an effect can be in another window
+                hwnd = self._window_of(b)
+                if hwnd and hwnd not in after:
+                    after[hwnd] = self._snapshot(hwnd)
         for a in reversed(batch):  # a window gone by now: its tree as it was when it opened
             hwnd = self._window_of(a)
             if a.get("snap") is not None and after.get(hwnd) is None and a["kind"] == "window_open":
@@ -920,6 +1043,9 @@ class Recorder:
                 step["invoked"] = self._locate(a["invoked_desc"], [before, snap])["selector"]
         elif kind == "menu" and desc:
             step["menu_path"] = self._menu_path(desc, [before, snap])
+        if a.get("effects"):
+            # What the application did by itself because of this step: seen, not a user step.
+            step["effects"] = [self._effect(e, after) for e in a["effects"]]
         tree_snap = snap if kind != "window_close" else None
         if kind == "menu_open":
             tree_snap = a.get("snap") or self._snapshot(a["hwnd"])
@@ -938,6 +1064,18 @@ class Recorder:
                     step["screenshot"] = shot
         self.file.write(json.dumps(step, ensure_ascii=False) + "\n")
         self.file.flush()
+
+    def _effect(self, e: dict, after: dict) -> dict:
+        """A selection the application made because of a step: where, never what (a row holds
+        data). `{"action": "select", "selector", "container", "window", "ts", "via"}`."""
+        hwnd = self._window_of(e)
+        snaps = [after.get(hwnd), self.trees.get(hwnd)]
+        window = self._window_info(hwnd, snaps[0] or snaps[1])
+        return {"action": e["kind"], "selector": self._locate(e["desc"], snaps)["selector"],
+                "container": self._container(e["desc"], snaps), "item_is": "data",
+                "window": window.get("selector"), "via": e.get("via"),
+                "ts": datetime.fromtimestamp(e["t"], UTC).isoformat(
+                    timespec="milliseconds").replace("+00:00", "Z")}  # fmt: skip
 
     def _desc_of(self, hwnd: int, rid: tuple) -> dict:
         """Properties of a control by runtime id (for one found only as an ancestor)."""
@@ -988,14 +1126,17 @@ class Recorder:
         procs = []
         for p in self.processes.values():
             sig = dict(p["signals"])
-            trees = [json.loads((self.out / f).read_text(encoding="utf-8"))
-                     for f in sorted((self.out / "trees").glob("*.json"))][:200]  # fmt: skip
+            trees = [json.loads(f.read_text(encoding="utf-8"))
+                     for f in sorted((self.out / "trees").glob("*.json"))[:200]]  # fmt: skip
             sig.update(detect.signals_from_trees(trees))
             tech = detect.detect(sig)
             sig["framework_ids"] = sorted(sig["framework_ids"])
             sig["classes"] = sorted(sig["classes"])
             procs.append({"process": p["process"], "pid": p["pid"], "technology": tech,
                           "signals": sig})  # fmt: skip
+        if self.effects_unplaced:
+            self.notes.append(f"{self.effects_unplaced} selection(s) the application made by "
+                              "itself, after the step before them was written: not recorded")  # fmt: skip
         doc = {
             "format": FORMAT,
             "surface": SURFACE,

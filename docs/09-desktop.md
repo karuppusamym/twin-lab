@@ -38,7 +38,9 @@ A step:
 ```
 
 Actions: `click`, `double_click`, `right_click`, `type`, `select`, `toggle`, `expand`, `collapse`,
-`menu`, `key`, `window_open`, `window_close`, `menu_open`, `focus`. `url` and `dom` are the web
+`menu`, `key`, `window_open`, `window_close`, `menu_open`, `focus`. A step can carry `effects`:
+what the application did by itself because of it (a selection it made; see Limits), which is
+not a step. `url` and `dom` are the web
 recorder's fields, left empty, so desktop and web steps share one shape and one timeline
 (`labctl.desktop.split.interleave`).
 
@@ -46,10 +48,10 @@ How each action is seen, and where UI Automation events were not enough:
 
 | Action | UI Automation path (WinForms, WPF, UWP/WinUI, Win32/MFC, JavaFX) | Java path (Swing/AWT) |
 |---|---|---|
-| click, double/right click, menu | low-level mouse hook (`WH_MOUSE_LL`); the element is read **in the hook**, before the click is delivered (a dialog it opens would cover the point). The innermost element is often the caption (in WPF the TextBlock inside a Button, CheckBox or MenuItem): the control it belongs to is recorded | the same hook; the control under the point is found in the window's last snapshot, else asked from the bridge |
+| click, double/right click, menu | low-level mouse hook (`WH_MOUSE_LL`); the element is read **in the hook**, before the click is delivered (a dialog it opens would cover the point). The innermost element is often the caption (in WPF the TextBlock inside a Button, CheckBox or MenuItem): the control it belongs to is recorded | the same hook, which also notes where the window is (a click on OK closes a message box before the click is handled); the control under the point is found in the window's last snapshot, else asked from the bridge |
 | click by a pattern (script, accessibility tool) | `Invoke_Invoked`, **only when the toolkit raises it**: WPF does (also for a mouse click, which is then recorded once), WinForms (.NET 6) does not. An Invoke within 0.4 s after a key press is what the key did (Enter on the default button): no click step, the key step names the control as `invoked` | not seen |
 | type | `ValueProperty` change events while the control has keyboard focus (shape computed in the handler, value dropped), else the value is read once when focus leaves. A WPF PasswordBox does neither: there a character key pressed while it has the focus makes the `type` step (`via: keyboard-hook`; which key, and how many, is not kept) | the focused text field polled through the bridge every 300 ms |
-| select | `SelectionItem_ElementSelected`; a Win32 drop-down's items are read when its list window opens | the window tree compared before and after (a combo box shows another item) |
+| select | `SelectionItem_ElementSelected`, when the user's last input was on that item or in its container (else it is an effect of the step before it); a Win32 drop-down's items are read when its list window opens | the window tree compared with the one read before (a combo box shows another item): when a click or a key arrives (the tree is asked for in the hook; a change it already shows came before that input), after each batch of actions, and every 1.5 s when idle |
 | toggle, expand, collapse | `ToggleState` / `ExpandCollapseState` change events; a click on a check box becomes a toggle with its state after | click on a check box; tree comparison for other changes |
 | key | low-level keyboard hook: Enter, Tab, Esc, Delete, F-keys and chords with Ctrl or Alt. Plain characters are **never** recorded | same |
 | window open / close / focus | polled every 250 ms (EnumWindows, GetForegroundWindow). A WPF `Popup` window (a menu's drop-down, a combo box's list) is not a window of the application: it gives `menu_open` or the combo box's items, and its steps belong to the window that owns it | same |
@@ -198,9 +200,17 @@ handles that error itself and pytest's fault handler reports it. The lookups suc
     key presses (a person's, or `Driver.keys`); a password set by a pattern call or pasted with
     the mouse is not recorded, and `verify` then has no step to type the password at.
   - WPF raises `SelectionItem_ElementSelected` also when the application selects a row itself
-    (a grid filled again with its first row selected). It is recorded as a `select` step whose
-    item is data; `verify` does not replay it and reports it skipped. It cannot be told from a
-    script's pattern call.
+    (after Save the grid is filled again and the saved row selected). That is no user step: a
+    selection is the user's only when the user's last input was on the item or in its list,
+    grid, tree, combo box or tab control (a mouse press there, a key pressed while the focus
+    was there, or the pattern action recorded just before, such as a script expanding a combo
+    box). Any other selection is written as an `effects` entry of the step that caused it
+    (the Save click), with its place and never its content; `verify` does not replay effects
+    and does not count them. When the step that caused it was already written, the selection is
+    only counted in the notes of `desktop.json`. The cost: a script that selects a row by a
+    pattern call alone, with no input and no other action in that list before it, is taken
+    for the application's doing. A row the user selects is still a `select` step whose item
+    is data; `verify` does not replay it and reports it skipped.
   - The items of a drop-down menu are in the window's tree only while the menu is open.
     `verify` compares them only when the recorded and the live tree both show the menu open;
     an item is not reported missing or extra against a closed menu.
@@ -211,13 +221,25 @@ handles that error itself and pytest's fault handler reports it. The lookups suc
     a person does not). The scripted run waits after each window opens.
   - A grid row's Name is the row object's text (`ToString()`); it is kept as its shape, like
     every row.
+- **Order within a batch** is by time: a mouse click has the time of the mouse press (also
+  when its Invoke event arrives after the window poll saw the dialog it opened), a window the
+  time the poll saw it. A click made by a pattern call has no mouse press; its Invoke event is
+  put before a window it is the owner of when that window was seen up to 0.8 s earlier.
 - **Snapshots come after a batch** (0.4 s of quiet): when actions follow each other faster, the
   after-tree may show a later state (for example a message box already answered). `verify`
   therefore does not compare enabled states when a modal dialog disables a window in one tree
   and not in the other.
 - Grid and list rows beyond 25 per control are left out of snapshots and counted.
-- Java: typing and selection are polled (up to a second late); a combo box change made and
-  undone within one poll is missed; keys are not replayed into Java windows by `verify`.
+- Java: typing and selection are polled, so they are seen up to a second late. A selection is
+  still written where it happened: the tree read when the next click or key arrives shows it,
+  and it goes before that step. The exception: when that click itself changes the controls of
+  the window before the tree is read (it opens a menu), the tree is not used and a selection
+  made without mouse or keyboard just before it is written after the click. A combo box change
+  made and undone within one poll is missed; keys are not replayed into Java windows by
+  `verify`. A window's tree is read control by control while the application runs: a reading
+  in which a child could not be read is read again (three times at most), a tree read while
+  the window closes is dropped, and a tree read when idle is dropped when a click or a key
+  arrived meanwhile, so an input is always located in a whole tree of the window.
 - Window titles are masked by rule (digits, after `:`, words seen as data); a title that holds a
   name never seen elsewhere in the recording is kept.
 - UWP/WinUI, Win32/MFC and JavaFX run through the same UI Automation code but were not

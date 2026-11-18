@@ -8,11 +8,14 @@ how the tree is read and how actions are seen differ (docs/09-desktop.md):
 | click, double_click, right_click, menu, toggle | the same mouse hook; the control at the point is read through the bridge (`getAccessibleContextAt`) |
 | key | the same keyboard hook |
 | type | the focused control's text, polled through the bridge every 300 ms; its shape is kept when focus leaves it or another action comes |
-| select (combo box), toggle by keyboard | the window's tree before and after each action (and every 1.5 s when idle) compared: a combo box showing another item, a check box changing state |
+| select (combo box), toggle by keyboard | the window's tree compared with the one read before: when a click or a key arrives (the tree is asked for in the hook), after each batch of actions, and every 1.5 s when idle: a combo box showing another item, a check box changing state |
 | window_open, window_close, menu_open | polled, as for UI Automation |
 
 The Access Bridge has no reliable event for typing or selection that works for every Swing
-component, so this path polls; that is why a change and its step can be up to a second apart.
+component, so this path polls. A change is therefore seen later than it happened; its step is
+placed by what was seen: a change already there in the tree read when a click or a key arrived
+happened before that input (unless the input was on that very control or in its list, see
+`input_made`), one found only after the batch happened after it.
 
 Locators: `jab:Name=Save;Role=push button` (Role and Name from the AccessibleContext; Index
 among siblings of the same role when there is no name), with the ancestor path, exactly as UIA
@@ -66,6 +69,47 @@ def find_paths(tree: dict, selector: str) -> list[tuple]:
     return out
 
 
+def input_made(change: dict, target: dict | None) -> bool:
+    """Whether a change found in the tree read when an input arrived is that input's own doing.
+
+    The tree is asked for in the hook, but the bridge answers a moment later, when the click
+    may already have had its effect. `change` is the control that changed (`rid`: its index
+    path, `type`), `target` the control the mouse was pressed on or, for a key, the control with
+    the keyboard focus. The input made the change when it was on that control, inside it, or
+    (for a combo box) on an item of a list. Every other change was there before the input: it
+    is a step of its own, placed before it."""
+    if not target:
+        return False
+    rid, trid = tuple(change.get("rid") or ()), tuple(target.get("rid") or ())
+    if rid and trid[: len(rid)] == rid:
+        return True
+    return change.get("type") == "ComboBox" and (
+        target.get("type") in ("ListItem", "List")
+        or "ComboBox" in (target.get("ancestor_types") or [])
+    )
+
+
+def place_changes(changes: list[dict], target: dict | None, t: float) -> list[dict]:
+    """The changes found in the tree read when an input arrived at time `t`, each with the time
+    that puts it where it happened: just before the input, or just after it when the input made
+    it (`input_made`). A check box the input itself changed is left out: the click on it is the
+    toggle step."""
+    out = []
+    for c in changes:
+        own = input_made(c["desc"], target)
+        if own and c["kind"] == "toggle":
+            continue
+        out.append({**c, "t": t + 0.001 if own else t - 0.001})
+    return out
+
+
+def same_structure(a: dict, b: dict) -> bool:
+    """Whether two raw trees of a window hold the same controls at the same index paths (their
+    values and states may differ)."""
+    shape = lambda t: [(tuple(n.get("rid") or ()), n.get("role")) for n, _a, _i in locator.walk(t)]  # noqa: E731
+    return shape(a) == shape(b)
+
+
 class JavaRecorder(Recorder):
     """The recorder for Java windows: the bridge instead of UI Automation (see the module)."""
 
@@ -76,6 +120,7 @@ class JavaRecorder(Recorder):
         self.jab = jab
         self.bridge = jab.shared()
         self.focus_state: dict | None = None  # {"rid", "window", "type", "shape0", "shape", "desc"}
+        self.focused_ctl: dict | None = None  # the control with the keyboard focus, any type
         self.last_diff = time.monotonic()
 
     # UI Automation is not used for Java windows.
@@ -85,19 +130,30 @@ class JavaRecorder(Recorder):
     def _snapshot(self, hwnd: int):
         if not hwnd or self.win.window_pid(hwnd) not in self.pids:
             return None
+        # Where the window is: a click that closes it is located by this. Read before the
+        # tree, because the window can close while the bridge reads the tree (the tree still
+        # comes back whole, the window's rectangle is then empty).
+        rect = self._rect(hwnd)
+        if rect is None:
+            return None
         try:
             raw = self.bridge.call(self.jab.capture, hwnd)
         except Exception:  # noqa: BLE001 - the window went away
             return None
-        if raw is None:
-            return None
+        if raw is None or not self.win.user32.IsWindowVisible(hwnd):
+            return None  # gone while it was read: the last tree of the window stays
+        raw["_screen"] = rect[:2]
+        return raw, privacy.clean(raw, self.known, self.structure)
+
+    def _rect(self, hwnd: int) -> tuple[int, int, int, int] | None:
+        """The window's rectangle on the screen, or None when it is gone."""
         import ctypes
         from ctypes import wintypes
 
-        r = wintypes.RECT()  # where the window was: a click that closes it is located by this
-        self.win.user32.GetWindowRect(hwnd, ctypes.byref(r))
-        raw["_screen"] = (r.left, r.top)
-        return raw, privacy.clean(raw, self.known, self.structure)
+        r = wintypes.RECT()
+        if not hwnd or not self.win.user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(r)):
+            return None
+        return (r.left, r.top, r.right, r.bottom) if r.right > r.left else None
 
     def _desc_of(self, hwnd: int, rid: tuple) -> dict:
         snap = self.trees.get(hwnd)
@@ -120,11 +176,19 @@ class JavaRecorder(Recorder):
 
                 def resolve(x, y, hwnd):
                     top = win.root_window(hwnd or 0)
-                    # Asked now, answered by the bridge thread at once: before a dialog the
-                    # click opens can cover the point.
-                    return top, bridge.submit(jab.describe_at, top, x, y)
+                    # Taken now, in the hook: where the window is (a click can close it
+                    # before the event is handled). Asked now, ahead of the calls waiting for
+                    # the bridge thread: what is at the point, then the window's tree as the
+                    # input finds it (what changed in it since the last read came before).
+                    return top, {"rect": self._rect(top), "pid": win.window_pid(top),
+                                 "desc": bridge.submit(jab.describe_at, top, x, y, urgent=True),
+                                 "pre": bridge.submit(jab.capture, top, urgent=True)}  # fmt: skip
 
-                hooks = recorder._Hooks(self.q, lambda pid: pid in self.pids, resolve)
+                def on_key(fg):
+                    top = win.root_window(fg or 0)
+                    return {"hwnd": top, "pre": bridge.submit(jab.capture, top, urgent=True)}
+
+                hooks = recorder._Hooks(self.q, lambda pid: pid in self.pids, resolve, on_key)
                 hooks.start()
                 hooks.ready.wait(5)
                 if hooks.failed:
@@ -188,6 +252,9 @@ class JavaRecorder(Recorder):
                 node = self.bridge.call(self.jab.focused, fg, timeout=5)
             except Exception:  # noqa: BLE001
                 node = None
+        self.focused_ctl = (
+            {k: node.get(k) for k in ("rid", "window", "type")} if node is not None else None
+        )
         f = self.focus_state
         same = (
             node is not None
@@ -254,19 +321,22 @@ class JavaRecorder(Recorder):
             except Exception:  # noqa: BLE001 - queue.Empty
                 return
             kind = ev["kind"]
-            if kind == "typing":
-                continue  # a character key (for UI Automation password fields): typing is polled
+            if kind in ("typing", "input"):
+                continue  # a character or navigation key: typing and selection are polled
             self._flush_typing()  # what was typed comes before the action that follows it
+            quick = ev.get("quick") or {}
             if kind in ("click", "double_click", "right_click"):
                 # The window as it was before the click (its last snapshot) says what was under
                 # the point; the bridge's answer comes later, when a dialog may cover it.
-                desc = self._hit(ev.get("el") or 0, ev["x"], ev["y"])
-                fut = ev.get("quick")
+                top = ev.get("el") or 0
+                desc = self._hit(top, ev["x"], ev["y"], quick.get("rect"))
+                fut = quick.get("desc")
                 if desc is None:
                     try:
                         desc = fut.result(timeout=5) if fut is not None else None
                     except Exception:  # noqa: BLE001
                         desc = None
+                self._before_input(top, quick.get("pre"), desc, ev["t"])
                 if recorder.DEBUG:
                     import sys as _sys
 
@@ -275,9 +345,11 @@ class JavaRecorder(Recorder):
                 if not desc:
                     continue
                 hwnd = desc.get("window") or 0
-                desc["pid"] = win.window_pid(hwnd)
+                # The hook passes only clicks in windows of the recorded processes; the
+                # window itself may be gone by now (the click closed it).
+                desc["pid"] = win.window_pid(hwnd) or quick.get("pid")
                 if not desc["pid"] and (hwnd in self.trees or hwnd in self.popup_owner):
-                    desc["pid"] = next(iter(self.pids))  # the click closed our window
+                    desc["pid"] = next(iter(self.pids))
                 if desc["pid"] not in self.pids:
                     continue
                 if desc.get("type") == "MenuItem" and kind == "click":
@@ -285,8 +357,38 @@ class JavaRecorder(Recorder):
                 self._add({"kind": kind, "desc": desc, "t": ev["t"], "via": "mouse-hook+jab",
                            "injected": ev.get("injected")})  # fmt: skip
             elif kind == "key":
+                self._before_input(quick.get("hwnd") or 0, quick.get("pre"), self.focused_ctl,
+                                   ev["t"])  # fmt: skip
                 self._add({"kind": "key", "key": ev["key"], "t": ev["t"], "via": "keyboard-hook",
                            "injected": ev.get("injected"), "hwnd": win.foreground()})  # fmt: skip
+
+    def _before_input(self, hwnd: int, fut, target: dict | None, t: float) -> None:
+        """The window's tree as a click or a key found it (asked for in the hook), compared
+        with the tree read before: what changed in between is a step of its own, placed before
+        the input, or after it when the input itself made the change (`place_changes`). Without
+        this a combo box item chosen before a click was only found after the click's batch,
+        and written after it.
+
+        Only a tree with the controls of the last one is used (`same_structure`): controls are
+        known by their index path, and the click itself may already have changed the window (a
+        menu that opened shifts the paths). Such a tree is dropped; what changed is then found
+        after the batch, as before."""
+        old = self.trees.get(hwnd)
+        if fut is None or not hwnd or old is None:
+            return
+        try:
+            raw = fut.result(timeout=5)
+        except Exception:  # noqa: BLE001 - the window went away, or the JVM did
+            raw = None
+        if raw is None or not same_structure(old[0], raw):
+            return
+        rect = self._rect(hwnd)
+        if rect is None or not self.win.user32.IsWindowVisible(hwnd):
+            return  # the window is closing: its last tree stays
+        new = (raw, privacy.clean(raw, self.known, self.structure))
+        self.pending.extend(place_changes(self._changes(hwnd, old, new, covered=False), target, t))
+        raw["_screen"] = rect[:2]
+        self.trees[hwnd] = new  # the same controls at the same paths, their newest state
 
     HIT_TYPES = {
         "Button",
@@ -306,16 +408,15 @@ class JavaRecorder(Recorder):
         "Spinner",
     }
 
-    def _hit(self, hwnd: int, x: int, y: int) -> dict | None:
+    def _hit(self, hwnd: int, x: int, y: int, rect: tuple | None = None) -> dict | None:
+        """The control at a screen point, from the window's last snapshot. `rect` is where the
+        window was when the mouse was pressed (read in the hook); without it, where it is now
+        or, when it is gone, where it was when the snapshot was read."""
         snap = self.trees.get(hwnd)
         if not hwnd or snap is None:
             return None
-        import ctypes
-        from ctypes import wintypes
-
-        r = wintypes.RECT()
-        self.win.user32.GetWindowRect(hwnd, ctypes.byref(r))
-        left, top = (r.left, r.top) if r.right > r.left else snap[0].get("_screen", (0, 0))
+        rect = rect or self._rect(hwnd)
+        left, top = rect[:2] if rect else snap[0].get("_screen", (0, 0))
         px, py = x - left, y - top
         best, best_anc = None, ()
         for node, anc, _i in locator.walk(snap[0]):
@@ -328,7 +429,7 @@ class JavaRecorder(Recorder):
         if recorder.DEBUG:
             import sys as _sys
 
-            print("DEBUG hit", hwnd, (r.left, r.top, r.right, r.bottom), (px, py), snap[0].get("rect"),
+            print("DEBUG hit", hwnd, (left, top), (px, py), snap[0].get("rect"),
                   snap[0].get("name"), best and best.get("name"), file=_sys.stderr)  # fmt: skip
         if best is None:
             return None
@@ -355,7 +456,10 @@ class JavaRecorder(Recorder):
             return
         old = self.trees.get(fg)
         new = self._snapshot(fg)
-        if new is None:
+        if new is None or not self.q.empty():
+            # A click or a key arrived while the tree was read: it may show the window half
+            # way through what that input does, and the input is located in the last tree.
+            # That tree stays; the window is compared again after the input's batch.
             return
         self.trees[fg] = new
         self._diff(fg, old, new, covered=False)
@@ -363,10 +467,20 @@ class JavaRecorder(Recorder):
             self._finish(force=True)
 
     def _diff(self, hwnd: int, old, new, covered: bool) -> None:
-        """Steps the tree shows but no event did: a combo box showing another item, a check box
-        changed by the keyboard or a pattern, a text changed without focus."""
+        """Steps the tree shows but no event did, found after a batch or when idle: written
+        now, with the time they were found."""
+        added = self._changes(hwnd, old, new, covered)
+        for a in added:
+            self.pending.append(a)
+        if added:
+            self.last_activity = 0  # write them now
+            super()._finish(force=True)
+
+    def _changes(self, hwnd: int, old, new, covered: bool) -> list[dict]:
+        """What two trees of a window show changed: a combo box showing another item, a check
+        box in another state (not when `covered`: a click on it was recorded)."""
         if old is None or new is None:
-            return
+            return []
         o = {tuple(n.get("rid") or ()): n for n, _a, _i in locator.walk(old[0])}
         added = []
         for n, _a, _i in locator.walk(new[0]):
@@ -386,11 +500,7 @@ class JavaRecorder(Recorder):
             elif t == "CheckBox" and was.get("toggle") != n.get("toggle") and not covered:
                 added.append({"kind": "toggle", "desc": desc, "state": n.get("toggle"),
                               "t": time.time(), "via": "jab-tree-diff"})  # fmt: skip
-        for a in added:
-            self.pending.append(a)
-        if added:
-            self.last_activity = 0  # write them now
-            super()._finish(force=True)
+        return added
 
 
 def record(command: list[str], out_dir: Path, *, script=None, wait: float = 30.0, **kw) -> Path:
