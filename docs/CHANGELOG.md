@@ -21,6 +21,27 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   (their packages are not on this machine). WinForms, WPF and Java Swing have their gates in
   code but were not run: they take the real mouse and need `TWINLAB_DESKTOP_GUI=1`. The React
   entry is NOT RUN in CI, where its vendor files are not built.
+## 2026-11-18 — JSF proven on a real application: the Caseboard reference
+- Detection and capture had rules for JSF but had never met a JSF application. There is one now:
+  `reference/web/caseboard-jsf/` (Mojarra 2.3.9 on embedded Jetty 9.4, Facelets pages, classic
+  managed beans, server-side view state, an ajax partial update, POST then redirect; synthetic
+  data in memory). Its jars are fetched from Maven Central with pinned checksums
+  (`fetch_libs.py`) and never committed; `build.py` and `run.py` need only a JDK.
+- The three certification gates run on it (`certify_local.py`,
+  `tests/test_reference_jsf.py`, skipped without a JDK or the jars): DETECT names JSF, Mojarra
+  and specification 2.3; CAPTURE holds all 24 expected actions; SELF-REPLAY against a fresh
+  instance replays 48 of 48 steps with no difference and 23 of 23 acceptance cases.
+- Four defects it found, each fixed with a test beside its neighbours: an id with a colon
+  (`search:q`) was cut at the selector's backslash, so every field given a value was compared as
+  a difference (`dom.key_of`); `;jsessionid=<id>` in an address was compared by its value, new
+  in every session (`fidelity.same_address`); the submit button a command link adds and clicks
+  from script was recorded as a click of its own that no replay could find (recorder); and the
+  analysis did not say which JSF implementation or version (`server.implementation`,
+  `server.framework_version`, read from JSF's own script).
+- Left open: MyFaces and Jakarta Faces 4 are matched by rule but not proven on an application;
+  the implementation's release (2.3.9) is in no page, so it is not reported; client-side state
+  saving, PrimeFaces components, file upload and a session that times out were not exercised.
+
 ## 2026-11-18 — A recording cut short by a crash, a timeout or a restart
 - An audit listed recovery after an interrupted recording as never validated. It is now tested
   (`tests/test_recording_recovery.py`, no browser): a last line of `steps.jsonl` cut off in the

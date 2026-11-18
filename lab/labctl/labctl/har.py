@@ -577,6 +577,15 @@ SERVER_RULES: list[_Rule] = [
         C_,
         "javax.faces.resource addresses",
     ),
+    # JSF's own script says which specification it implements: 23000 is 2.3, 40000 is 4.0.
+    _srv(
+        "text",
+        r"\b(?:jsf|faces)\.specversion\s*=\s*(?P<v>\d)(?P<vminor>\d)000\b",
+        "Java",
+        "JSF",
+        C_,
+        "specversion in JSF's own script (jsf.js)",
+    ),
     _srv(
         "path",
         r"/j_spring_security_check$|/j_security_check$",
@@ -1180,6 +1189,25 @@ CLIENT_RULES: list[_Rule] = [
         "primefaces script",
         implies=("Java", "JSF"),
     ),
+    # Which JSF implementation serves the pages, as its own script (jsf.js) names itself.
+    _rule(
+        "text",
+        r"\bmojarra\.\w+\s*=\s*function\b",
+        "lib",
+        "Mojarra",
+        C_,
+        "mojarra.* functions in JSF's own script (jsf.js)",
+        implies=("Java", "JSF"),
+    ),
+    _rule(
+        "text",
+        r"\bmyfaces\._impl\b",
+        "lib",
+        "MyFaces",
+        C_,
+        "myfaces._impl in JSF's own script (jsf.js)",
+        implies=("Java", "JSF"),
+    ),
     _rule(
         "class",
         r"^rf-(dt|p|tb|tbl|pnl|ac|cal|ddm|ei)\b",
@@ -1357,6 +1385,11 @@ ANGULARJS_SCRIPT = re.compile(
     r"angular(?:js)?(?:[-.]1\.\d+(?:\.\d+)?)?(?:\.min)?\.js$|/angularjs/", re.I
 )
 TEXT_BANNER = 4000  # bytes of a script searched for a version banner
+FACES_SCRIPT = re.compile(r"/(?:javax|jakarta)\.faces\.resource/(?:jsf|faces)\.js", re.I)
+FACES_SCRIPT_FACTS = re.compile(
+    r"\b(?:jsf|faces)\.specversion\s*=\s*\d{5}\b|\bmojarra\.\w+\s*=\s*function\b|\bmyfaces\._impl\b"
+)
+JSF_IMPLEMENTATIONS = ("Mojarra", "MyFaces")
 
 # JavaScript bundles that show a framework by what is inside them.
 JS_MARKERS: list[tuple[str, re.Pattern, str]] = [
@@ -1408,6 +1441,10 @@ def _signals(
         out["script"].add(path)
         if text:
             out["text"].add(text[:TEXT_BANNER])
+            if FACES_SCRIPT.search(path):
+                # JSF's own script: what it says of itself is anywhere in it (a licence comment
+                # may fill the banner, and the implementation's namespace comes last).
+                out["text"].update(m.group(0) for m in FACES_SCRIPT_FACTS.finditer(text))
     return out
 
 
@@ -1420,7 +1457,9 @@ def _hits(values: dict[str, set[str]]) -> list[dict]:
             m = rule.rx.search(value)
             if m:
                 found = True
-                version = version or m.groupdict().get("v")
+                groups = m.groupdict()
+                if not version and groups.get("v"):  # `vminor`: the digit after the dot
+                    version = ".".join(x for x in (groups["v"], groups.get("vminor")) if x)
                 if version:
                     break
         if found:
@@ -1496,6 +1535,11 @@ def _pick_server(hits: list[dict]) -> dict:
         server["framework"] = fw
         server["framework_marker"] = h["rule"].marker
         server["framework_confidence"] = c
+        # The version a marker of this framework itself showed (`version` below is of any marker
+        # of the technology, such as a Servlet header beside JSF).
+        own = [x["version"] for _, f, x in fws if f == fw and x["version"] and not x.get("implied")]
+        if own:
+            server["framework_version"] = own[0]
     version = next((h["version"] for _, _, h in sorted(items, key=lambda i: -RANK[i[0]])
                     if h["version"] and not h.get("implied")), None)  # fmt: skip
     if version:
@@ -1563,7 +1607,14 @@ def _framework(
         if srv in found:
             label = {"aspnet-webforms": "ASP.NET Web Forms", "jsf": "JSF"}[srv]
             result = {"framework": label, "rendering": "server", "marker": found[srv]["marker"]}
+            if server.get("framework") == label and server.get("framework_version"):
+                result["version"] = server["framework_version"]
             break
+    if server.get("framework") == "JSF":  # Mojarra or MyFaces, when the pages load its script
+        impl = next((best[n] for n in JSF_IMPLEMENTATIONS if n in best), None)
+        if impl:
+            server["implementation"] = impl["rule"].name
+            server["implementation_marker"] = impl["rule"].marker
     if not result:
         for client in ("angular", "react", "vue"):
             if client in found:

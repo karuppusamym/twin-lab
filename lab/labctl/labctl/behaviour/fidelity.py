@@ -30,6 +30,7 @@ are reported in their own section and never counted as passed.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -1536,13 +1537,23 @@ class _WrongAddress(AssertionError):
     pass
 
 
+_SESSION_IN_PATH = re.compile(r"(;jsessionid=)[^;/?#]*", re.I)
+
+
+def same_address(url: str) -> str:
+    """An address as two sessions can share it. A Java server writes the session's id into the
+    path (`/login.xhtml;jsessionid=node01ab...`) until it knows the browser keeps cookies; the id
+    is new in every session, so that it is there is compared, never its value."""
+    return _SESSION_IN_PATH.sub(r"\1*", url)
+
+
 def _wait_address(page, url: str, timeout_ms: int = 5000) -> None:
     """A navigation the step before caused (or the app made by itself) is not made again: the
     replica must arrive at the same address on its own."""
     import time
 
     deadline = time.monotonic() + max(timeout_ms, 5000) / 1000
-    while page.url != url:
+    while same_address(page.url) != same_address(url):
         if time.monotonic() >= deadline:
             raise _WrongAddress(f"expected {url}, the page is at {page.url}")
         page.wait_for_timeout(50)

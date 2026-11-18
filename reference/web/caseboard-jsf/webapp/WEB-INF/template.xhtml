@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:h="http://xmlns.jcp.org/jsf/html"
+      xmlns:f="http://xmlns.jcp.org/jsf/core"
+      xmlns:ui="http://xmlns.jcp.org/jsf/facelets">
+<h:head>
+  <title>Caseboard - <ui:insert name="title">Cases</ui:insert></title>
+  <h:outputStylesheet library="css" name="caseboard.css"/>
+</h:head>
+<h:body>
+  <div class="bar">
+    <span class="brand">Caseboard</span>
+    <!-- No id on this form: JSF generates one (j_idtN), as most real applications have. -->
+    <h:form rendered="#{login.signedIn}" styleClass="who">
+      <h:outputText id="who" value="Signed in as #{login.username}"/>
+      <h:commandLink id="signOut" value="Sign out" action="#{login.signOut}" immediate="true"/>
+    </h:form>
+  </div>
+  <div class="main">
+    <ui:insert name="content"/>
+  </div>
+</h:body>
+</html>

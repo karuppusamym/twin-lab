@@ -1,0 +1,18 @@
+body { font-family: Segoe UI, Arial, sans-serif; margin: 0; color: #1f2933; background: #f5f7fa; }
+.bar { background: #243b53; color: #fff; padding: 10px 24px; display: flex; align-items: center; }
+.bar .brand { font-weight: 600; font-size: 18px; flex: 1; }
+.bar form { margin: 0; }
+.bar a { color: #fff; margin-left: 16px; }
+.main { padding: 16px 24px; max-width: 900px; }
+h1 { font-size: 22px; }
+table.grid { border-collapse: collapse; width: 100%; background: #fff; margin-top: 12px; }
+table.grid th, table.grid td { border: 1px solid #d9e2ec; padding: 6px 10px; text-align: left; }
+table.grid th { background: #e4e7eb; }
+table.fields td { padding: 4px 12px 4px 0; vertical-align: top; }
+.pager { margin-top: 10px; }
+.pager a, .pager span { margin-right: 14px; }
+.messages { list-style: none; padding: 0; }
+.error { color: #ba2525; }
+.info { color: #1f7a4d; }
+.note { color: #52606d; }
+input[type=submit] { margin-top: 10px; margin-right: 12px; padding: 4px 14px; }

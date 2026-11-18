@@ -569,7 +569,13 @@ LISTENER_JS = r"""
     }
     return true;
   }
+  let userClick = false;
   function onClick(el, e) {
+    // A click the page's own script makes while the person's click is still being handled is the
+    // page's doing, not a step: a JSF command link (Mojarra's jsfcljs) adds a submit button to
+    // the form, clicks it and removes it. Replaying the person's click makes the page do it again.
+    if (e && e.isTrusted === false && userClick) return;
+    if (e && e.isTrusted) { userClick = true; setTimeout(() => { userClick = false; }, 0); }
     if (closedHost(el)) return;
     const t = target(el);
     if (!t || t.nodeType !== 1) return;

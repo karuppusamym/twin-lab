@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<faces-config xmlns="http://xmlns.jcp.org/xml/ns/javaee"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee http://xmlns.jcp.org/xml/ns/javaee/web-facesconfig_2_2.xsd"
+              version="2.2">
+  <application>
+    <locale-config>
+      <default-locale>en</default-locale>
+    </locale-config>
+  </application>
+
+  <!-- Classic managed beans, declared here: no CDI container and no annotation scanning needed.
+       The descriptor says 2.2 on purpose: Mojarra 2.3 demands a CDI BeanManager when it says 2.3. -->
+  <managed-bean>
+    <managed-bean-name>store</managed-bean-name>
+    <managed-bean-class>caseboard.CaseStore</managed-bean-class>
+    <managed-bean-scope>application</managed-bean-scope>
+  </managed-bean>
+  <managed-bean>
+    <managed-bean-name>login</managed-bean-name>
+    <managed-bean-class>caseboard.LoginBean</managed-bean-class>
+    <managed-bean-scope>session</managed-bean-scope>
+  </managed-bean>
+  <managed-bean>
+    <managed-bean-name>cases</managed-bean-name>
+    <managed-bean-class>caseboard.CasesBean</managed-bean-class>
+    <managed-bean-scope>session</managed-bean-scope>
+    <managed-property>
+      <property-name>store</property-name>
+      <value>#{store}</value>
+    </managed-property>
+  </managed-bean>
+  <managed-bean>
+    <managed-bean-name>edit</managed-bean-name>
+    <managed-bean-class>caseboard.EditBean</managed-bean-class>
+    <managed-bean-scope>view</managed-bean-scope>
+    <managed-property>
+      <property-name>store</property-name>
+      <value>#{store}</value>
+    </managed-property>
+  </managed-bean>
+</faces-config>

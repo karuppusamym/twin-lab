@@ -638,7 +638,8 @@ def detected_stack(stack) -> list[str]:
     if server.get("technology"):
         what = server["technology"]
         if server.get("framework"):
-            what += f" ({server['framework']})"
+            impl = f", {server['implementation']}" if server.get("implementation") else ""
+            what += f" ({server['framework']}{impl})"
         if server.get("version"):
             what += f" {server['version']}"
         marker = server["marker"]

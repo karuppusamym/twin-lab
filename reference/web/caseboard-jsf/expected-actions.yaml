@@ -1,0 +1,40 @@
+# The semantic actions flow.py performs, in order, named as the recorder names them
+# (labctl.behaviour.fidelity.action_label). Written from the flow, not from a recording.
+# Page loads (goto) and the form submits a click causes are not listed: a person does not
+# perform them. Pass `actions` as `expected=` to fidelity.replay.
+version: 1
+app: caseboard-jsf
+flow: flow.py
+actions:
+  # sign-in, wrong password
+  - type      # loginForm:username
+  - type      # loginForm:password (wrong)
+  - click     # loginForm:signIn -> message
+  # sign-in
+  - type      # loginForm:password
+  - click     # loginForm:signIn -> POST, redirect to the list
+  # paging
+  - click     # list:next
+  - click     # list:next
+  - click     # list:previous
+  # search
+  - type      # search:q
+  - click     # search:go
+  # open the second case found
+  - click     # list:table:1:open -> POST, redirect to the edit form
+  # required field
+  - type      # edit:title, emptied
+  - click     # edit:save -> "Title is required"
+  # converter message
+  - type      # edit:title
+  - type      # edit:hours, letters
+  - click     # edit:save -> "Hours must be a whole number"
+  # the rest of the form
+  - type      # edit:hours
+  - select    # edit:status = Closed, ajax partial update shows edit:resolution
+  - type      # edit:resolution
+  - check     # edit:priority:2 (radio button "High")
+  - check     # edit:urgent (check box)
+  - click     # edit:save -> POST, redirect to the confirmation
+  - click     # backToList
+  - click     # Sign out (j_idtN:signOut)

@@ -1,0 +1,29 @@
+<ui:composition xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:h="http://xmlns.jcp.org/jsf/html"
+                xmlns:f="http://xmlns.jcp.org/jsf/core"
+                xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+                template="/WEB-INF/template.xhtml">
+  <f:metadata>
+    <f:viewParam name="id" value="#{edit.id}"/>
+    <f:viewAction action="#{login.guard}"/>
+    <f:viewAction action="#{edit.load}"/>
+  </f:metadata>
+  <ui:define name="title">Saved</ui:define>
+  <ui:define name="content">
+    <h1>Case saved</h1>
+    <p id="confirmation" class="info">
+      Case <h:outputText id="savedNumber" value="#{edit.number}"/> was saved.
+    </p>
+    <h:panelGrid columns="2" styleClass="fields">
+      <h:outputText value="Title"/>
+      <h:outputText id="savedTitle" value="#{edit.title}"/>
+      <h:outputText value="Status"/>
+      <h:outputText id="savedStatus" value="#{edit.status}"/>
+      <h:outputText value="Priority"/>
+      <h:outputText id="savedPriority" value="#{edit.priority}"/>
+      <h:outputText value="Hours"/>
+      <h:outputText id="savedHours" value="#{edit.hours}"/>
+    </h:panelGrid>
+    <h:link id="backToList" outcome="/cases" value="Back to the list"/>
+  </ui:define>
+</ui:composition>
