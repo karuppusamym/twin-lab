@@ -858,6 +858,14 @@ class _Run:
                 row.hover(timeout=10000)
         if step.action == "type":
             loc.fill(value, timeout=10000)
+            if step.left:
+                # The source's snapshot was taken after focus left the field: what the page does
+                # then (a message for a required field, a framework marking it as visited) is in
+                # it. A field removed by its own input has nothing to leave.
+                try:
+                    loc.blur(timeout=2000)
+                except Exception:  # noqa: BLE001 - the field went away as it was filled
+                    pass
         elif step.action == "select":
             if step.seq in self.bnd.indexes:
                 loc.select_option(index=self.bnd.indexes[step.seq], timeout=10000)

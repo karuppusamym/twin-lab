@@ -1,0 +1,10 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 15px; color: #1d2733; background: #f3f5f8; }
+main { max-width: 980px; margin: 0 auto; padding: 20px; }
+h1 { font-size: 22px; margin: 0 0 14px; }
+button { font: inherit; padding: 6px 14px; border: 1px solid #7a8794; border-radius: 4px; background: #fff; cursor: pointer; }
+button.primary { background: #1f5fa8; border-color: #1f5fa8; color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; }
+input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid #7a8794; border-radius: 4px; }
+.error { color: #a61b1b; }
+.notice { color: #17603a; background: #e3f4ea; padding: 8px 12px; border-radius: 4px; }

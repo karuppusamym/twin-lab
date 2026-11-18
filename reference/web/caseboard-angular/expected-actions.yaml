@@ -1,0 +1,41 @@
+# The semantic actions flow.py performs, in order, named as the lab's recorder names them
+# (labctl.behaviour.fidelity.action_label). Written from the flow, not from a recording: the
+# CAPTURE gate fails when a recording of the flow lacks one of them. A recording may hold more
+# (the address change the route guard makes at the start, for one).
+version: 1
+flow: flow.py
+actions:
+  - goto              # the application is opened; the guard shows the sign-in page
+  - type              # user name
+  - type              # a wrong password
+  - click             # Sign in
+  - submit            # the sign-in form (refused: a message)
+  - type              # the right password
+  - click             # Sign in
+  - submit            # the sign-in form
+  - goto              # to the list of cases (router, no page load)
+  - type              # search text
+  - click             # Clear
+  - click             # Next page
+  - click             # Next page
+  - click             # Previous page
+  - click             # the link of case CB-1007
+  - goto              # to the edit form (router, lazy-loaded chunk)
+  - type              # the title, emptied
+  - click             # into the Owner field: the title's message shows
+  - click             # Save
+  - submit            # the case form (refused: a title is required)
+  - type              # the title
+  - select            # status
+  - check             # priority: High (a radio button)
+  - check             # Urgent (a check box)
+  - type              # due date
+  - type              # notes
+  - click             # Save
+  - submit            # the case form
+  - goto              # back to the list, with the saved case
+  - click             # Sign out (opens the dialog)
+  - keypress:Escape   # closes the dialog
+  - click             # Sign out again
+  - click             # Sign out now (in the dialog)
+  - goto              # to the sign-in page
