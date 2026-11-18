@@ -1,0 +1,64 @@
+{
+  "id": "react-16",
+  "technology": "React",
+  "version": "16.7.0",
+  "surface": "web",
+  "result": "CAPTURE VERIFIED",
+  "reason": "rebuild not run: no rebuild replay report is named in the entry",
+  "date": "2026-11-18",
+  "gates": {
+    "detect": {
+      "status": "PASS",
+      "detail": "detected version 16.7.0, framework react, rendering client",
+      "facts": {
+        "declared": {
+          "framework": "react",
+          "version": "16.7.0",
+          "rendering": "client"
+        },
+        "detected": {
+          "version": "16.7.0",
+          "framework": "react",
+          "rendering": "client"
+        },
+        "marker": "react-dom bundle, rendererPackageName"
+      }
+    },
+    "capture": {
+      "status": "PASS",
+      "detail": "20 expected action(s), all in the recording (24 action(s) recorded)",
+      "facts": {
+        "expected": 20,
+        "captured": 24,
+        "missing": [],
+        "steps": 25
+      }
+    },
+    "self-replay": {
+      "status": "PASS",
+      "detail": "24 of 24 step(s) replayed against a fresh instance, 21 compared, 0 failed",
+      "facts": {
+        "status": "pass",
+        "steps": 24,
+        "replayed": 24,
+        "compared": 21,
+        "failed": 0,
+        "skipped": 0,
+        "unresolved": 0,
+        "missing_value": 0,
+        "differences": 0
+      }
+    },
+    "rebuild": {
+      "status": "NOT RUN",
+      "detail": "no rebuild replay report is named in the entry",
+      "facts": {}
+    }
+  },
+  "not_covered": [
+    "React 17 and later (other bundle markers)",
+    "a router, a data API, a component library",
+    "the files are served as static files, not by the app's own server.py",
+    "a rebuild by a coding agent"
+  ]
+}
