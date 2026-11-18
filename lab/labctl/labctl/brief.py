@@ -242,6 +242,14 @@ def data_location(model: AppModel, override: str | None) -> dict | None:
             "label": f"{override} (named by a person)", "evidence": [note, *base["evidence"]]}  # fmt: skip
 
 
+def _frame_path(frame: dict) -> str:
+    from urllib.parse import urlsplit
+
+    from labctl import sanitize
+
+    return sanitize.route_pattern(urlsplit(str(frame.get("src") or "")).path or "/")
+
+
 def scope(
     app: str,
     system: str,
@@ -290,6 +298,16 @@ def scope(
         if opener in needed_names and not any(f.startswith(NEED) for f in screen.from_):
             screen.from_ = screen.from_ + [f for s in model.screens if s.name == opener
                                            for f in s.from_ if f.startswith(NEED)]  # fmt: skip
+
+    # A page shown in a frame of a needed screen (same application) is needed with it: "a page
+    # within a page" is part of the screen a person saw.
+    by_path = {s.path: s for s in model.screens if s.path}
+    for screen in list(model.screens):
+        need = [f for f in screen.from_ if f.startswith(NEED)]
+        for frame in screen.frames if need else []:
+            inner = by_path.get(_frame_path(frame))
+            if inner is not None and inner is not screen and not inner.embedded:
+                inner.from_ = inner.from_ + [f for f in need if f not in inner.from_]
 
     # Screens somebody needs, and the API calls they make.
     for screen in model.screens:

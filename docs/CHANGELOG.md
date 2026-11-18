@@ -114,6 +114,54 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   every remaining step passes; the damage is under "Why not pass" and in `compared`, but
   whether it should lower the status is a decision for a person. The replay loop itself was
   not run in a browser for these cases.
+## 2026-11-18 — The build package carries the API, the navigation, every action and the sign-in
+What a coding agent gets was measured on two recordings (the two-application fixture, and a new
+help-desk fixture whose pages are filled by a JSON API), then the gaps were closed.
+- **API catalogue** (`labctl.apicatalog`): `apps/<app>/api/catalogue.json` and one file per
+  endpoint the pages called. Method, address pattern, path and query parameters with the
+  control that sets each, the content type, how the call was authorised by name only (a
+  cookie's name, the scheme of a header), a schema of the request and of each answer by status,
+  the screen and action that sent it with step numbers, where the page showed the answer's
+  fields, and every recorded call in order with synthetic values. The examples are one world:
+  a listed record is the row of `db/seed.json` with that identifier, a typed value is the one
+  `steps/*.values.yaml` gives the step, the record a call created is the one later calls read,
+  change and delete. Kept as recorded: field names, code lists, identifiers the application
+  generated, paging numbers, the application's own error messages. `apicatalog.leaks` checks
+  the files against every other value of the HAR, and a file that fails is not written.
+- **Search, filter, sort and paging** are stated from the answers: which parameter filtered,
+  which ordered the rows and how, the page size, checked on every recorded answer.
+- **Field map**: which table and column each API field and screen element is, with its basis.
+- **Navigation map and actions** (`labctl.navmap`): `apps/<app>/navigation.json` and two brief
+  sections. Every way from screen to screen with its element and text, redirects, modal
+  dialogs, in-page tabs, iframes (this application's or another origin's), popup windows,
+  links seen and not visited with what answers there, and every interactive element of every
+  screen with what happened each time it was used, or "seen, not used".
+- **Sign-in and session** (`labctl.signin`): what was observed (the call, each attempt, the
+  cookie by name, sign-out, what a request without a session got), and the requirement that
+  users and sessions are in the database: `app_users` and `app_sessions` in `db/schema.sql`,
+  and in the seed the user the replay signs in as, the password as a PBKDF2 hash. This
+  replaces "accept any non-empty user name and password".
+- **No flow, no automation**: `labctl brief` no longer refuses an application that has only a
+  recording. The scope is then every screen and action recorded, in recorded order, and the
+  brief says so in a new *Scope* section (`labctl.contract`).
+- **The task** (`BUILD_TASK.md`) is rewritten: what to build and what done means, the exact
+  reading order, technology and versions, nine rules, how to report assumptions, the known
+  gaps. The package gains `INDEX.md` (every file, one line each), a `purpose` per file in
+  `MANIFEST.json`, and a completeness check (`labctl.builder.complete`): a screen without an
+  actions list, an endpoint without a schema, an undefined navigation target, a table without
+  seed rows, a typing step without a value. Gaps are written into the package and warned
+  about; `strict=True` or `TWINLAB_PACKAGE_STRICT=1` refuses the package.
+- **Defects the JSON fixture found**, fixed: a table with no columns in `db/schema.sql` (an
+  answer that only wraps an object); a same-origin iframe's page left out of scope; a new
+  record's identifier taken from the page after sign-in instead of the creating call's answer,
+  so the seed held the record the recording made; the option a select chose not found when the
+  form was sent as JSON; a filter that found other rows on the seed than in the recording
+  (seeded rows now keep each record's own code values).
+- **Blind rebuild**: a coding agent given only the unpacked help-desk package built the
+  application (FastAPI, SQLite). The recording replayed on it: 58 of 58 steps, no difference,
+  3 of 3 acceptance cases. Two record bindings of the replay were filled by hand from the
+  package. The builder's questions led to five further fixes; what stays open is listed in
+  `docs/06-evidence.md`.
 ## 2026-11-18 — Angular proven on a real application: the first reference for the certification matrix
 - `reference/web/caseboard-angular/`: Caseboard, a small real Angular 21.2 application with
   synthetic data (sign-in, a route guard, a routed list with search and paging, a lazy-loaded

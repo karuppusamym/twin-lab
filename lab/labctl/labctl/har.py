@@ -1939,6 +1939,13 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         model.problems.append(
             f"{ev}: {server_errors} response(s) were server errors (5xx); they are faults, not rules"
         )
+    # An answer that only wraps another object (`{"user": {...}}`) names no column of its own:
+    # that is not a table (a `CREATE TABLE` without columns does not even apply).
+    for name in [n for n, cols in tables.items() if not cols]:
+        del tables[name]
+        for acc in routes.values():
+            if name in acc.tables:
+                acc.tables.remove(name)
     # A change sent to a resource that a read showed belongs to the same table.
     for (method, pattern), acc in routes.items():
         entity = _entity(pattern)

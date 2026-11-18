@@ -20,6 +20,8 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
+from labctl.builder import complete
+
 FORMAT = "twinlab-build-package/1"
 TASK_FILE = "BUILD_TASK.md"
 MANIFEST_FILE = "MANIFEST.json"
@@ -31,6 +33,10 @@ _ZIP_TIME = (1980, 1, 1, 0, 0, 0)  # fixed, so the same inputs give the same fil
 
 class PackageError(Exception):
     pass
+
+
+class PackageWarning(UserWarning):
+    """A package was written although the completeness check found gaps."""
 
 
 def normalize_repo(repo: str) -> str:
@@ -108,6 +114,7 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         f"{app}/db/seed.json",
         f"{app}/app.yaml",
         f"{app}/behaviours.json",
+        f"{app}/navigation.json",
         "AGENTS.md",
         "docs/factory-playbook.md",
     ]
@@ -124,6 +131,12 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         for path in sorted(pages.glob("*.html")):
             if path.is_file() and not path.is_symlink():
                 found[f"{app}/pages/{path.name}"] = path
+    # The API catalogue: one file per endpoint the pages called (labctl.apicatalog).
+    api = repo_root / app / "api"
+    if api.is_dir():
+        for path in sorted(api.glob("*.json")):
+            if path.is_file() and not path.is_symlink():
+                found[f"{app}/api/{path.name}"] = path
     # The recorded steps in order and the sequence across applications (structure, no value),
     # and the requested flows for this app (drafts from a recording included).
     steps = repo_root / app / "steps"
@@ -575,7 +588,8 @@ def _browser_database_text(conf: dict, app: str) -> str:
     )
 
 
-def _package_only_text(app_id: str, app: str, engine: str, has_steps: bool, db_var: str) -> str:
+def _package_only_text(app_id: str, app: str, engine: str, has_steps: bool, db_var: str,
+                       nav: bool = False, api: bool = False) -> str:  # fmt: skip
     """What applies to a builder who has the zip and no repository: where to build, what of the
     steps below to skip, and how to check the app without labctl."""
     e = (engine or "").lower()
@@ -595,6 +609,14 @@ def _package_only_text(app_id: str, app: str, engine: str, has_steps: bool, db_v
         if has_steps
         else ""
     )
+    extra_check = (
+        (f" Then walk `{app}/navigation.json`: every transition, dialog, tab, frame and popup "
+         "window opens and closes on its element, and every element marked as used does what "
+         "its `used` entries say." if nav else "")
+        + (f" Call every endpoint of `{app}/api/` with the request of each recorded call "
+           "(`calls`), in order, on a fresh seed: the status and the keys of the answer are "
+           "those of the call." if api else "")
+    )  # fmt: skip
     return f"""## Working from this package alone
 
 If you were given only this package and no repository (no `.git`, no `lab/` folder):
@@ -609,9 +631,146 @@ If you were given only this package and no repository (no `.git`, no `lab/` fold
 3. Check the app without labctl: your own tests for it; {schema_check}; `docker build` if Docker
    is available, else run the app directly with `{db_var}` set; then open every screen in the
    brief and check that each listed selector resolves, that each route answers on its method
-   and path, and that each message appears with its exact text where the brief says.{steps_check}
+   and path, and that each message appears with its exact text where the brief says.{steps_check}{extra_check}
+4. There is nobody to ask. Where this task says "stop and ask", working from the package alone
+   means: choose the simplest behaviour that fits the package, and report it under Assumptions
+   in `BUILD-NOTES.md`.
 
 """
+
+
+def _done_text(app: str, packaged: list[str], browser: bool, values: bool) -> str:
+    """The numbered list of what must hold for the build to be done."""
+    items = [
+        "Every screen of the brief opens at its address and has every element of its snapshot, "
+        "with the same selectors, ids and texts.",
+    ]
+    if f"{app}/navigation.json" in packaged:
+        items += [
+            f"Every way from screen to screen, and every dialog, tab, frame and popup window "
+            f"in `{app}/navigation.json`, works on the same element.",
+            "Every element the recording used does what the brief's *Actions on each screen* "
+            "says: the same request, the same message, the same next page.",
+        ]
+    if f"{app}/api/catalogue.json" in packaged:
+        items.append(f"Every endpoint in `{app}/api/` answers on the same method and path, with "
+                     "the same keys, types, codes and statuses.")  # fmt: skip
+    if browser:
+        items.append("The data is kept where the brief's *Browser storage* section says, under "
+                     "the same keys.")  # fmt: skip
+    else:
+        items += [
+            "Sign-in, the session and sign-out work as the brief's *Sign-in and session* says "
+            "(where the brief has that section).",
+            "Users, sessions and every record are stored in and read from the database. The "
+            "tables come from `db/schema.sql`; the seed is loaded at start.",
+        ]
+    if values:
+        items.append(f"The recorded steps, replayed in order with the values of "
+                     f"`{app}/steps/*.values.yaml`, give at each step the outcome the recording "
+                     "showed. This is the acceptance run.")  # fmt: skip
+    items.append(f"`{app}/BUILD-NOTES.md` says what you built, what you checked and what you "
+                 "assumed.")  # fmt: skip
+    return "\n".join(f"{n}. {text}" for n, text in enumerate(items, 1))
+
+
+def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
+    """The exact order to read the package in: only files that are in it, plus the line kept
+    for the look of the screens (`look/`, written by another step when it has run)."""
+    have = set(packaged)
+
+    def any_under(prefix: str) -> bool:
+        return any(p.startswith(prefix) for p in have)
+
+    rows: list[str] = [
+        "`BUILD_TASK.md` (this file), then `INDEX.md`: every file and what it is for.",
+        "`AGENTS.md`, then `docs/factory-playbook.md`: the lab's rules. They apply to everything.",
+        f"`{app}/BRIEF.md`, whole, top to bottom. It is the specification. Its sections: the "
+        "scope, the stack, each screen with its elements and fields, the API, the tables, what "
+        "each recorded action did, the seed and the replay values, sign-in and session, the "
+        "navigation map, the actions of each screen, how it runs in the lab, the acceptance "
+        "checks, the open questions.",
+    ]
+    if any_under(f"{app}/pages/"):
+        rows.append(f"`{app}/pages/*.html`: one snapshot per screen. The structure, ids, classes "
+                    "and interface text are real; data is masked (letters x, digits 9). Build "
+                    "each screen from its snapshot.")  # fmt: skip
+    if any_under(f"{app}/look/"):
+        rows.append(f"`{app}/look/` (style sheets, `theme.json`, one rendered picture per screen): "
+                    "how the screens look. Match each screen to its picture.")  # fmt: skip
+    else:
+        rows.append("The package has no pictures or style sheets of the screens: the styles "
+                    "inside the snapshots are the reference.")  # fmt: skip
+    if f"{app}/navigation.json" in have:
+        rows.append(f"`{app}/navigation.json`: every screen, each way in and out, dialogs, tabs, "
+                    "frames and popup windows, and every element of each screen with what "
+                    "happened when the recording used it.")  # fmt: skip
+    if f"{app}/api/catalogue.json" in have:
+        rows.append(f"`{app}/api/catalogue.json`, then each `{app}/api/*.json`: one file per "
+                    "endpoint, with its parameters, schemas and every recorded call with "
+                    "synthetic values.")  # fmt: skip
+    if f"{app}/db/schema.sql" in have:
+        seed = (f", then `{app}/db/seed.sql` (the same rows as JSON: `db/seed.json`): the rows "
+                "to load at start" if f"{app}/db/seed.sql" in have else "")  # fmt: skip
+        rows.append(f"`{app}/db/schema.sql`: the tables{seed}.")
+    if any_under(f"{app}/steps/"):
+        rows.append(f"`{app}/steps/<recording>.json`: the recorded steps in order. "
+                    f"`{app}/steps/<recording>.values.yaml`: the value the acceptance replay "
+                    "types at each step and the outcome the recording showed. "
+                    "`<recording>.sequence.yaml`, when present: the order across applications.")  # fmt: skip
+    if any_under("flows/"):
+        rows.append("`flows/*.yaml`: the flow in words.")
+    rows.append(f"`{app}/behaviours.json`, `{app}/model.yaml`, `{app}/app.yaml`: reference. "
+                "Look things up in them; the brief is generated from them.")  # fmt: skip
+    if any_under(f"evidence/{app_id}/screenshots/"):
+        rows.append(f"`evidence/{app_id}/screenshots/`: pictures of the screens, for reference.")
+    return "\n".join(f"{n}. {text}" for n, text in enumerate(rows, 1))
+
+
+def _rules_text(app: str, packaged: list[str], browser: bool, seed_loaded: bool) -> str:
+    """The rules a build may never break, numbered, each one sentence first."""
+    nav = f"{app}/navigation.json" in packaged
+    api = f"{app}/api/catalogue.json" in packaged
+    rules = [
+        "**Same selectors and ids.** Keep **every recorded selector, element id, class, "
+        "`name`, iframe and shadow-DOM structure** exactly as the brief's screen tables and "
+        f"`{app}/pages/*.html` show them. Automations find elements by these, and a changed id "
+        "breaks them silently.",
+        "**Same literal texts.** Write every label, heading, button, option, link and message "
+        "exactly as the snapshots and the brief have it, letter for letter. Text shown masked "
+        "(`Xxxx`, `9999`) is data: show the record's value there.",
+        "**Same addresses and API contract.** Every screen keeps its path. Every route keeps "
+        "its method, path, parameters, field names, types, codes and statuses"
+        + (f" (`{app}/api/`)." if api else "."),
+        "**Every navigation and every action works.** "
+        + (f"Each link, button, form, key, redirect, dialog, tab, frame and popup window in "
+           f"`{app}/navigation.json` behaves as listed. " if nav else
+           "Each link, button and form of the brief leads where the brief says. ")
+        + "An element nobody used in the recording is rendered and gets no behaviour the brief "
+        "does not state.",
+    ]  # fmt: skip
+    if browser:
+        rules.append("**Data stays where the original keeps it.** That is the browser, as the "
+                     "brief's *Browser storage* section says. There is no server database.")  # fmt: skip
+    else:
+        rules.append("**Data lives in the backend database.** Users, sessions and every record "
+                     "are stored in and read from the database by the server. Nothing important "
+                     "is kept only in the page or in the server's memory.")  # fmt: skip
+        rules.append("**The seed is loaded at start.** Create the tables from `db/schema.sql` "
+                     + ("and load exactly the rows of `db/seed.sql`, once, when the tables are "
+                        "empty." if seed_loaded else
+                        "and fill them with synthetic rows as the brief says, once, when the "
+                        "tables are empty."))  # fmt: skip
+    rules += [
+        "**Synthetic data only.** No real name, number, address, hostname or credential in any "
+        "file. Use the values the package gives.",
+        "**Build what was recorded, nothing else.** Nothing under *Out of scope* is built or "
+        "stubbed. What the package does not state is an assumption you write down, never a "
+        "feature you invent.",
+        "**The brief and the checks are not yours to change.** A check that fails is a finding "
+        "about your app.",
+    ]
+    return "\n".join(f"{n}. {text}" for n, text in enumerate(rules, 1))
 
 
 def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | None = None) -> str:
@@ -674,7 +833,8 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         )
     else:
         conformance_step = (
-            "6. Conformance: `app.yaml` lists no automations under `built_for`, so there is "
+            "6. Conformance: `app.yaml` lists no registered automation under `built_for` (a "
+            "requested flow has nothing to run), so there is "
             "nothing to run. Say so in BUILD-NOTES.md."
         )
     enhance = (repo_root / "apps" / app_id / "Dockerfile").is_file()
@@ -846,7 +1006,9 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         if step_files
         else ""
     )
-    package_only = _package_only_text(app_id, app, engine, bool(step_files), db_var)
+    package_only = _package_only_text(app_id, app, engine, bool(step_files), db_var,
+                                      nav=f"{app}/navigation.json" in packaged,
+                                      api=f"{app}/api/catalogue.json" in packaged)  # fmt: skip
     # The look (labctl.lookfeel): its own section, its files in the lists, its check.
     from labctl import lookfeel
 
@@ -859,41 +1021,73 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
                       + (shots_text if shots else ""))  # fmt: skip
         package_only = package_only.replace("exact text where the brief says.",
                                             "exact text where the brief says." + look_check, 1)  # fmt: skip
+    done_text = _done_text(app, packaged, browser, bool(value_files))
+    reading = _reading_order(app, app_id, packaged)
+    rules_text = _rules_text(app, packaged, browser, seed_loaded=f"{app}/db/seed.sql" in packaged)
+    gaps = complete.problems(repo_root, app_id)
+    gaps_section = (
+        "## Known gaps in this package\n\nThe packaging step checked the package and found "
+        "these gaps. Each is something the evidence does not hold. Where one matters, choose the "
+        "simplest behaviour that fits the brief and report it as an assumption:\n\n"
+        + "\n".join(f"- {g}" for g in gaps) + "\n\n"
+        if gaps else ""
+    )  # fmt: skip
     return f"""# Twin Lab build task: `{app_id}`
 
-You are a coding agent. Build the demo app `{app_id}` for Twin Lab from its build brief and hand
-the result back as one pull request (or, if you cannot open one, as one branch). Follow the steps
-below in order. Brief digest: `{digest}`.
+You are a coding agent. Build the demo app `{app_id}` for Twin Lab from this package and hand
+the result back as one pull request (or, if you cannot open one, as one branch; working from the
+package alone, as the folder `{app}/`). Everything you need is in the package: do not look for
+the original application. Follow the sections below in order. Brief digest: `{digest}`.
 
 The Twin Lab package (`twinlab-{app_id}-*.zip`) holds this task, the brief and its inputs at
-their repository paths. `MANIFEST.json` in the package lists every file with its sha256. If you
-are working inside the repository, the files are already there.
+their repository paths. `INDEX.md` lists every file with one line on what it is for.
+`MANIFEST.json` lists every file with its sha256. If you are working inside the repository, the
+files are already there.
 
-## What a demo app is for
+## What to build, and what "done" means
 
-A demo app is a look-alike of a real application that Twin Lab builds from recordings of it. Its
-purpose is to let automations (UiPath processes, Python scripts, test bots) run against
-something safe: synthetic data, no real systems. Fidelity to what was recorded is therefore the
-whole job: an automation that passes on your app must find the same screens, selectors, routes
-and fields it would find in the real one. You do not need the original business logic beyond the
-behaviours the brief lists.
+Build a working look-alike of a real application: the same screens, the same behaviour, a real
+backend and a real database. A person used the real application once while Twin Lab recorded
+it. That recording is all the evidence there is, and this package is what it showed, with the
+data taken out. Automations (UiPath processes, Python scripts, test bots) will run against your
+build instead of the real application, so it must be the same wherever the recording shows
+what the real one does: an automation that passes on your app must find the same screens,
+selectors, routes and fields it would find in the real one. You do not need the original
+business logic beyond the behaviours the brief lists.
 
-## Same technology, same structure
+The build is done when all of this holds:
+
+{done_text}
+
+## Read in this order
+
+{reading}
+
+## Technology and versions
 
 Rebuild in the **same technology the brief's "Stack to pin" section names**: the front-end
 framework and version, the server technology and the UI library. Do not substitute another
 because it is easier. If that section names none, use the default it states and record that in
-BUILD-NOTES.md. From the brief, as it stands:
+BUILD-NOTES.md. Pin the version of the language, the framework and every library you use, and
+list them in BUILD-NOTES.md. From the brief, as it stands:
 {stack_block}
-Keep **every recorded selector, element id, class, `name`, iframe and shadow-DOM structure**
-exactly as the brief's screen tables and `{app}/pages/*.html` show them: automations find
-elements by these, and a changed id breaks them silently.
+## Rules that are not negotiable
+
+{rules_text}
 
 {look_section}## Database
 
 {database_section}
 
-{cross_section}{package_only}{new_section}## 1. Repository and branch
+## How to report assumptions
+
+Where the package is silent, or says *hypothesis*, *assumed*, *not recorded* or *seen, not
+used*, do not stop and do not invent a feature. Choose the simplest behaviour that fits
+everything the package does say. Write it in `{app}/BUILD-NOTES.md` under **Assumptions**, one
+line each: what the package did not say, what you chose, the file where you built it. Ask a
+person only where section 7 says to stop.
+
+{gaps_section}{cross_section}{package_only}{new_section}## 1. Repository and branch
 
 (In the repository. Working from the package alone, see *Working from this package alone*.)
 
@@ -901,21 +1095,22 @@ elements by these, and a changed id breaks them silently.
 2. Work on a branch named `{branch}`, created from the default branch (if you are already on a
    branch you were told to use, stay on it). Do all work on it. Never push to the default branch.
 
-## 2. Read before you build
+## 2. Start from the brief's files
 
 1. Read `AGENTS.md`, then `docs/factory-playbook.md`. Their rules apply to everything below.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
-3. Read what the brief builds from. If it lists source files, read them and only what they
-   import. Otherwise (no source code, the usual case) read `{app}/pages/*.html`: value-free
-   snapshots of each recorded screen, with the real element ids, classes, labels and layout;
-   `{app}/behaviours.json` and the brief's "Behaviour seen in the recordings": what each screen
-   does; and `{app}/model.yaml`: request and response shapes, codes and timings.{shots_text}{steps_text}
+3. Read what the brief builds from, in the order *Read in this order* gives. If the brief lists
+   source files, read them and only what they import. Otherwise (no source code, the usual
+   case) read `{app}/pages/*.html`: value-free snapshots of each recorded screen, with the real
+   element ids, classes, labels and layout; `{app}/behaviours.json` and the brief's "Behaviour
+   seen in the recordings": what each screen does; and `{app}/model.yaml`: request and response
+   shapes, codes and timings.{shots_text}{steps_text}
 
 ## 3. Build
 
@@ -958,8 +1153,8 @@ later). Keep the exact result of each one for steps 5 and 6.
 ## 5. Build notes
 
 Write `{app}/BUILD-NOTES.md` with these sections: what you built; the versions you pinned; each
-check above with its command and result; assumptions; what you could not check and why; anything
-in the brief you think is wrong.
+check above with its command and result; assumptions (one line each, as *How to report
+assumptions* says); what you could not check and why; anything in the brief you think is wrong.
 
 ## 6. Pull request
 
@@ -988,14 +1183,38 @@ request, leave the work committed on your branch and say so.
 """
 
 
-def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None) -> Path:
+def completeness(repo_root: Path, app_id: str) -> list[str]:
+    """What the package of `app_id` lacks, one line each ([] when complete): a screen without an
+    actions list, an endpoint without a schema, an undefined navigation target, a table without
+    seed rows, a typing step without a value (labctl.builder.complete)."""
+    return complete.problems(Path(repo_root), app_id)
+
+
+def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None,
+          strict: bool | None = None) -> Path:  # fmt: skip
     """Write `twinlab-<app>-<digest8>.zip` into `out_dir` and return its path.
 
     `<digest8>` is the first 8 hex digits of a sha256 over the packaged files (path and content),
     so a changed brief, page or prompt gives a new name, and the same inputs the same name.
+
+    The package is checked for completeness first. Every gap is written into the task, into
+    `INDEX.md` and into `MANIFEST.json` (`completeness`), and printed as a warning. With
+    `strict=True` (or `TWINLAB_PACKAGE_STRICT=1`) a gap refuses the package instead.
     """
     repo_root = Path(repo_root)
     _check_inputs(repo_root, app_id)
+    desktop = bool((_app_yaml(repo_root, app_id).get("stack") or {}).get("desktop"))
+    gaps = [] if desktop else completeness(repo_root, app_id)
+    if strict is None:
+        strict = os.environ.get("TWINLAB_PACKAGE_STRICT", "").strip() in ("1", "true", "yes")
+    if gaps and strict:
+        raise PackageError(f"package of {app_id} is not complete ({len(gaps)} gap(s)):\n"
+                           + "\n".join(f"  - {g}" for g in gaps))  # fmt: skip
+    if gaps:
+        import warnings
+
+        warnings.warn(f"package of {app_id}: {len(gaps)} gap(s): " + "; ".join(gaps),
+                      PackageWarning, stacklevel=2)  # fmt: skip
     task = prompt(repo_root, app_id, repo).encode("utf-8")
     files = _collect(repo_root, app_id)
     from labctl import lookfeel  # refuses a look that holds data, or a picture it did not render
@@ -1008,10 +1227,16 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None) 
         )
     entries: list[tuple[str, bytes]] = [(TASK_FILE, task)]
     entries += [(rel, _content(path)) for rel, path in files]
+    purposes = [(rel, complete.purpose(rel, app_id, data)) for rel, data in entries]
+    purposes += [(complete.INDEX_FILE, complete.purpose(complete.INDEX_FILE, app_id)),
+                 (MANIFEST_FILE, complete.purpose(MANIFEST_FILE, app_id))]  # fmt: skip
+    index = complete.index_md(app_id, purposes, gaps).encode("utf-8")
+    entries.insert(1, (complete.INDEX_FILE, index))
     listing = [
-        {"path": rel, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+        {"path": rel, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
+         "purpose": complete.purpose(rel, app_id, data)}
         for rel, data in entries
-    ]
+    ]  # fmt: skip
     combined = hashlib.sha256(
         "\n".join(f"{f['path']} {f['sha256']}" for f in listing).encode("utf-8")
     ).hexdigest()
@@ -1022,6 +1247,7 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None) 
         "brief_digest": brief_digest(repo_root, app_id),
         "package_digest": combined,
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "completeness": {"complete": not gaps, "gaps": gaps},
         "files": listing,
     }
     out_dir = Path(out_dir)
