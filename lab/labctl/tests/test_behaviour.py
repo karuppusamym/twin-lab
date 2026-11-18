@@ -153,6 +153,41 @@ def test_dom_reader_basics():
     assert dom.shape("12,500.00") == "9,9.9"
 
 
+def test_an_id_with_a_colon_is_one_key_in_a_selector_and_in_a_snapshot():
+    r"""JSF ids hold colons (`search:q`), which the recorder writes escaped in a selector
+    (`input#search\:q`). The key was cut at the backslash (`#search`), so a field given a value
+    for the replay was not known as supplied and its value format was compared: found on the
+    Caseboard reference application, where every typing step failed."""
+    assert dom.key_of(r"input#search\:q") == "#search:q"
+    assert dom.key_of(r"a#list\:table\:1\:open") == "#list:table:1:open"
+    assert dom.key_of(r"form#j_idt10 >>> a#j_idt10\:signOut") == "#j_idt10:signOut"
+    assert dom.key_of(r"div#\31 0th") == "#10th"  # CSS.escape of an id that starts with a digit
+    assert dom.key_of("iframe#a >>> button#save") == "#save"
+    recorded = '<form><input id="search:q" name="search:q" value=""></form>'
+    live = '<form><input id="search:q" name="search:q" value="Okafor"></form>'
+    assert [d.check for d in fidelity.compare_dom(recorded, live)] == ["value_format"]
+    supplied = {dom.key_of(r"input#search\:q")}
+    assert fidelity.compare_dom(recorded, live, supplied=supplied) == []
+
+
+def test_a_session_id_in_an_address_is_compared_as_there_not_by_its_value():
+    """A Java server writes `;jsessionid=<id>` into the first form's address. The id is new in
+    every session, so a replay could never arrive at the recorded one."""
+    recorded = "http://127.0.0.1:1/login.xhtml;jsessionid=node01abc9.node0"
+    live = "http://127.0.0.1:1/login.xhtml;jsessionid=node0zz81k.node0"
+    assert fidelity.same_address(recorded) == fidelity.same_address(live)
+    assert fidelity.same_address(recorded + "?id=7") == fidelity.same_address(live + "?id=7")
+    assert fidelity.same_address(recorded + "?id=7") != fidelity.same_address(live + "?id=8")
+    # with and without one are different addresses, as are different paths
+    assert fidelity.same_address(recorded) != fidelity.same_address(
+        "http://127.0.0.1:1/login.xhtml"
+    )
+    other = "http://127.0.0.1:1/cases.xhtml;jsessionid=node01abc9.node0"
+    assert fidelity.same_address(recorded) != fidelity.same_address(other)
+    plain = "http://127.0.0.1:1/orders?session=abc"
+    assert fidelity.same_address(plain) == plain  # nothing else is touched
+
+
 def test_recording_reader():
     rec = recording.load(RECS[0])
     assert rec.app == "showcase"

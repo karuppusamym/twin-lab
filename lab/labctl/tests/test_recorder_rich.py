@@ -172,3 +172,40 @@ def test_fidelity_replay_goes_into_frames_and_shadow(site, tmp_path):
     acted = {s.selector: s.status for s in report.steps}
     assert acted["iframe#partner >>> button#lookup"] != "fail", report.markdown()
     assert acted["iframe#inner >>> button#saveNote"] != "fail", report.markdown()
+
+
+COMMAND_LINK = b"""<!DOCTYPE html><html><body>
+<form id="list" action="/next.html" method="get">
+<a id="go" href="#" onclick="var f=document.getElementById('list'),a=document.createElement('input');a.type='submit';f.appendChild(a);a.click();f.removeChild(a);return false">Next</a>
+</form>
+<button id="plain" onclick="document.getElementById('out').textContent='pressed'">Press</button>
+<p id="out"></p></body></html>"""
+NEXT = b"""<!DOCTYPE html><html><body><h1 id="title">Next page</h1></body></html>"""
+
+
+def test_a_click_the_page_makes_inside_the_persons_click_is_not_a_step(tmp_path):
+    """A JSF command link (Mojarra's `jsfcljs`) submits its form by adding a submit button,
+    clicking it from script and removing it. That click was recorded as a step of its own
+    (`click input`), on an element no replay can find. Found on the Caseboard reference
+    application. A click made by script on its own (a robot's simulated click) is still a step."""
+    server = serve({"/": (COMMAND_LINK, "text/html"), "/next.html": (NEXT, "text/html")})
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def script(page):
+        page.wait_for_timeout(300)
+        page.evaluate("document.getElementById('plain').click()")  # not inside a person's click
+        page.wait_for_timeout(600)
+        page.click("#go")
+        page.wait_for_url("**/next.html*")
+        page.wait_for_timeout(600)
+
+    try:
+        out = recorder.record(f"{base}/", tmp_path / "rec", script=script, headless=True)
+    finally:
+        server.shutdown()
+    steps = [s for s in steps_of(out) if s["url"] != "about:blank"]
+    assert [(s["action"], s["selector"]) for s in steps] == [
+        ("goto", None), ("click", "button#plain"), ("click", "a#go"), ("submit", "form#list"),
+        ("goto", None)]  # fmt: skip
+    link = steps[2]["seq"]
+    assert steps[3]["caused_by"] == link and steps[4]["caused_by"] == link

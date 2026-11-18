@@ -1,0 +1,62 @@
+<ui:composition xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:h="http://xmlns.jcp.org/jsf/html"
+                xmlns:f="http://xmlns.jcp.org/jsf/core"
+                xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+                template="/WEB-INF/template.xhtml">
+  <f:metadata>
+    <f:viewParam name="id" value="#{edit.id}"/>
+    <f:viewAction action="#{login.guard}"/>
+    <f:viewAction action="#{edit.load}"/>
+  </f:metadata>
+  <ui:define name="title">Edit case</ui:define>
+  <ui:define name="content">
+    <h1>Edit case <h:outputText id="number" value="#{edit.number}"/></h1>
+    <h:messages id="messages" styleClass="messages" errorClass="error" infoClass="info"/>
+    <h:form id="edit">
+      <h:panelGrid columns="2" styleClass="fields">
+        <h:outputLabel for="title" value="Title"/>
+        <h:inputText id="title" value="#{edit.title}" required="true" size="40"
+                     requiredMessage="Title is required"/>
+
+        <h:outputLabel value="Owner"/>
+        <h:outputText id="owner" value="#{edit.owner}"/>
+
+        <h:outputLabel for="hours" value="Hours"/>
+        <h:inputText id="hours" value="#{edit.hours}" required="true" size="6"
+                     requiredMessage="Hours is required"
+                     converterMessage="Hours must be a whole number"
+                     validatorMessage="Hours must be between 0 and 500">
+          <f:validateLongRange minimum="0" maximum="500"/>
+        </h:inputText>
+
+        <h:outputLabel for="status" value="Status"/>
+        <h:selectOneMenu id="status" value="#{edit.status}">
+          <f:selectItems value="#{edit.statuses}"/>
+          <!-- Partial update: choosing a status re-renders the note below without a page load. -->
+          <f:ajax render="statusNote"/>
+        </h:selectOneMenu>
+
+        <h:outputText value=""/>
+        <h:panelGroup id="statusNote" layout="block" styleClass="note">
+          <h:outputText id="openNote" value="The case stays on the board."
+                        rendered="#{not edit.closed}"/>
+          <h:panelGroup id="closedNote" rendered="#{edit.closed}">
+            <h:outputLabel for="resolution" value="Resolution"/>
+            <h:inputText id="resolution" value="#{edit.resolution}" size="30"/>
+          </h:panelGroup>
+        </h:panelGroup>
+
+        <h:outputLabel value="Priority"/>
+        <h:selectOneRadio id="priority" value="#{edit.priority}">
+          <f:selectItems value="#{edit.priorities}"/>
+        </h:selectOneRadio>
+
+        <h:outputLabel for="urgent" value="Urgent"/>
+        <h:selectBooleanCheckbox id="urgent" value="#{edit.urgent}"/>
+      </h:panelGrid>
+      <h:commandButton id="save" value="Save" action="#{edit.save}"/>
+      <h:commandLink id="cancel" value="Cancel" action="/cases.xhtml?faces-redirect=true"
+                     immediate="true"/>
+    </h:form>
+  </ui:define>
+</ui:composition>

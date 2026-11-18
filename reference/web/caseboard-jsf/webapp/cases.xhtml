@@ -1,0 +1,54 @@
+<ui:composition xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:h="http://xmlns.jcp.org/jsf/html"
+                xmlns:f="http://xmlns.jcp.org/jsf/core"
+                xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+                template="/WEB-INF/template.xhtml">
+  <f:metadata>
+    <f:viewAction action="#{login.guard}"/>
+  </f:metadata>
+  <ui:define name="title">Cases</ui:define>
+  <ui:define name="content">
+    <h1>Cases</h1>
+    <h:form id="search">
+      <h:outputLabel for="q" value="Search"/>
+      <h:inputText id="q" value="#{cases.query}"/>
+      <h:commandButton id="go" value="Search" action="#{cases.search}"/>
+    </h:form>
+    <h:form id="list">
+      <h:dataTable id="table" value="#{cases.rows}" var="c" styleClass="grid">
+        <h:column>
+          <f:facet name="header">Case</f:facet>
+          <h:outputText value="#{c.number}"/>
+        </h:column>
+        <h:column>
+          <f:facet name="header">Title</f:facet>
+          <h:commandLink id="open" value="#{c.title}" action="#{cases.open(c)}"/>
+        </h:column>
+        <h:column>
+          <f:facet name="header">Owner</f:facet>
+          <h:outputText value="#{c.owner}"/>
+        </h:column>
+        <h:column>
+          <f:facet name="header">Status</f:facet>
+          <h:outputText value="#{c.status}"/>
+        </h:column>
+        <h:column>
+          <f:facet name="header">Priority</f:facet>
+          <h:outputText value="#{c.priority}"/>
+        </h:column>
+        <h:column>
+          <f:facet name="header">Hours</f:facet>
+          <h:outputText value="#{c.hours}"/>
+        </h:column>
+      </h:dataTable>
+      <div class="pager">
+        <h:commandLink id="previous" value="Previous" action="#{cases.previous}"
+                       rendered="#{cases.hasPrevious}"/>
+        <h:outputText id="pageOf" value="Page #{cases.pageNumber} of #{cases.pageCount}"/>
+        <h:commandLink id="next" value="Next" action="#{cases.next}"
+                       rendered="#{cases.hasNext}"/>
+        <h:outputText id="total" value="#{cases.total} cases"/>
+      </div>
+    </h:form>
+  </ui:define>
+</ui:composition>

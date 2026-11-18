@@ -383,13 +383,25 @@ def snapshot(html: str) -> Snapshot:
     return Snapshot(elements=elements, signatures=signatures)
 
 
+def css_unescape(ident: str) -> str:
+    r"""An identifier as written in a selector (`CSS.escape`), back to the id itself:
+    `loginForm\:username` -> `loginForm:username`, `\31 0th` -> `10th`."""
+
+    def one(m: re.Match) -> str:
+        return chr(int(m.group(1), 16)) if m.group(1) else m.group(2)
+
+    return re.sub(r"\\(?:([0-9a-fA-F]{1,6}) ?|(.))", one, ident)
+
+
 def key_of(selector: str | None) -> str | None:
-    """The element key a CSS selector names: its last #id, or tag[name=...]."""
+    r"""The element key a CSS selector names: its last #id, or tag[name=...]. An id is the
+    element's own, not as the selector escapes it: JSF ids hold colons (`form:field`), written
+    `#form\:field` in a selector, and the snapshot's key is `#form:field`."""
     if not selector:
         return None
-    ids = re.findall(r"#([A-Za-z_][\w-]*)", selector)
+    ids = re.findall(r"#((?:\\[0-9a-fA-F]{1,6} ?|\\.|[\w-])+)", selector)
     if ids:
-        return f"#{ids[-1]}"
+        return f"#{css_unescape(ids[-1])}"
     m = re.search(r"(\w+)\[name=['\"]?([\w-]+)['\"]?\]", selector)
     if m:
         return f"{m.group(1)}[name='{m.group(2)}']"

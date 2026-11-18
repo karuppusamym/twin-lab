@@ -111,6 +111,61 @@ def test_java_jsf_primefaces_with_jquery(tmp_path):
     assert libs["jQuery"]["version"] == "1.12.4" and libs["PrimeFaces"]["role"] == "ui"
 
 
+JSF_PAGE = page(
+    "<form id='list' method='post'><input type='hidden' name='javax.faces.ViewState' "
+    "id='j_id1:javax.faces.ViewState:0' value='1:2'><input id='list:q' name='list:q'>"
+    "<input id='list:r' name='list:r'></form>",
+    head="<script src='/javax.faces.resource/jsf.js.xhtml?ln=javax.faces'></script>",
+)
+
+
+def jsf_script(body: str) -> dict:
+    """JSF's own script as a server sends it: the address ends in .xhtml, and what the script
+    says of itself comes after a licence comment longer than the banner that is searched."""
+    licence = "/*\n" + " * Licensed to someone under some terms.\n" * 150 + " */\n"
+    assert len(licence) > har.TEXT_BANNER
+    return entry("http://a.test/javax.faces.resource/jsf.js.xhtml?ln=javax.faces", licence + body,
+                 mime="application/javascript")  # fmt: skip
+
+
+def test_jsf_implementation_and_specification_from_its_own_script(tmp_path):
+    """Found on the Caseboard reference application (Mojarra 2.3 on Jetty): the lab named JSF but
+    not which implementation or version, though every page with a command link loads the script
+    that says both."""
+    mojarra = (
+        "var jsf = {};\njsf.specversion = 23000;\njsf.implversion = 3;\n"
+        "mojarra.jsfcljs = function jsfcljs(f, pvp, t) { mojarra.apf(f, pvp); };\n"
+    )
+    model, stack = detect(tmp_path, [
+        entry("http://a.test/cases.xhtml", JSF_PAGE, set_cookies=["JSESSIONID"]),
+        jsf_script(mojarra),
+    ])  # fmt: skip
+    server = stack.server
+    assert (server["technology"], server["framework"]) == ("Java", "JSF")
+    assert server["confidence"] == "certain"
+    assert server["implementation"] == "Mojarra"
+    assert server["implementation_marker"] == "mojarra.* functions in JSF's own script (jsf.js)"
+    assert server["framework_version"] == "2.3"
+    assert model.stack.frontend["framework"] == "JSF" and model.stack.frontend["version"] == "2.3"
+    assert "Java (JSF, Mojarra) 2.3" in "\n".join(brief_mod.detected_stack(stack))
+
+    faces4 = "var faces = {};\nfaces.specversion = 40000;\nmyfaces._impl.core = {};\n"
+    _, other = detect(tmp_path, [entry("http://a.test/cases.xhtml", JSF_PAGE), jsf_script(faces4)])
+    assert other.server["implementation"] == "MyFaces"
+    assert other.server["framework_version"] == "4.0"
+
+    # A page that does not load the script shows neither, and nothing is made up.
+    _, bare = detect(tmp_path, [entry("http://a.test/cases.xhtml", JSF_PAGE)])
+    assert bare.server["framework"] == "JSF"
+    assert "implementation" not in bare.server and "framework_version" not in bare.server
+    # Another script that merely mentions the words is not JSF's own.
+    _, mention = detect(tmp_path, [
+        entry("http://a.test/cases.xhtml", JSF_PAGE),
+        entry("http://a.test/js/app.js", "x" * 5000 + mojarra, mime="application/javascript"),
+    ])  # fmt: skip
+    assert "implementation" not in mention.server
+
+
 def test_dotnet_web_forms_and_iis(tmp_path):
     html = page(
         "<form id='form1' method='post'><input type='hidden' name='__VIEWSTATE' id='__VIEWSTATE' "
