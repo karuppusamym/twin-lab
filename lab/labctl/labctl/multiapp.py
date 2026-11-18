@@ -427,6 +427,8 @@ def build_all(
     if not rec.is_dir():
         raise BuildAllError(f"{rec} is not a recording folder")
     prop, prop_path, accepted = _proposal(rec, proposal, yes)
+    for p in sp.problems(rec):  # a damaged recording: said before anything is built from it
+        say(f"recording: {p}")
     summary = Summary(rec.name, _rel(root, prop_path) or str(prop_path))
     if not accepted:
         summary.stopped = True

@@ -108,6 +108,8 @@ class Proposal:
     recording: str
     apps: list[Entry] = field(default_factory=list)
     setup: int = 0  # informational: setup events (blank pages), in no application
+    # What is damaged in the recording (see `problems()`); filled by propose(), never saved.
+    problems: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         out: dict = {"recording": self.recording}
@@ -324,29 +326,41 @@ def _iframes(html: str, base: str) -> list[tuple[str, str]]:
     return out
 
 
-def _load_steps(rec: Path) -> list[_Step]:
+def _load_steps(rec: Path, problems: list[str] | None = None) -> list[_Step]:
+    """The steps as written. A line that is not a step is left out; `problems` (when given) gets
+    a line for each, for each snapshot a step names that is not there, and for step numbers
+    used twice (see `problems()`)."""
+    from labctl.botlog.recording import bad_line, seq_problems
+
+    problems = problems if problems is not None else []
     steps_file = rec / "steps.jsonl"
     if not steps_file.is_file():
         raise ProposalError(
             f"{rec.name}: no steps.jsonl; a recording without steps cannot be split"
         )
     out: list[_Step] = []
-    for n, line in enumerate(steps_file.read_text(encoding="utf-8").splitlines()):
-        if not line.strip():
-            continue
+    text = steps_file.read_text(encoding="utf-8-sig", errors="replace")
+    lines = [(n, line) for n, line in enumerate(text.splitlines()) if line.strip()]
+    for n, line in lines:
         try:
             data = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(data, dict):
+            if not isinstance(data, dict):
+                raise TypeError("not an object")
+            seq = int(data.get("seq") or n + 1)
+        except (ValueError, TypeError) as exc:
+            problems.append(bad_line(n + 1, n == lines[-1][0], exc))
             continue
         url = str(data.get("url") or "")
         p = urlsplit(url)
-        step = _Step(n, data, int(data.get("seq", n + 1)), _time(data.get("ts")), url,
+        step = _Step(n, data, seq, _time(data.get("ts")), url,
                      normalise_origin(url), p.path or "/", tab=str(data.get("tab") or ""))  # fmt: skip
         frames: list[tuple[str, str]] = []
+        for key in ("dom", "dom_before", "screenshot"):
+            rel = data.get(key)
+            if rel and not (isinstance(rel, str) and (rec / rel).is_file()):
+                problems.append(f"step {seq}: {rel} not found; the step is kept without it")
         for key in ("dom", "dom_before"):
-            if data.get(key):
+            if data.get(key) and isinstance(data[key], str):
                 html = _read(rec / data[key])
                 frames += _iframes(html, url)
                 if 'type="password"' in html:
@@ -361,7 +375,16 @@ def _load_steps(rec: Path) -> list[_Step]:
                 (match or [cross[0][1]])[0] if (match or len(set(o for _, o in cross)) == 1) else ""
             )
         out.append(step)
+    problems += seq_problems([s.seq for s in out])
     return out
+
+
+def problems(recording: Path) -> list[str]:
+    """What is damaged in a recording's steps (a recorder that crashed or was restarted): lines
+    that are not steps, snapshots a step names that are not there, step numbers used twice."""
+    found: list[str] = []
+    _load_steps(Path(recording), found)
+    return found
 
 
 def _load_har(rec: Path) -> dict:
@@ -369,13 +392,25 @@ def _load_har(rec: Path) -> dict:
     if not har.is_file():
         found = sorted(rec.glob("*.har"))
         if not found:
-            raise ProposalError(f"{rec.name}: no recording.har")
+            raise ProposalError(
+                f"{rec.name}: no recording.har; without the requests the steps cannot be given "
+                "to an application (was the recorder stopped before it wrote the HAR?)"
+            )
         har = found[0]
     try:
-        doc = json.loads(har.read_text(encoding="utf-8-sig"))
-        doc["log"]["entries"]
+        text = har.read_text(encoding="utf-8-sig", errors="replace")
+        if not text.strip():
+            raise ValueError("the file is empty")
+        doc = json.loads(text)
+        if not isinstance(doc["log"]["entries"], list):
+            raise TypeError("'entries' is not a list")
+        doc["log"]["entries"] = [e for e in doc["log"]["entries"] if isinstance(e, dict)]
     except (ValueError, KeyError, TypeError) as exc:
-        raise ProposalError(f"{har.name} is not a HAR file: {exc}") from exc
+        why = f"no {exc}" if isinstance(exc, KeyError) else str(exc)
+        raise ProposalError(
+            f"{rec.name}: {har.name} is not a complete HAR file ({why}); the recorder may have "
+            "stopped before it was written. Record again, or restore the file"
+        ) from exc
     return doc
 
 
@@ -443,7 +478,13 @@ def propose(recording: Path) -> Proposal:
     rec = Path(recording)
     if not rec.is_dir():
         raise ProposalError(f"{rec}: a recording folder is needed (steps.jsonl and recording.har)")
-    steps = _load_steps(rec)
+    damage: list[str] = []
+    steps = _load_steps(rec, damage)
+    if not steps:
+        raise ProposalError(
+            f"{rec.name}: steps.jsonl has no step; an empty recording cannot be split"
+            + "".join(f"\n  {p}" for p in damage)
+        )
     entries = _entries(_load_har(rec))
     setup = sum(1 for s in steps if s.setup)
     steps = [s for s in steps if s.origin and not s.is_tab and not s.setup] or []
@@ -475,7 +516,7 @@ def propose(recording: Path) -> Proposal:
     if not any(e.include for e in result):  # a recording of nothing but sign-on: keep it usable
         for e in result:
             e.include = True
-    return Proposal(rec.name, result, setup)
+    return Proposal(rec.name, result, setup, damage)
 
 
 # --- applying ----------------------------------------------------------------------------------------
@@ -738,7 +779,16 @@ def apply(
     proposal = from_dict(proposal.to_dict(), "proposal")  # validate what is being applied
     # A setup event (the blank page a browser starts on) belongs to no application: it is kept,
     # for provenance, in the sequence file's `setup` list.
-    every = _load_steps(rec)
+    damage: list[str] = []
+    every = _load_steps(rec, damage)
+    seqs = [s.seq for s in every]
+    twice = sorted({q for q in seqs if seqs.count(q) > 1})
+    if twice:  # every reference between steps is by number: two steps with one number are lost
+        raise ProposalError(
+            f"{rec.name}: step number(s) {', '.join(map(str, twice[:10]))} are used more than "
+            "once in steps.jsonl (the recorder may have been restarted and appended), so a "
+            "reference to one of them cannot be followed. Keep one run's lines, or record again"
+        )
     setup = [s for s in every if s.setup and not s.is_tab]
     steps = [s for s in every if not (s.setup and not s.is_tab)
              and (s.origin or s.is_tab or s.data.get("action") != "goto")]  # fmt: skip
@@ -789,7 +839,7 @@ def apply(
         _write_part(rec, outs[i], doc, entries, ent_app, i, _with_tabs(mine, steps),
                     app_of, last_app == i)  # fmt: skip
         paths.append(outs[i])
-    _write_sequence(rec, root, steps, router, included, proposal, tabs, setup, len(every))
+    _write_sequence(rec, root, steps, router, included, proposal, tabs, setup, len(every), damage)
     return paths
 
 
@@ -1081,7 +1131,8 @@ def _copy_docs(
 
 def _write_sequence(rec: Path, root: Path, steps: list[_Step], router: _Router, included: set[str],
                     proposal: Proposal, tabs: dict[str, dict] | None = None,
-                    setup: list[_Step] = (), total: int | None = None) -> Path:  # fmt: skip
+                    setup: list[_Step] = (), total: int | None = None,
+                    damage: list[str] = ()) -> Path:  # fmt: skip
     """The whole order across applications, in the shape of `appmodel.Flow` steps (screen, path,
     do) plus the global step number and the app id; `apps` replaces the single `app`. With
     `tabs` (which tab each application was used in), `handovers` (where the flow goes from one
@@ -1138,6 +1189,8 @@ def _write_sequence(rec: Path, root: Path, steps: list[_Step], router: _Router, 
     data["counts"] = {"total": total if total is not None else len(steps) + len(setup),
                       "setup": len(setup), "tab": sum(1 for s in steps if s.is_tab),
                       "apps": per_app}  # fmt: skip
+    if damage:  # what was damaged in the recording: the parts were written without it
+        data["problems"] = list(damage)
     data["handovers"] = _handovers(rows)
     data["travels"] = [t for t in _travels(rec, steps, router)
                        if t["from"]["app"] in included and t["to"]["app"] in included]  # fmt: skip

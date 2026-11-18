@@ -111,6 +111,10 @@ class Recording:
     steps: list[RecStep] = field(default_factory=list)
     entries: list[HarEntry] = field(default_factory=list)
     bad_lines: int = 0
+    # What is damaged or missing (a recorder that crashed, timed out or was restarted): lines
+    # dropped, snapshots a step names that are not there, repeated step numbers, an unreadable
+    # HAR. The recording still loads; whoever shows a result from it shows these.
+    problems: list[str] = field(default_factory=list)
 
     def dom(self, step: RecStep | None, before: bool = False) -> str | None:
         rel = (step.dom_before if before else step.dom) if step is not None else None
@@ -168,13 +172,35 @@ def request_key(method: str, url: str) -> str:
     return f"{(method or 'GET').upper()} {path_pattern(parts.path or '/')}{star}"
 
 
-def read_har(path: Path) -> list[HarEntry]:
+def read_har(path: Path, problems: list[str] | None = None) -> list[HarEntry]:
+    """The requests of a HAR file. One that cannot be read (empty, cut off, not a HAR) gives no
+    requests and, when `problems` is given, a line saying why."""
+    path = Path(path)
+    problems = problems if problems is not None else []
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError as exc:
+        problems.append(f"{path.name} could not be read ({exc}): no requests were read")
+        return []
+    if not text.strip():
+        problems.append(f"{path.name} is empty: no requests were read")
+        return []
+    try:
+        data = json.loads(text)
+        raw = data["log"]["entries"]
+        if not isinstance(raw, list):
+            raise TypeError("'entries' is not a list")
+    except (ValueError, KeyError, TypeError) as exc:
+        why = str(exc) if isinstance(exc, ValueError) else "no log.entries list"
+        problems.append(
+            f"{path.name} is not a complete HAR file ({why}): no requests were read; "
+            "the recorder may have stopped before it was written"
+        )
         return []
     entries = []
-    for e in (data.get("log") or {}).get("entries") or []:
+    for e in raw:
+        if not isinstance(e, dict):
+            continue
         req = e.get("request") or {}
         res = e.get("response") or {}
         start = _ts(e.get("startedDateTime"))
@@ -196,13 +222,16 @@ def read_har(path: Path) -> list[HarEntry]:
 
 
 def load(path: Path) -> Recording:
+    """Read a recording folder. A damaged one (a recorder that crashed, timed out or was
+    restarted) still loads: what could be read is kept and `problems` says what was not."""
     path = Path(path)
     rec = Recording(id=path.name, path=path, app=path.parent.name or None)
     steps_file = path / "steps.jsonl"
+    named: list[tuple[int, str]] = []  # (seq, file) of each snapshot or picture a step names
     if steps_file.exists():
-        for line in steps_file.read_text(encoding="utf-8-sig").splitlines():
-            if not line.strip():
-                continue
+        text = steps_file.read_text(encoding="utf-8-sig", errors="replace")
+        lines = [(n, line) for n, line in enumerate(text.splitlines(), 1) if line.strip()]
+        for n, line in lines:
             try:
                 d = json.loads(line)
                 rec.steps.append(
@@ -226,13 +255,62 @@ def load(path: Path) -> Recording:
                         **_extra(d),
                     )
                 )
-            except (ValueError, TypeError, AttributeError):
+                named += [
+                    (rec.steps[-1].seq, d[key])
+                    for key in ("dom", "dom_before", "screenshot")
+                    if isinstance(d.get(key), str) and d[key]
+                ]
+            except (ValueError, TypeError, AttributeError) as exc:
                 rec.bad_lines += 1
-    rec.steps.sort(key=lambda s: s.seq)
+                rec.problems.append(bad_line(n, n == lines[-1][0], exc))
+        if not rec.steps:
+            rec.problems.append("steps.jsonl has no step: the recording is empty")
+    else:
+        rec.problems.append("no steps.jsonl: the recording has no steps")
+    rec.problems += seq_problems([s.seq for s in rec.steps])
+    if len({s.seq for s in rec.steps}) == len(rec.steps):
+        rec.steps.sort(key=lambda s: s.seq)
+    # else: a number is used twice (the recorder was restarted and appended). Sorting would
+    # interleave the two runs, so the steps stay in the order they were written.
+    root = path.resolve()
+    for seq, rel in named:
+        target = (path / rel).resolve()
+        if root not in target.parents or not target.is_file():
+            rec.problems.append(f"step {seq}: {rel} not found; the step has no such snapshot")
     har = path / "recording.har"
     if har.exists():
-        rec.entries = read_har(har)
+        rec.entries = read_har(har, rec.problems)
+    else:
+        rec.problems.append("no recording.har: no requests were read")
     return rec
+
+
+def bad_line(n: int, last: bool, exc: Exception | None = None) -> str:
+    """The problem line for a steps.jsonl line that is not a step. The last line of a file whose
+    recorder was stopped while writing is cut off in the middle; that is said as such."""
+    if last and isinstance(exc, json.JSONDecodeError):
+        return (
+            f"steps.jsonl line {n} (the last) is cut off; dropped. "
+            "The recorder may have stopped while writing it"
+        )
+    return f"steps.jsonl line {n} is not a step; skipped"
+
+
+def seq_problems(seqs: list[int]) -> list[str]:
+    """Step numbers used twice, or not in rising order, in the order the steps were written."""
+    count: dict[int, int] = {}
+    for seq in seqs:
+        count[seq] = count.get(seq, 0) + 1
+    twice = sorted(seq for seq, n in count.items() if n > 1)
+    if twice:
+        return [
+            f"steps.jsonl: step number(s) {', '.join(map(str, twice[:10]))} used more than once; "
+            "the recorder may have been restarted and appended. The steps are kept in the order "
+            "written; a reference to one of these numbers is ambiguous"
+        ]
+    if seqs != sorted(seqs):
+        return ["steps.jsonl: step numbers are not in rising order; check the order of the steps"]
+    return []
 
 
 def _extra(d: dict) -> dict:
