@@ -9,8 +9,9 @@ reproduce those. It is built and installed on a Windows machine or VM: no contai
 OpenShift.
 
 Code: `lab/labctl/labctl/desktop/`. Commands: `labctl desktop record | record-java | attach |
-analyse | split | verify`. Reference targets: `reference/desktop/CaseDesk/` (.NET 6 WinForms)
-and `reference/desktop/CaseDeskSwing/` (Java 11 Swing).
+analyse | split | verify`. Reference targets: `reference/desktop/CaseDesk/` (.NET 6 WinForms),
+`reference/desktop/CaseDeskWpf/` (the same application in .NET 6 WPF, with the same control
+names) and `reference/desktop/CaseDeskSwing/` (Java 11 Swing).
 
 ## What a recording captures
 
@@ -45,13 +46,13 @@ How each action is seen, and where UI Automation events were not enough:
 
 | Action | UI Automation path (WinForms, WPF, UWP/WinUI, Win32/MFC, JavaFX) | Java path (Swing/AWT) |
 |---|---|---|
-| click, double/right click, menu | low-level mouse hook (`WH_MOUSE_LL`); the element is read **in the hook**, before the click is delivered (a dialog it opens would cover the point) | the same hook; the control under the point is found in the window's last snapshot, else asked from the bridge |
-| click by a pattern (script, accessibility tool) | `Invoke_Invoked`, **only when the toolkit raises it**: WinForms (.NET 6) does not | not seen |
-| type | `ValueProperty` change events while the control has keyboard focus (shape computed in the handler, value dropped), else the value is read once when focus leaves | the focused text field polled through the bridge every 300 ms |
+| click, double/right click, menu | low-level mouse hook (`WH_MOUSE_LL`); the element is read **in the hook**, before the click is delivered (a dialog it opens would cover the point). The innermost element is often the caption (in WPF the TextBlock inside a Button, CheckBox or MenuItem): the control it belongs to is recorded | the same hook; the control under the point is found in the window's last snapshot, else asked from the bridge |
+| click by a pattern (script, accessibility tool) | `Invoke_Invoked`, **only when the toolkit raises it**: WPF does (also for a mouse click, which is then recorded once), WinForms (.NET 6) does not. An Invoke within 0.4 s after a key press is what the key did (Enter on the default button): no click step, the key step names the control as `invoked` | not seen |
+| type | `ValueProperty` change events while the control has keyboard focus (shape computed in the handler, value dropped), else the value is read once when focus leaves. A WPF PasswordBox does neither: there a character key pressed while it has the focus makes the `type` step (`via: keyboard-hook`; which key, and how many, is not kept) | the focused text field polled through the bridge every 300 ms |
 | select | `SelectionItem_ElementSelected`; a Win32 drop-down's items are read when its list window opens | the window tree compared before and after (a combo box shows another item) |
 | toggle, expand, collapse | `ToggleState` / `ExpandCollapseState` change events; a click on a check box becomes a toggle with its state after | click on a check box; tree comparison for other changes |
 | key | low-level keyboard hook: Enter, Tab, Esc, Delete, F-keys and chords with Ctrl or Alt. Plain characters are **never** recorded | same |
-| window open / close / focus | polled every 250 ms (EnumWindows, GetForegroundWindow) | same |
+| window open / close / focus | polled every 250 ms (EnumWindows, GetForegroundWindow). A WPF `Popup` window (a menu's drop-down, a combo box's list) is not a window of the application: it gives `menu_open` or the combo box's items, and its steps belong to the window that owns it | same |
 
 Only the recorded processes are read: the hooks check the process of the window under the mouse
 or in the foreground first, and every event whose element belongs to another process is dropped.
@@ -119,8 +120,9 @@ the shape of the web detection.
 | Toolkit | Status |
 |---|---|
 | WinForms | **recorded and verified live** (CaseDesk) |
+| WPF | **recorded and verified live** (CaseDeskWpf, .NET 6): sign-in with a PasswordBox, message boxes, menu, DataGrid, ComboBox, CheckBox, and a deliberately wrong build found by `verify`. Limits below |
 | Java Swing / AWT | **recorded and verified live** through the Java Access Bridge (CaseDeskSwing) |
-| WPF, UWP / WinUI, Win32 / MFC | same UI Automation path; detection and model proven with fixtures only, not on a live app |
+| UWP / WinUI, Win32 / MFC | same UI Automation path; detection and model proven with fixtures only, not on a live app |
 | JavaFX | UI Automation (JavaFX is its own provider from 8u40); fixtures only |
 | Electron / CEF | detected (fixtures only); **use the web recorder** (`labctl evidence attach` to `--remote-debugging-port`) |
 | Delphi/VCL, Qt, VB6, PowerBuilder | detected and reported **not supported** (out of scope by decision) |
@@ -164,7 +166,8 @@ labctl desktop verify caseapp --exe apps\caseapp\publish\caseapp\CaseApp.exe `
 ```
 
 `verify` starts the app, replays the steps by their locators (UI Automation patterns, `BM_CLICK`
-posted to buttons, keys posted to the focused control; for Java the bridge's actions, focus and
+posted to buttons, keys posted to the focused control, or to its top-level window when the
+control has no window of its own, as in WPF; for Java the bridge's actions, focus and
 a posted space key: no mouse, no keyboard reaches another application), compares each step's
 window with the recorded tree (missing, extra, changed, ambiguous, enabled, visibility, options,
 value shape; grid rows by presence), closes the app, and writes the report in the web fidelity
@@ -176,8 +179,10 @@ application counts only if the demo app has another number of matches.
 The scripted evidence runs (`reference/desktop/*/flow.py`) stand in for a person: they type
 through UI Automation / the bridge and press buttons with **real mouse clicks** (SendInput, after
 checking the app owns the foreground window and the point; the cursor is put back), because
-WinForms raises no Invoke event a recorder could hear for a pattern call. The live tests run only
-on request: `TWINLAB_DESKTOP_GUI=1 python -m pytest -m desktop_gui`.
+WinForms raises no Invoke event a recorder could hear for a pattern call. The WPF run types the
+password with real key presses (`Driver.keys`, only while the password box has the keyboard
+focus), because a PasswordBox set through its Value pattern raises nothing. The live tests run
+only on request: `TWINLAB_DESKTOP_GUI=1 python -m pytest -m desktop_gui`.
 A run prints `Windows fatal exception: code 0x8001010d` thread dumps: UI Automation raises and
 handles that error itself and pytest's fault handler reports it. The lookups succeed; add
 `-p no:faulthandler` for a quiet log.
@@ -186,7 +191,26 @@ handles that error itself and pytest's fault handler reports it. The lookups suc
 
 - **Event coverage differs by toolkit.** WinForms raises no `Invoke_Invoked`; clicks are
   therefore seen only through the mouse hook (a person's click is; a script's pattern call is
-  not). Value events fire for WinForms edits; other toolkits may need the focus-change read.
+  not). Value events fire for WinForms and WPF edits; other toolkits may need the focus-change
+  read.
+- **WPF** (found on CaseDeskWpf):
+  - A PasswordBox gives no value, no shape and no value event. Typing in it is seen only as
+    key presses (a person's, or `Driver.keys`); a password set by a pattern call or pasted with
+    the mouse is not recorded, and `verify` then has no step to type the password at.
+  - WPF raises `SelectionItem_ElementSelected` also when the application selects a row itself
+    (a grid filled again with its first row selected). It is recorded as a `select` step whose
+    item is data; `verify` does not replay it and reports it skipped. It cannot be told from a
+    script's pattern call.
+  - The items of a drop-down menu are in the window's tree only while the menu is open.
+    `verify` compares them only when the recorded and the live tree both show the menu open;
+    an item is not reported missing or extra against a closed menu.
+  - A window that is closing gives a tree without its content; a snapshot read while the
+    window went away is dropped, so the step that closed a window may have no tree.
+  - A value set within the recorder's window poll (250 ms) of a window opening is taken as the
+    application filling the window in and is not recorded (any toolkit; a script meets it,
+    a person does not). The scripted run waits after each window opens.
+  - A grid row's Name is the row object's text (`ToString()`); it is kept as its shape, like
+    every row.
 - **Snapshots come after a batch** (0.4 s of quiet): when actions follow each other faster, the
   after-tree may show a later state (for example a message box already answered). `verify`
   therefore does not compare enabled states when a modal dialog disables a window in one tree
@@ -196,6 +220,6 @@ handles that error itself and pytest's fault handler reports it. The lookups suc
   undone within one poll is missed; keys are not replayed into Java windows by `verify`.
 - Window titles are masked by rule (digits, after `:`, words seen as data); a title that holds a
   name never seen elsewhere in the recording is kept.
-- WPF, UWP/WinUI, Win32/MFC and JavaFX run through the same UI Automation code but were not
+- UWP/WinUI, Win32/MFC and JavaFX run through the same UI Automation code but were not
   recorded live here; they, and the Electron hand-off, are tested on fixtures only. Proven live:
-  WinForms and Swing.
+  WinForms, WPF and Swing.

@@ -219,3 +219,105 @@ def test_compare_trees() -> None:
     ]
     assert compare_trees(rec, _window(*more_rows)) == []  # rows compare by presence
     assert value_for("X-9999") == "A-1111"
+
+
+# --- WPF (found on the live reference app, reference/desktop/CaseDeskWpf) --------------------------
+
+
+def _menu(*case_items: dict) -> dict:
+    """A WPF main window: the items of the Case menu are listed under it only while it is open."""
+    case = {"type": "MenuItem", "aid": "mnuCase", "name": "Case", "children": list(case_items)}
+    bar = {"type": "Menu", "aid": "menuMain", "children": [
+        {"type": "MenuItem", "aid": "mnuFile", "name": "File"}, case]}  # fmt: skip
+    return _window(bar, {"type": "Button", "aid": "btnOpen", "name": "Open", "enabled": True})
+
+
+def test_compare_trees_wpf_menu_open_in_one_tree_only() -> None:
+    refresh = {"type": "MenuItem", "aid": "mnuRefresh", "name": "Refresh"}
+    open_case = {"type": "MenuItem", "aid": "mnuOpenCase", "name": "Open case"}
+    # Open in the recording, closed in the live tree, and the other way round: nothing was seen
+    # of the items on one side, so they are neither missing nor extra.
+    assert compare_trees(_menu(open_case, refresh), _menu()) == []
+    assert compare_trees(_menu(), _menu(open_case, refresh)) == []
+    # Open in both: a menu that lost or gained an item is still reported.
+    checks = {(d.check, d.element) for d in compare_trees(_menu(open_case, refresh), _menu(open_case))}  # fmt: skip
+    assert checks == {("missing", "uia:AutomationId=mnuRefresh;ControlType=MenuItem")}
+    checks = {(d.check, d.element) for d in compare_trees(_menu(open_case), _menu(open_case, refresh))}  # fmt: skip
+    assert checks == {("extra", "uia:AutomationId=mnuRefresh;ControlType=MenuItem")}
+    # A menu of the menu bar itself is never excused.
+    no_file = _window({"type": "Menu", "aid": "menuMain", "children": [
+        {"type": "MenuItem", "aid": "mnuCase", "name": "Case"}]},
+        {"type": "Button", "aid": "btnOpen", "name": "Open", "enabled": True})  # fmt: skip
+    assert ("missing", "uia:AutomationId=mnuFile;ControlType=MenuItem") in {
+        (d.check, d.element) for d in compare_trees(_menu(), no_file)
+    }
+
+
+def test_wpf_popup_window_content() -> None:
+    from labctl.desktop.recorder import popup_content
+
+    popup = {"type": "Window", "cls": "Popup", "fw": "WPF"}
+    menu = {**popup, "children": [{"type": "MenuItem", "aid": "mnuRefresh", "name": "Refresh"}]}
+    combo = {**popup, "children": [{"type": "ListItem", "name": "Open"}]}
+    assert popup_content(menu) == {"MenuItem"}
+    assert popup_content(combo) == {"ListItem"}
+    assert popup_content(popup) == set()
+    # A dialog is not a popup, whatever it holds.
+    assert popup_content({"type": "Window", "cls": "Window", "children": menu["children"]}) == set()
+    assert popup_content(None) == set()
+
+
+def _recorder():
+    """A Recorder without Windows: only the state its event handling needs."""
+    from labctl.desktop.recorder import Recorder
+
+    rec = Recorder.__new__(Recorder)
+    rec.pending, rec.last_activity, rec.focus, rec.typed_since_focus = [], 0.0, None, False
+    rec.last_combo, rec.pending_items, rec.combo_items = None, None, {}
+    return rec
+
+
+def test_recorder_invoke_after_a_key_is_the_key() -> None:
+    """WPF raises Invoke for the default button when Enter is pressed: one key step that names
+    the button, not a key and a click."""
+    search = {"rid": (1, 2), "type": "Button", "aid": "btnSearch"}
+    rec = _recorder()
+    rec.pending.append({"kind": "key", "key": "Enter", "t": 10.0})
+    rec._semantic({"kind": "invoke", "desc": search, "t": 10.05})
+    rec._semantic({"kind": "invoke", "desc": search, "t": 10.07})  # WPF raises it again
+    assert [a["kind"] for a in rec.pending] == ["key"]
+    assert rec.pending[0]["invoked_desc"] == search
+    # A mouse click on the button is a click, also right after a key.
+    rec = _recorder()
+    rec.pending.append({"kind": "key", "key": "Tab", "t": 10.0})
+    rec.pending.append({"kind": "click", "desc": search, "t": 10.1, "provisional": True})
+    rec._semantic({"kind": "invoke", "desc": search, "t": 10.15})
+    assert [(a["kind"], a.get("via")) for a in rec.pending] == [("key", None), ("click", "uia-invoke")]  # fmt: skip
+    assert "invoked_desc" not in rec.pending[0]
+    # An Invoke long after the key (a script's pattern call) is a click of its own.
+    rec = _recorder()
+    rec.pending.append({"kind": "key", "key": "Enter", "t": 10.0})
+    rec._semantic({"kind": "invoke", "desc": search, "t": 11.0})
+    assert [a["kind"] for a in rec.pending] == ["key", "click"]
+
+
+def test_recorder_typing_in_a_password_field_without_value_events() -> None:
+    """WPF's PasswordBox raises no value event: a key typed while it has the focus is the type
+    step. Nothing of the key is kept; other fields are left to their value events."""
+    box = {"rid": (7,), "type": "Edit", "aid": "txtPassword", "password": True}
+    rec = _recorder()
+    rec._typing({"kind": "typing", "t": 1.0})  # no focus known: nothing
+    rec.focus = {"rid": (8,), "type": "Edit", "aid": "txtUser"}
+    rec._typing({"kind": "typing", "t": 1.1})  # not a password field: nothing
+    assert rec.pending == []
+    rec.focus = box
+    for t in (2.0, 2.1, 2.2):
+        rec._typing({"kind": "typing", "t": t})
+    assert len(rec.pending) == 1
+    step = rec.pending[0]
+    assert (step["kind"], step["password"], step["shape"], step["via"]) == (
+        "type", True, None, "keyboard-hook")  # fmt: skip
+    assert set(step) == {"kind", "desc", "shape", "t", "password", "via"} and rec.typed_since_focus
+    # A toolkit that does raise value events (WinForms): the same one step, said by the event.
+    rec._typed({"kind": "value", "desc": box, "password": True, "t": 2.3})
+    assert len(rec.pending) == 1 and rec.pending[0]["via"] == "uia-value-event"

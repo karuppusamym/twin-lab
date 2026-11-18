@@ -65,6 +65,21 @@ def _named(path: list[str]) -> list[str]:
     return [p for p in path if "AutomationId=" in p or "Name=" in p]
 
 
+def _submenu_closed(other: dict, tree: dict, ancestors: tuple) -> bool:
+    """Whether a menu item's parent menu item shows no items in the `other` tree. WPF lists the
+    items of a drop-down menu under their parent only while the menu is open; whether a snapshot
+    caught it open is timing. An item is then neither missing nor extra: nothing was seen."""
+    if not ancestors or ancestors[-1].get("type") != "MenuItem":
+        return False
+    parent = ancestors[-1]
+    loc = locator.build(tree, parent, ancestors[:-1], parent.get("idx", 0))
+    hits = locator.find(other, loc["selector"],
+                        loc["path"] if "Index=" in loc["selector"] else None)  # fmt: skip
+    return len(hits) == 1 and not any(
+        c.get("type") == "MenuItem" for c in hits[0][0].get("children") or []
+    )
+
+
 def _rows(node: dict) -> int:
     n = 0
     for c in node.get("children") or []:
@@ -87,9 +102,9 @@ def compare_trees(recorded: dict, live: dict, step: int = 0,
     modal = bool(recorded.get("enabled")) != bool(live.get("enabled"))
     for node, ancestors, idx in _controls(recorded):
         loc = locator.build(recorded, node, ancestors, idx)
-        expected.append((loc, node))
+        expected.append((loc, node, ancestors))
     matched_ids: set[int] = set()
-    for loc, node in expected:
+    for loc, node, ancestors in expected:
         sel = loc["selector"]
         scoped = "Index=" in sel
         hits = locator.find(live, sel, loc["path"] if scoped else None)
@@ -101,6 +116,8 @@ def compare_trees(recorded: dict, live: dict, step: int = 0,
                                         expected=loc["matches"], actual=len(hits)))  # fmt: skip
             continue
         if not hits:
+            if node.get("type") == "MenuItem" and _submenu_closed(live, recorded, ancestors):
+                continue
             diffs.append(Difference(step=step, element=sel, check="missing", expected=1, actual=0))
             continue
         if len(hits) > 1:
@@ -154,6 +171,8 @@ def compare_trees(recorded: dict, live: dict, step: int = 0,
             recorded, loc["selector"], loc["path"] if "Index=" in loc["selector"] else None
         )
         if not found:
+            if node.get("type") == "MenuItem" and _submenu_closed(recorded, live, ancestors):
+                continue
             diffs.append(Difference(step=step, element=loc["selector"], check="extra",
                                     expected=0, actual=loc["matches"]))  # fmt: skip
     return diffs

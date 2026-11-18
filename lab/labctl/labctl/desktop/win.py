@@ -373,6 +373,28 @@ def focused():
     return auto().GetFocusedElement()
 
 
+# A click on the text or picture inside one of these presses the control itself.
+PRESSED_BY_CONTENT = {"Button", "CheckBox", "RadioButton", "MenuItem", "TabItem", "SplitButton",
+                      "Hyperlink"}  # fmt: skip
+
+
+def click_target(el):
+    """The control a click on `el` acts on. `ElementFromPoint` gives the innermost element, in
+    WPF the TextBlock a button, check box or menu item draws its caption with: outside the
+    control view (the nearest control element is taken) or a Text child of the control (its
+    parent is taken). Any other element is returned as it is."""
+    try:
+        walker = auto().ControlViewWalker
+        el = walker.NormalizeElement(el) or el
+        if CONTROL_TYPES.get(el.CurrentControlType) in ("Text", "Image"):
+            parent = walker.GetParentElement(el)
+            if parent and CONTROL_TYPES.get(parent.CurrentControlType) in PRESSED_BY_CONTENT:
+                return parent
+    except (comtypes.COMError, OSError, ValueError):
+        pass
+    return el
+
+
 def _get(el, pid, cached: bool):
     try:
         return el.GetCachedPropertyValue(pid) if cached else el.GetCurrentPropertyValue(pid)
@@ -648,13 +670,19 @@ def post_click(el) -> str | None:
 
 
 def pids_focus(pids: set[int]) -> int:
-    """The window handle of the focused control, when it belongs to one of these processes."""
+    """The window handle of the focused control, when it belongs to one of these processes. A
+    control without a window of its own (every WPF control) gives the nearest window above it:
+    the top-level window, which is where WPF takes its keyboard messages from."""
     try:
         el = focused()
         if el.CurrentProcessId not in pids:
             return 0
-        return int(el.CurrentNativeWindowHandle or 0)
-    except comtypes.COMError:
+        walker, steps = auto().ControlViewWalker, 0
+        while el and not el.CurrentNativeWindowHandle and steps < 60:
+            el, steps = walker.GetParentElement(el), steps + 1
+        hwnd = int(el.CurrentNativeWindowHandle or 0) if el else 0
+        return hwnd if hwnd and window_pid(hwnd) in pids else 0
+    except (comtypes.COMError, OSError, ValueError):
         return 0
 
 
