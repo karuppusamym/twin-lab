@@ -91,7 +91,7 @@
       <h3>Record a flow</h3>
       <p class="small muted">Opens a browser on this machine. Sign in and go through the flow once; close the window to finish. Each step keeps the page before the action, the page after it, and a picture.</p>
       <label for="rurl">Start address of the real application</label><input id="rurl" type="url" name="url" placeholder="https://qtt.uat.example/login">
-      <label for="rname">Recording name</label><input id="rname" type="text" name="name" required placeholder="qc-review" pattern="[a-z0-9][a-z0-9-]*">
+      <label for="rname">Recording name</label><input id="rname" type="text" name="name" required placeholder="qc-review" pattern="[a-z0-9][a-z0-9\-]*">
       <details><summary>Or record a browser that is already running (a robot's)</summary>
         <p class="small muted">Start Chrome or Edge on this machine with <code>--remote-debugging-port=9222 --user-data-dir=C:\tl-robot</code>, give its address here, start recording, then run the robot. Stop with the button below or by closing that browser.</p>
         <label for="rcdp">Browser address</label><input id="rcdp" type="text" name="cdp" placeholder="http://127.0.0.1:9222">
@@ -100,7 +100,7 @@
       <button type="submit">Start recording</button>
     </form>
     <form method="post" action="/apps/{{ app_id }}/record/stop" class="row">
-      <div><input type="text" name="name" placeholder="recording name" pattern="[a-z0-9][a-z0-9-]*" required></div>
+      <div><input type="text" name="name" placeholder="recording name" pattern="[a-z0-9][a-z0-9\-]*" required></div>
       <div><button type="submit" class="secondary">Stop recording</button></div>
     </form>
   </div>
@@ -318,7 +318,7 @@
       <h3>Named data packs</h3>
       <p class="small muted">Save the current data under a name, and load it again later: "month-end", "empty queue". Packs stay on this machine.</p>
       <form method="post" action="/apps/{{ app_id }}/packs/save" class="row">
-        <div><input type="text" name="name" placeholder="month-end" pattern="[a-z0-9][a-z0-9-]*" required></div>
+        <div><input type="text" name="name" placeholder="month-end" pattern="[a-z0-9][a-z0-9\-]*" required></div>
         <div><button type="submit" class="secondary">Save current data</button></div>
       </form>
       {% if packs %}<table class="small"><tbody>
