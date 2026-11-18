@@ -105,9 +105,15 @@ def build_model(
 ):
     evidence = evidence or discover(root, app_id)
     pages_dir = root / "apps" / app_id / "pages"
+    needs = flows(root, app_id)
+    if not needs and not automations(root, app_id):
+        # nobody narrowed the scope: every screen and action the recordings show
+        from labctl import contract
+
+        needs = contract.implied_flows(root, app_id)
     parts = [
         mb.from_automations(app_id, automations(root, app_id)),
-        mb.from_flows(app_id, flows(root, app_id)),
+        mb.from_flows(app_id, needs),
     ]
     if source is not None:
         parts.append(mb.from_source(app_id, source, root))
@@ -146,9 +152,13 @@ def generate(
     force: bool = False,
     data: str | None = None,
 ) -> Result:
-    if not automations(root, app_id) and not flows(root, app_id):
+    from labctl import contract
+
+    if (not automations(root, app_id) and not flows(root, app_id)
+            and not contract.implied_flows(root, app_id)):  # fmt: skip
         raise FactoryError(
-            f"no registered automation or requested flow needs '{app_id}'; nothing to build"
+            f"no registered automation or requested flow needs '{app_id}' and it has no "
+            "recording; nothing to build"
         )
     out = root / "apps" / app_id
     model_file, brief_file = out / "model.yaml", out / "BRIEF.md"
@@ -165,6 +175,7 @@ def generate(
     if db_engine is None:
         db_engine = chosen_engine(root, app_file)
     result = brief_mod.scope(app_id, system or app_id, model, db_engine, data)
+    extras = contract.adopt(root, app_id, result, model)  # session-only tables become app_users
     schema_file.parent.mkdir(parents=True, exist_ok=True)
     _write(
         model_file,
@@ -231,8 +242,10 @@ def generate(
     if look:
         marker = "## Running in the lab"
         text = text.replace(marker, look + marker, 1) if marker in text else f"{text}\n{look}"
-    _write(brief_file, text)
     _write(schema_file, brief_mod.schema(result, root))
+    # The API catalogue, the navigation map, sign-in and the scope (labctl.contract).
+    text = contract.extend(root, app_id, result, model, text, extras)
+    _write(brief_file, text)
     if not model.stack.desktop:  # the app pipeline builds a container; a desktop app has none
         write_workflow(root, app_id)
     kept = app_file.exists()
@@ -328,7 +341,8 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
 
 
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
-             "behaviours.json", "pages", "steps", "look")  # fmt: skip
+             "behaviours.json", "pages", "steps", "look", "api",
+             "navigation.json")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:

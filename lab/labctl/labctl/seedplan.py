@@ -87,6 +87,17 @@ class Ex:
     form: dict[str, str]
     status: int
     data: object  # the JSON answer, or None
+    # For the API catalogue (labctl.apicatalog): the JSON body sent (typed values are shapes
+    # already), content types, the page that sent it (Referer path), where a redirect leads,
+    # and how the request was authorised BY NAME only (cookie names, the Authorization scheme).
+    body: object = None
+    req_type: str = ""
+    resp_type: str = ""
+    referer: str = ""
+    location: str = ""
+    cookies_sent: tuple = ()
+    cookies_set: tuple = ()
+    auth_scheme: str = ""
 
 
 @dataclass
@@ -153,8 +164,46 @@ def _exchanges(har_doc: dict, hosts: set[str]) -> list[Ex]:
         out.append(Ex(har._time(entry.get("startedDateTime")), str(req.get("method") or "GET").upper(),
                       url.path or "/", sanitize.route_pattern(url.path or "/"),
                       dict(parse_qsl(url.query, keep_blank_values=True)), form,
-                      int(resp.get("status") or 0), data))  # fmt: skip
+                      int(resp.get("status") or 0), data, **_extras(entry, post, content)))  # fmt: skip
     return [e for e in out if e.started is not None]
+
+
+def _extras(entry: dict, post: dict, content: dict) -> dict:
+    """The fields of `Ex` the API catalogue reads. Header values that could be a credential are
+    never kept: a cookie gives its name, an Authorization header its scheme."""
+    req, resp = entry.get("request") or {}, entry.get("response") or {}
+
+    def heads(side: dict, name: str) -> list[str]:
+        return [str(h.get("value") or "") for h in side.get("headers") or []
+                if str(h.get("name") or "").lower() == name]  # fmt: skip
+
+    req_type = str(post.get("mimeType") or "").split(";")[0].strip().lower()
+    body = None
+    text = post.get("text")
+    if isinstance(text, str) and ("json" in req_type or text.lstrip().startswith(("{", "["))):
+        try:
+            body = json.loads(text)
+        except ValueError:
+            body = None
+    sent = {p.split("=", 1)[0].strip() for v in heads(req, "cookie") for p in v.split(";")
+            if "=" in p}  # fmt: skip
+    sent |= {str(c.get("name") or "") for c in req.get("cookies") or []}
+    made = {v.split("=", 1)[0].strip() for h in heads(resp, "set-cookie") for v in h.splitlines()
+            if "=" in v}  # fmt: skip
+    made |= {str(c.get("name") or "") for c in resp.get("cookies") or []}
+    scheme = next((v.split(" ", 1)[0] for v in heads(req, "authorization") if " " in v), "")
+    referer = next(iter(heads(req, "referer")), "")
+    location = next(iter(heads(resp, "location")), "") or str(resp.get("redirectURL") or "")
+    return {
+        "body": body,
+        "req_type": req_type or ("application/json" if body is not None else ""),
+        "resp_type": str(content.get("mimeType") or "").split(";")[0].strip().lower(),
+        "referer": urlsplit(referer).path if referer else "",
+        "location": urlsplit(location).path if location else "",
+        "cookies_sent": tuple(sorted(n for n in sent if sanitize.COOKIE_NAME.match(n))),
+        "cookies_set": tuple(sorted(n for n in made if sanitize.COOKIE_NAME.match(n))),
+        "auth_scheme": scheme if re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{1,20}", scheme) else "",
+    }
 
 
 def load_part(app: str, part: Path) -> Part:
@@ -296,6 +345,9 @@ class ListDesign:
     searches: list[Search] = field(default_factory=list)
     note: str = ""
     before_writes: int = 0  # most rows an answer listed before the recording changed anything
+    # Per identifier number, what the answers first showed of that record (a list row or the
+    # record's own GET): read only for code values, booleans and empty fields, never copied as data.
+    seen: dict[int, dict] = field(default_factory=dict)
 
 
 @dataclass
@@ -465,6 +517,10 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
         shown = next((g["value"] for g in firsts if g.get("value")), None)
         if shown is not None:
             d.first_new = int(stepfacts.ID_VALUE.match(shown).group(3))
+        made = _api_made(loaded, d)
+        if made:  # the answer of the creating call names the new record: nothing to guess
+            d.first_new = min(made)
+        _records_seen(loaded, d, shapes)
         if d.first_new is not None and d.first_new == d.lowest:
             d.rows = 0
             d.note = (f"the first record was written during the recording "
@@ -472,10 +528,52 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
                       "before: start with no seeded rows of this kind, numbering from that value")  # fmt: skip
             continue
         d.rows = max(d.highest - d.lowest + 1, *[s.total for s in d.searches], 0)
+        if made and d.first_new > d.lowest:  # rows before the first record the recording made
+            d.rows = d.first_new - d.lowest
     words = set().union(*(p.words for p in loaded)) if loaded else set()
     c = Core(app, loaded, lists, created, words)
     _terms(c)
     return c
+
+
+def _api_made(parts: list[Part], d: ListDesign) -> list[int]:
+    """Numbers of the records a POST of this entity answered with (201 and its `id`)."""
+    from labctl import har
+
+    out = []
+    for p in parts:
+        for e in p.exchanges:
+            if (e.method == "POST" and 200 <= e.status < 300 and isinstance(e.data, dict)
+                    and har._entity(e.route) == d.entity):  # fmt: skip
+                n = _id_of(e.data.get(d.id_key), d.pattern)
+                if n is not None:
+                    out.append(n)
+    return out
+
+
+def _records_seen(parts: list[Part], d: ListDesign, shapes: set[str]) -> None:
+    """Fill `d.seen` from the list rows and from each record's own GET (`/tickets/{id}`), and
+    give the list's columns the fields only the record's own answer shows."""
+    from labctl import har
+
+    for p in parts:
+        for e in p.exchanges:
+            if e.method != "GET" or not (200 <= e.status < 300) or e.data is None:
+                continue
+            if har._entity(e.route) != d.entity:
+                continue
+            single = _items(e.data) is None
+            for item in har._items(e.data):
+                n = _id_of(item.get(d.id_key), d.pattern)
+                if n is None:
+                    continue
+                row = d.seen.setdefault(n, {})
+                for k, v in item.items():
+                    if isinstance(v, (dict, list)):
+                        continue
+                    row.setdefault(k, v)
+                    if single and not (isinstance(v, str) and _masked(v, shapes)):
+                        d.values.setdefault(k, []).append(v)
 
 
 def _pat(pattern: tuple) -> dict:
@@ -584,8 +682,13 @@ def _cell(c: Core, d: ListDesign, col, i: int, n: int, first: list[str], others:
     )
     if any(_key(s.key or "") == k and s.term for s in d.searches):
         return f"{fn} {' '.join(words) if words else ln}"
+    was = next((v for kk, v in d.seen.get(n, {}).items() if _key(kk) == k), None)
+    if was == "" and kind not in ("code", "boolean"):
+        return ""  # the record showed this field empty: empty here too
     if kind == "code" and info.get("values"):
         vals = list(info["values"])
+        if isinstance(was, str) and was in vals:
+            return was  # this record's own code, so a filter finds the rows the recording found
         return vals[i % len(vals)]
     if kind == "date" and info.get("range"):
         lo = date.fromisoformat(info["range"][0] + "-01")
@@ -605,7 +708,7 @@ def _cell(c: Core, d: ListDesign, col, i: int, n: int, first: list[str], others:
             )
         return int(value)
     if kind == "boolean":
-        return i % 2 == 0
+        return was if isinstance(was, bool) else i % 2 == 0
     if kind == "identifier" and info.get("pattern"):
         return obs.make_from_pattern(info["pattern"], i + 1)
     if kind == "email":

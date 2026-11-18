@@ -162,6 +162,13 @@ def facts(part: Path) -> Facts:
     ids, out.lists = _identifiers(entries, doms)
     out.generated = _generated(out.steps, raw, doms,
                                [i for i in ids if i["named"] or i["distinct"] >= 2])  # fmt: skip
+    # The answer of a creating call (POST, 2xx, an identifier in it) names the new record exactly:
+    # it replaces what the pages suggest for that pattern. Signing in creates no record.
+    api = _api_generated(owner, out.steps)
+    taken = {(g["prefix"], g["sep"], g["width"]) for g in api}
+    out.generated = api + [g for g in out.generated
+                           if (g["prefix"], g["sep"], g["width"]) not in taken
+                           and not SESSION_ROUTE.search(g["request"])]  # fmt: skip
     made = {(g["prefix"], g["sep"], g["width"]) for g in out.generated}
     # a pattern is an identifier when it has several values, is named like one, or was generated
     out.ids = [i for i in ids if i["distinct"] >= 2 or i.pop("named", False)
@@ -169,6 +176,34 @@ def facts(part: Path) -> Facts:
     for i in out.ids:
         i.pop("named", None)
         i.pop("names", None)
+    return out
+
+
+SESSION_ROUTE = re.compile(r"log_?in|log_?on|sign_?in|auth|session|token", re.I)
+
+
+def _api_generated(owner: dict[int, list], steps: list[dict]) -> list[dict]:
+    """New identifiers the application answered a creating call with (`POST ... 201` and an
+    `id`, `number`, `reference`... field holding an identifier)."""
+    out = []
+    for i in sorted(owner):
+        for e in owner[i]:
+            route = sanitize.route_pattern(e.path)
+            if (e.method != "POST" or not (200 <= e.status < 300)
+                    or not isinstance(e.resp_json, dict) or SESSION_ROUTE.search(route)):  # fmt: skip
+                continue
+            for k, v in e.resp_json.items():
+                m = ID_VALUE.match(v.strip()) if isinstance(v, str) else None
+                if not m or not (sanitize.name_words(str(k)) & ID_WORDS):
+                    continue
+                s = steps[i]
+                item = {"prefix": m.group(1), "sep": m.group(2), "width": len(m.group(3))}
+                out.append({"after": s["n"], "global": s.get("global"),
+                            "request": f"{e.method} {route} {e.status}",
+                            "element": f"answer field {k}", "screen": s.get("screen"),
+                            "value": v.strip(), "shape": None,
+                            "pattern": id_text(item, 0).replace("0", "9"), **item})  # fmt: skip
+                break
     return out
 
 

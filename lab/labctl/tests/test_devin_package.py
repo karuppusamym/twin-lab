@@ -62,6 +62,7 @@ def test_package_holds_exactly_the_build_inputs(tmp_path):
     assert path.name.startswith("twinlab-demo-") and len(path.stem) == len("twinlab-demo-") + 8
     assert names(path) == {
         "BUILD_TASK.md",
+        "INDEX.md",
         "MANIFEST.json",
         "AGENTS.md",
         "docs/factory-playbook.md",
