@@ -1,0 +1,62 @@
+{
+  "id": "html-forms",
+  "technology": "Server-rendered HTML forms",
+  "version": null,
+  "surface": "web",
+  "result": "CAPTURE VERIFIED",
+  "reason": "rebuild not run: no rebuild replay report is named in the entry",
+  "date": "2026-11-18",
+  "gates": {
+    "detect": {
+      "status": "PASS",
+      "detail": "detected framework server-rendered, rendering server",
+      "facts": {
+        "declared": {
+          "framework": "server-rendered",
+          "rendering": "server"
+        },
+        "detected": {
+          "version": null,
+          "framework": "server-rendered",
+          "rendering": "server"
+        },
+        "marker": "pages arrive with their content; no client framework marker"
+      }
+    },
+    "capture": {
+      "status": "PASS",
+      "detail": "62 expected action(s), all in the recording (107 action(s) recorded)",
+      "facts": {
+        "expected": 62,
+        "captured": 107,
+        "missing": [],
+        "steps": 108
+      }
+    },
+    "self-replay": {
+      "status": "PASS",
+      "detail": "107 of 107 step(s) replayed against a fresh instance, 63 compared, 0 failed",
+      "facts": {
+        "status": "pass",
+        "steps": 107,
+        "replayed": 107,
+        "compared": 63,
+        "failed": 0,
+        "skipped": 0,
+        "unresolved": 0,
+        "missing_value": 0,
+        "differences": 0
+      }
+    },
+    "rebuild": {
+      "status": "NOT RUN",
+      "detail": "no rebuild replay report is named in the entry",
+      "facts": {}
+    }
+  },
+  "not_covered": [
+    "no server technology is declared (the fixture is Python's http.server and shows no marker)",
+    "file upload and download",
+    "a rebuild by a coding agent"
+  ]
+}

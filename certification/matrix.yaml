@@ -1,0 +1,207 @@
+# The certification matrix: one entry per technology (and version), each on a small real
+# reference application, each through the same four gates. Run with `labctl certify`; the gates
+# and how to add a technology are in docs/10-certification.md.
+#
+# gates.detect: what the lab must detect (every key given is compared; `version` always).
+# gates.capture: the actions the flow has, written by hand from the flow (never from a recording).
+# gates.self-replay.values: synthetic values a replay types, per field, in order.
+# gates.rebuild.report: a kept replay report of a rebuilt copy (a path from the repository root).
+version: 1
+entries:
+  - id: html-forms
+    technology: Server-rendered HTML forms
+    surface: web
+    app:
+      kind: python
+      file: lab/labctl/tests/fixtures/multiapp/apps.py
+      serve: serve
+      origins: [orders, billing, widget]
+      start: "{orders}/login"
+    flow:
+      file: lab/labctl/tests/fixtures/multiapp/flow.py
+      run: run
+    gates:
+      detect: {framework: server-rendered, rendering: server}
+      capture: {expected_from: EXPECTED}  # 62 actions, declared by hand in the flow file
+      self-replay:
+        values:
+          "#username": [clerk.syn]
+          "#password": [Syn-pass-1]
+          "#searchBy": [Customer name, Order number]
+          "#q": [Lindqvist, ORD-1026, QQQ-0001]  # ORD-1026: a fresh instance's first new order
+          "#customerName": [Syn Customer]
+          "#customerEmail": [syn-bad, syn@example.test]
+          "#customerPhone": [0100 111 2222, 0100 111 3333]
+          "#product": [Desk lamp]
+          "#quantity": ["0", "2"]
+          "#deliveryDate": ["2027-01-15"]
+          "#notes": [Syn note one, Syn note two]
+          orderRef: [BAD9, ORD-1026, ORD-1026]
+          payer: [Syn Payer]
+          terms: [30 days]
+          amount: [abc, "88.20"]
+          memo: [Syn memo]
+      rebuild: {}
+    not_covered:
+      - no server technology is declared (the fixture is Python's http.server and shows no marker)
+      - file upload and download
+      - a rebuild by a coding agent
+
+  - id: react-16
+    technology: React
+    version: "16.7.0"
+    surface: web
+    app:
+      kind: static
+      folder: apps/web-todo/static
+      start: /index.html
+      requires: [vendor/react.js, vendor/react-dom.js]
+      requires_reason: built from node_modules by build.cjs, not in Git
+    flow:
+      file: certification/flows/react_todo.py
+      run: run
+    gates:
+      detect: {framework: react, version: "16.7.0", rendering: client}
+      capture:
+        expected:
+          - type            # first task
+          - keypress:Enter
+          - type            # second task
+          - keypress:Enter
+          - check           # complete the first
+          - click           # Active
+          - click           # Completed
+          - click           # All
+          - dblclick        # edit the second
+          - type
+          - keypress:Escape
+          - dblclick
+          - type
+          - keypress:Enter
+          - goto:reload
+          - check           # complete all
+          - click           # Clear completed
+          - type            # third task
+          - keypress:Enter
+          - click           # delete it
+      self-replay:
+        values:
+          input.new-todo: [Syn task one, Syn task two, Syn task three]
+          input.edit: [Syn edit dropped, Syn task two changed]
+      rebuild: {}
+    not_covered:
+      - React 17 and later (other bundle markers)
+      - a router, a data API, a component library
+      - the files are served as static files, not by the app's own server.py
+      - a rebuild by a coding agent
+
+  # Declared for later: what the lab must detect is given, the application and the flow are not.
+  # Set `version` (and gates.detect.version) when the reference application is chosen.
+  - id: angular
+    technology: Angular
+    surface: web
+    app: null   # to fill: a small Angular application, built, served as static files
+    flow: null  # to fill: certification/flows/<name>.py and the expected actions
+    gates:
+      detect: {framework: angular, rendering: client}
+    not_run: framework package not on this machine; needs a download the user has not approved
+    not_covered: [everything, nothing has run]
+
+  - id: vue
+    technology: Vue
+    surface: web
+    app: null
+    flow: null
+    gates:
+      detect: {framework: vue, rendering: client}
+    not_run: framework package not on this machine; needs a download the user has not approved
+    not_covered: [everything, nothing has run]
+
+  - id: jsf-primefaces
+    technology: JSF / PrimeFaces
+    surface: web
+    app: null   # to fill: a JSF application on a servlet container (needs a JDK and the jars)
+    flow: null
+    gates:
+      detect:
+        framework: JSF
+        rendering: server
+        ui_library: PrimeFaces
+        server: {technology: Java, framework: JSF}
+    not_run: framework package not on this machine; needs a download the user has not approved
+    not_covered: [everything, nothing has run]
+
+  - id: aspnet-webforms
+    technology: ASP.NET Web Forms
+    surface: web
+    app: null   # to fill: a Web Forms site on IIS Express (.NET Framework 4.x)
+    flow: null
+    gates:
+      detect:
+        framework: ASP.NET Web Forms
+        rendering: server
+        server: {technology: .NET, framework: ASP.NET Web Forms}
+    not_run: framework package not on this machine; needs a download the user has not approved
+    not_covered: [everything, nothing has run]
+
+  # Desktop entries start a GUI application and click with the real mouse. They run only on
+  # Windows with TWINLAB_DESKTOP_GUI=1. Each app folder has flow.py with build() and flow.
+  - id: winforms
+    technology: WinForms
+    version: ".NET 6"
+    surface: desktop
+    app: {kind: winforms, folder: reference/desktop/CaseDesk}
+    gates:
+      detect: {toolkit: WinForms, runtime: {name: .NET, version: "6"}}
+      capture:
+        expected: [type, type, click, click, type, click, type, "key:Enter", menu, click, type,
+                   select, toggle, click, click, type, click, menu]
+      self-replay:
+        values:
+          txtPassword: [wrong, demo]
+          txtSearch: C-100
+      rebuild: {}
+    not_covered:
+      - .NET Framework 4.x builds
+      - third-party grids and custom-drawn controls
+      - a rebuild by a coding agent
+
+  - id: wpf
+    technology: WPF
+    version: ".NET 6"
+    surface: desktop
+    app: {kind: wpf, folder: reference/desktop/CaseDeskWpf}
+    gates:
+      detect: {toolkit: WPF, runtime: {name: .NET, version: "6"}}
+      capture:
+        expected: [type, type, click, click, type, click, type, "key:Enter", menu, click, type,
+                   select, toggle, click, click, type, click, menu]
+      self-replay:
+        values:
+          txtPassword: [wrong, demo]
+          txtSearch: C-100
+      rebuild: {}
+    not_covered:
+      - the expected actions and values assume the same flow and control ids as CaseDesk
+      - data templates, virtualised lists, third-party controls
+      - a rebuild by a coding agent
+
+  - id: java-swing
+    technology: Java Swing
+    version: "Java 11"
+    surface: desktop
+    app: {kind: swing, folder: reference/desktop/CaseDeskSwing}
+    gates:
+      detect: {toolkit: Java Swing / AWT}
+      capture:
+        expected: [type, type, click, click, type, click, type, click, menu, click, type, select,
+                   toggle, click, click, type, click, menu]
+      self-replay:
+        values:
+          Password: [wrong, demo]
+          Case or name: C-100
+      rebuild: {}
+    not_covered:
+      - the Java version is not detected, so it is not compared
+      - JavaFX and SWT
+      - a rebuild by a coding agent

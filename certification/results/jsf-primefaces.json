@@ -1,0 +1,35 @@
+{
+  "id": "jsf-primefaces",
+  "technology": "JSF / PrimeFaces",
+  "version": null,
+  "surface": "web",
+  "result": "NOT RUN",
+  "reason": "framework package not on this machine; needs a download the user has not approved",
+  "date": "2026-11-18",
+  "gates": {
+    "detect": {
+      "status": "NOT RUN",
+      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "facts": {}
+    },
+    "capture": {
+      "status": "NOT RUN",
+      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "facts": {}
+    },
+    "self-replay": {
+      "status": "NOT RUN",
+      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "facts": {}
+    },
+    "rebuild": {
+      "status": "NOT RUN",
+      "detail": "framework package not on this machine; needs a download the user has not approved",
+      "facts": {}
+    }
+  },
+  "not_covered": [
+    "everything",
+    "nothing has run"
+  ]
+}

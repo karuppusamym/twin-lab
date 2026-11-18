@@ -2,6 +2,25 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — Certification matrix: which technologies are proven
+- Detection has rules for about 30 web stacks; few were proven on a live application. The
+  matrix (`certification/matrix.yaml`, [10-certification.md](10-certification.md)) has one entry
+  per technology, each on a small reference application, each through four gates: detect
+  (technology and version as declared), capture (a scripted flow recorded with the real
+  recorder holds every expected action, written by hand), self-replay (the recording replays
+  against a fresh instance with no failed step) and rebuild (a kept replay report of a rebuilt
+  copy is VERIFIED COMPLETE; read, never run).
+- `labctl certify [--only <id>] [--out <folder>]` runs it, writes `certification/results/<id>.json`
+  and regenerates [certification-matrix.md](certification-matrix.md). A gate that did not run
+  is NOT RUN with its reason and never counts as passed.
+- Run here: server-rendered HTML forms (the two-application fixture: 62 expected actions all
+  captured, 107 of 107 steps replayed, 0 failed) and React 16.7.0 (`apps/web-todo`: version
+  detected from the bundle, 20 expected actions all captured, 24 of 24 steps replayed, 0
+  failed). Both are CAPTURE VERIFIED. No entry is CERTIFIED: no rebuild was judged.
+- Left open: Angular, Vue, JSF / PrimeFaces and ASP.NET Web Forms are declared but NOT RUN
+  (their packages are not on this machine). WinForms, WPF and Java Swing have their gates in
+  code but were not run: they take the real mouse and need `TWINLAB_DESKTOP_GUI=1`. The React
+  entry is NOT RUN in CI, where its vendor files are not built.
 ## 2026-11-18 — A recording cut short by a crash, a timeout or a restart
 - An audit listed recovery after an interrupted recording as never validated. It is now tested
   (`tests/test_recording_recovery.py`, no browser): a last line of `steps.jsonl` cut off in the

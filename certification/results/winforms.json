@@ -1,0 +1,36 @@
+{
+  "id": "winforms",
+  "technology": "WinForms",
+  "version": ".NET 6",
+  "surface": "desktop",
+  "result": "NOT RUN",
+  "reason": "set TWINLAB_DESKTOP_GUI=1",
+  "date": "2026-11-18",
+  "gates": {
+    "detect": {
+      "status": "NOT RUN",
+      "detail": "set TWINLAB_DESKTOP_GUI=1",
+      "facts": {}
+    },
+    "capture": {
+      "status": "NOT RUN",
+      "detail": "set TWINLAB_DESKTOP_GUI=1",
+      "facts": {}
+    },
+    "self-replay": {
+      "status": "NOT RUN",
+      "detail": "set TWINLAB_DESKTOP_GUI=1",
+      "facts": {}
+    },
+    "rebuild": {
+      "status": "NOT RUN",
+      "detail": "no rebuild replay report is named in the entry",
+      "facts": {}
+    }
+  },
+  "not_covered": [
+    ".NET Framework 4.x builds",
+    "third-party grids and custom-drawn controls",
+    "a rebuild by a coding agent"
+  ]
+}

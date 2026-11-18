@@ -11,6 +11,7 @@ import yaml
 from pydantic import ValidationError
 
 from labctl import bindings as bindings_mod
+from labctl import certify as certify_mod
 from labctl import conformance as conformance_mod
 from labctl import demand as demand_report
 from labctl import evidence_cli, factory, ocp_cli, repo
@@ -289,6 +290,7 @@ app.add_typer(
 )
 app.add_typer(ocp_cli.app, name="ocp")
 app.add_typer(desktop_cli.app, name="desktop")
+app.command("certify")(certify_mod.certify)
 
 
 def _automation(automation_id: str) -> Automation:
