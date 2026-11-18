@@ -1,0 +1,24 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: twinlab-showcase-web
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: showcase
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: twinlab-showcase-agent
+    app.kubernetes.io/managed-by: labctl
+  annotations:
+    haproxy.router.openshift.io/timeout: 300s
+spec:
+  to:
+    kind: Service
+    name: twinlab-showcase-agent
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

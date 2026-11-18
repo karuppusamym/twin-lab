@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: twinlab-showcase-db
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: showcase
+    app.kubernetes.io/component: db
+    app.kubernetes.io/name: twinlab-showcase-db
+    app.kubernetes.io/managed-by: labctl
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: showcase
+      app.kubernetes.io/component: db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: twinlab
+        app.kubernetes.io/instance: showcase
+        app.kubernetes.io/component: db
+        app.kubernetes.io/name: twinlab-showcase-db
+        app.kubernetes.io/managed-by: labctl
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: db
+        image: quay.io/sclorg/postgresql-16-c9s
+        env:
+        - name: POSTGRESQL_USER
+          value: lab
+        - name: POSTGRESQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: twinlab-showcase-secrets
+              key: db-password
+        - name: POSTGRESQL_DATABASE
+          value: showcase
+        - name: POSTGRESQL_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: twinlab-showcase-secrets
+              key: db-password
+        ports:
+        - name: postgres
+          containerPort: 5432
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/pgsql/data
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -q
+            - -h
+            - 127.0.0.1
+            - -U
+            - lab
+            - -d
+            - showcase
+          periodSeconds: 5
+          timeoutSeconds: 3
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -q
+            - -h
+            - 127.0.0.1
+            - -U
+            - lab
+            - -d
+            - showcase
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: twinlab-showcase-db

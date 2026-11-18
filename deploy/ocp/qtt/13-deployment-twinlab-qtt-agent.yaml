@@ -1,0 +1,150 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: twinlab-qtt-agent
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: qtt
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: twinlab-qtt-agent
+    app.kubernetes.io/managed-by: labctl
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"twinlab-qtt-agent:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"agent\")].image"}]'
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: qtt
+      app.kubernetes.io/component: agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: twinlab
+        app.kubernetes.io/instance: qtt
+        app.kubernetes.io/component: agent
+        app.kubernetes.io/name: twinlab-qtt-agent
+        app.kubernetes.io/managed-by: labctl
+      annotations:
+        twinlab.io/schema-sha256: b6caf0ddabed3382
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: agent
+        image: image-registry.openshift-image-registry.svc:5000/twinlab/twinlab-qtt-agent:latest
+        env:
+        - name: LAB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: twinlab-qtt-secrets
+              key: lab-token
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: twinlab-qtt-secrets
+              key: db-password
+        - name: APP_ID
+          value: qtt
+        - name: APP_UPSTREAM
+          value: http://twinlab-qtt-app:8000
+        - name: APP_HEALTH_PATH
+          value: /api/health
+        - name: APP_VERSION
+          value: main
+        - name: DB_PROXY_PORT
+          value: '15432'
+        - name: DB_UPSTREAM
+          value: twinlab-qtt-db:5432
+        - name: ADMIN_DATABASE_URL
+          value: postgresql://lab:$(DB_PASSWORD)@twinlab-qtt-db:5432/qtt
+        - name: SCHEMA_PATH
+          value: /lab/schema.sql
+        - name: STATE_DIR
+          value: /var/lib/twinlab
+        - name: LAB_PORT
+          value: '9000'
+        ports:
+        - name: http
+          containerPort: 9000
+        - name: db
+          containerPort: 15432
+        volumeMounts:
+        - name: schema
+          mountPath: /lab
+          readOnly: true
+        - name: state
+          mountPath: /var/lib/twinlab
+        startupProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - |
+              import os, sys, urllib.error, urllib.request as u
+              r = u.Request("http://127.0.0.1:9000/_lab/health", headers={"X-Lab-Token": os.environ["LAB_TOKEN"]})
+              try:
+                  status = u.urlopen(r, timeout=4).status
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+              sys.exit(0 if status in (200, 503) else 1)
+          timeoutSeconds: 6
+          periodSeconds: 5
+          failureThreshold: 24
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - |
+              import os, sys, urllib.error, urllib.request as u
+              r = u.Request("http://127.0.0.1:9000/_lab/health", headers={"X-Lab-Token": os.environ["LAB_TOKEN"]})
+              try:
+                  status = u.urlopen(r, timeout=4).status
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+              sys.exit(0 if status in (200, 503) else 1)
+          timeoutSeconds: 6
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - |
+              import os, sys, urllib.error, urllib.request as u
+              r = u.Request("http://127.0.0.1:9000/_lab/health", headers={"X-Lab-Token": os.environ["LAB_TOKEN"]})
+              try:
+                  status = u.urlopen(r, timeout=4).status
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+              sys.exit(0 if status in (200, 503) else 1)
+          timeoutSeconds: 6
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      volumes:
+      - name: schema
+        configMap:
+          name: twinlab-qtt-schema
+      - name: state
+        persistentVolumeClaim:
+          claimName: twinlab-qtt-agent-state

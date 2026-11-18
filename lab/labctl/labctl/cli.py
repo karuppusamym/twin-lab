@@ -183,9 +183,22 @@ def brief(
         "--data",
         help="Where the business data lives, if the recording cannot show it: browser or server.",
     ),
+    draft_flow: bool = typer.Option(
+        False,
+        "--draft-flow",
+        help="No automation or flow says what the app needs: first write a draft requested "
+        "flow from each of its recordings (flows/<app>-<recording>.yaml), to review.",
+    ),
 ) -> None:
     """Write apps/<app>/model.yaml, BRIEF.md, db/schema.sql and a first app.yaml from the evidence."""
     root = _root()
+    if draft_flow:
+        from labctl import multiapp
+
+        for rec in factory.discover(root, app_id).recordings:
+            if rec.is_dir() and (rec / "steps.jsonl").is_file():
+                path, note = multiapp.write_draft_flow(root, app_id, rec, rec.name)
+                typer.echo(f"flow: {path.relative_to(root) if path else '-'} ({note})")
     if source is not None and not source.is_dir():
         typer.echo(f"source folder not found: {source}", err=True)
         raise typer.Exit(2)
@@ -210,6 +223,10 @@ def brief(
         )
     except factory.FactoryError as exc:
         typer.echo(str(exc), err=True)
+        if "nothing to build" in str(exc) and found.recordings:
+            typer.echo(f"  the evidence has {len(found.recordings)} recording(s): run again with "
+                       "--draft-flow to draft the requested flow from them, or write "
+                       f"flows/{app_id}-....yaml yourself", err=True)  # fmt: skip
         raise typer.Exit(1) from exc
     except UnsupportedStack as exc:
         typer.echo(f"UNSUPPORTED  {exc}", err=True)
@@ -381,6 +398,32 @@ def _labs(on: list[str]) -> dict[str, str]:
             raise typer.BadParameter(f"{lab_id} is not a copy (app.copy, see labctl lab copies)")
         out[base] = lab_id
     return out
+
+
+@app.command()
+def coverage(
+    app_id: str = typer.Argument(..., help="Application id."),
+    as_json: bool = typer.Option(False, "--json", help="Print the matrix as JSON."),
+    no_save: bool = typer.Option(False, "--no-save", help="Do not keep the result for the portal."),
+) -> None:
+    """The coverage matrix: every requirement, what shows it, what checks it, and what to ask for.
+
+    Prints the claim "100% of the agreed replication acceptance cases passed" only when every
+    required row is VERIFIED or EXCLUDED; otherwise the exact shortfall. Exit 1 when it cannot be
+    claimed."""
+    from labctl import coverage as coverage_mod
+
+    root = _root()
+    try:
+        report = coverage_mod.build(root, app_id)
+    except coverage_mod.CoverageError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    if not no_save:
+        coverage_mod.save(root, report)
+    typer.echo(report.model_dump_json(indent=2) if as_json else report.markdown())
+    if not report.claim:
+        raise typer.Exit(1)
 
 
 ON_HELP = "Use this copy of an app's lab (app.copy); repeat for several apps."

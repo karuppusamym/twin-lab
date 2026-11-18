@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: twinlab-loandesk-agent-state
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: loandesk
+    app.kubernetes.io/component: lab
+    app.kubernetes.io/name: twinlab-loandesk-lab
+    app.kubernetes.io/managed-by: labctl
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

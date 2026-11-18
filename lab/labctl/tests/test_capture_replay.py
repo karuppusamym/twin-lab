@@ -117,6 +117,47 @@ def test_the_scripted_flow_captures_every_expected_action_in_order(gate):
     assert sum(s.nav == "reload" for s in rec.steps) == 1
 
 
+# Newer Chromium (CI's) drops a binding call made while a document is torn down: the recorder
+# must not depend on one. This emulates it: every call made from `pagehide` on is discarded. It
+# runs before the recorder's own listener (registered first), as in that browser. With the
+# recorder that flushed its batches from `pagehide`, this flow recorded 6 steps (no blank page,
+# no check, no second Enter): the steps CI lost.
+DROP_AT_UNLOAD_JS = """
+window.addEventListener("pagehide", () => {
+  for (const name of ["__tlEvent", "__tlStep", "__tlSecret"]) {
+    try { Object.defineProperty(window, name, {value: () => Promise.resolve(), configurable: true}); }
+    catch (e) {}
+  }
+}, true);
+"""
+
+
+def test_no_step_depends_on_a_call_made_while_the_page_unloads(servers, tmp_path, monkeypatch):
+    scripts = recorder._init_scripts
+    monkeypatch.setattr(recorder, "_init_scripts", lambda ms: [DROP_AT_UNLOAD_JS, *scripts(ms)])
+
+    def flow(page):
+        new = page.locator(".new-todo")
+        new.fill("First thing")
+        new.press("Enter")
+        tf.row(page, "First thing").locator(".toggle").check()
+        page.reload()  # at once: the check's batch has not settled yet
+        new.fill("Second thing")
+        new.press("Enter")
+        page.reload()
+        tf.pause(page, 300)
+
+    out = recorder.record(f"{servers.source}/index.html", tmp_path / "rec", script=flow,
+                          headless=True)  # fmt: skip
+    rec = load(out)
+    assert [(s.action, s.nav or s.key or "") for s in rec.steps] == [
+        ("goto", "navigate"), ("goto", "navigate"), ("type", ""), ("keypress", "Enter"),
+        ("check", ""), ("goto", "reload"), ("type", ""), ("keypress", "Enter"),
+        ("goto", "reload")]  # fmt: skip
+    assert rec.steps[0].url == "about:blank" and [s.seq for s in rec.steps] == list(range(1, 10))
+    assert rec.steps[0].setup == "blank page"
+
+
 # --- (2), (4), (5), (9) replay on a fresh replica -----------------------------------------------
 
 
@@ -131,7 +172,10 @@ def test_the_log_replays_on_a_fresh_replica_to_the_same_state(gate, replayed):
     assert report.status == "pass", report.markdown()
     c = report.coverage
     assert (c.skipped, c.unresolved, c.missing_value, c.unsupported, c.failed) == (0, 0, 0, 0, 0)
-    assert c.replayed == c.steps == len(load(gate.path).steps) and c.missing_expected == []
+    # every step but the setup event (the blank page the browser starts on: kept, not counted)
+    steps = load(gate.path).steps
+    assert c.replayed == c.steps == len(steps) - 1 and c.setup == 1 and steps[0].setup
+    assert c.missing_expected == []
     # the end state, declared independently of any DOM comparison
     assert state["titles"] == FINAL_TITLES_REPLICA
     assert state["completed"] == [False, False]
@@ -170,6 +214,37 @@ def test_two_titles_typed_into_the_same_input_replay_as_two_titles(servers, tmp_
     assert seen["titles"] == ["Synthetic one", "Synthetic two"]
 
 
+def test_the_gate_passes_its_declared_acceptance_cases_within_scope(gate, replayed, servers,
+                                                                   tmp_path):  # fmt: skip
+    """R05/R11 on the gate: the end state declared from the flow, values from the bindings."""
+    copy = tmp_path / "rec"
+    shutil.copytree(gate.path, copy)
+    typed = [s.seq for s in load(copy).steps if s.action == "type" and s.blank is None]
+    titles = [{"binding": typed[2]}, {"binding": typed[7]}]
+    (copy / "acceptance.yaml").write_text(yaml.safe_dump({
+        "scope": ["the first completion gate"], "cases": [
+            {"id": "titles", "check": "texts", "locator": ".todo-list li label", "equals": titles},
+            {"id": "none-completed", "check": "count", "locator": ".todo-list li.completed",
+             "equals": 0},
+            {"id": "left", "check": "text", "locator": ".todo-count", "equals": "2 items left"},
+            {"id": "stored", "check": "storage", "area": "localStorage", "key": tf.KEY,
+             "path": "$[1].title", "equals": titles[1]},
+            {"id": "after-reload", "check": "texts", "reload": True, "category": "data",
+             "locator": ".todo-list li label", "equals": titles},
+            {"id": "isolated", "check": "count", "fresh_context": True, "category": "data",
+             "locator": ".todo-list li", "equals": 0},
+        ]}), "utf-8")  # fmt: skip
+    report, _ = replay_gate(copy, servers.replica, artifacts=tmp_path / "art")
+    assert report.verdict == "PASS WITHIN DECLARED SCOPE", report.markdown()
+    cats = report.categories
+    assert (cats["capture"].status, cats["replay"].status) == ("PASS", "PASS")
+    assert cats["capture"].required_passed == cats["capture"].required_total == len(tf.EXPECTED)
+    assert (cats["behaviour"].required_passed, cats["data"].required_passed) == (3, 3)
+    fp = report.fingerprint
+    assert fp["recording"]["digest"] and fp["files"]["acceptance"]["digest"]
+    assert fp["files"]["bindings"]["digest"] and fp["browser"]["name"] == "chromium"
+
+
 def test_filter_links_are_targeted_although_their_selector_is_a_bare_a(gate, replayed):
     rec = load(gate.path)
     links = [s for s in rec.steps if s.action == "click" and s.selector in ("a", "a.selected")]
@@ -183,6 +258,18 @@ def test_filter_links_are_targeted_although_their_selector_is_a_bare_a(gate, rep
     for s in links:
         nav = next(x for x in rec.steps if x.caused_by == s.seq)
         assert by_seq[nav.seq].status == "pass" and by_seq[nav.seq].outcome == "implied"
+
+
+def test_the_source_replayed_against_itself_shows_no_difference(gate, servers, tmp_path):
+    """Observation boundaries (multi-app trial P0-2): the recording replayed against the SAME
+    source page compares the same moments the recorder captured: zero differences, three times,
+    with the source's own end state."""
+    for _ in range(3):
+        report, state = replay_gate(gate.path, servers.source)
+        diffs = [d.text() for s in report.steps for d in s.differences]
+        assert report.status == "pass" and diffs == [], report.markdown()
+        assert report.coverage.compared > 20 and report.coverage.setup == 1
+        assert state["titles"] == FINAL_TITLES_REPLICA  # the bound values, on the source page
 
 
 def test_three_fresh_context_repetitions_pass(gate, servers):

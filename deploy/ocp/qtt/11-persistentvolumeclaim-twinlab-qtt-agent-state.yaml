@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: twinlab-qtt-agent-state
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: qtt
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: twinlab-qtt-agent
+    app.kubernetes.io/managed-by: labctl
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

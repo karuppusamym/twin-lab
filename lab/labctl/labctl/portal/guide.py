@@ -57,11 +57,19 @@ def app_steps(
     declared: list[str],
     recorded_automations: list[str] | None = None,
     recheck: dict[str, str] | None = None,
+    replication: dict | None = None,
 ) -> list[Step]:
     """Progress of one app, in the order the app page is laid out.
 
     `ready` holds only bots whose READY is still current. `recheck` maps a bot whose earlier READY
-    can no longer be relied on to why (the app was rebuilt, the lab cannot be read, ...)."""
+    can no longer be relied on to why (the app was rebuilt, the lab cannot be read, ...).
+
+    `replication` (only for an app that has recordings) adds the steps after the lab is up: fill
+    the synthetic values and declare the judging inputs, replay, read the verdict and the coverage
+    matrix. Its keys: `recordings` (names), `blocked` (what blocks a run, per recording or a list),
+    `todo` (TODO values still in the files), `declared_acceptance`, `flow` (a flow or bot says what
+    the app must do), `verdict`, `report_state` (current | stale | legacy | none), `coverage_state`
+    (current | stale | none), `claim` and `shortfall`."""
     base = f"/apps/{app_id}"
     recheck = recheck or {}
     not_ready = [a for a in automations if a not in ready]
@@ -103,7 +111,76 @@ def app_steps(
               + (f" Still to accept: {', '.join(undeclared)}." if sessions and undeclared else "")),
              f"{base}#sessions", optional=not automations),
     ]  # fmt: skip
+    if replication and replication.get("recordings"):
+        steps = _with_replication(steps, base, replication)
     return mark(steps)
+
+
+def _with_replication(steps: list[Step], base: str, rep: dict) -> list[Step]:
+    first = rep["recordings"][0]
+    page = f"{base}/recordings/{first}"
+    blocked = rep.get("blocked") or []
+    verdict, state = rep.get("verdict"), rep.get("report_state", "none")
+    cov = rep.get("coverage_state", "none")
+    out = list(steps)
+    flow = Step(
+        "flow",
+        "Flow and scope",
+        bool(rep.get("flow")),
+        "Review the draft flow: the brief builds only what a flow or a bot needs. Edit it, "
+        "then generate the brief again.",
+        "/flows",
+    )
+    declare = Step(
+        "declare", "Values and checks", not blocked and bool(rep.get("declared_acceptance")),
+        ("Fill the synthetic values and declare the baseline, acceptance cases, exclusions and "
+         "pictures. Blocking a run now: " + "; ".join(blocked[:3])
+         + (f" (and {len(blocked) - 3} more)" if len(blocked) > 3 else "") + ".")
+        if blocked else
+        ("Declare acceptance cases (what must be true), exclusions and pictures before replaying: "
+         "without one the verdict is BLOCKED."), page)  # fmt: skip
+    if state == "stale":
+        replay_hint = (
+            "The last replay is out of date (the app, the evidence or a declaration "
+            "changed): replay again."
+        )
+    elif verdict and verdict != "PASS WITHIN DECLARED SCOPE":
+        replay_hint = f"The last replay is {verdict}: read the first divergence, fix, replay again."
+    else:
+        replay_hint = "Replay the recording against the lab and read the verdict."
+    replay = Step(
+        "replay",
+        "Replay",
+        state == "current" and verdict == "PASS WITHIN DECLARED SCOPE",
+        replay_hint,
+        page + "#replay",
+    )
+    short = rep.get("shortfall") or ""
+    coverage = Step(
+        "coverage",
+        "Coverage",
+        cov == "current" and bool(rep.get("claim")),
+        (
+            "Coverage is out of date: build the matrix again."
+            if cov == "stale"
+            else "Build the coverage matrix: what is verified, what was never observed, and what to ask "
+            "the application owner for."
+            if cov == "none"
+            else (
+                "Everything in scope is verified."
+                if rep.get("claim")
+                else f"Close the shortfall: {short}"
+                if short
+                else "Close the evidence requests."
+            )
+        ),
+        f"{base}/coverage",
+    )
+    at = next((i for i, s in enumerate(out) if s.id == "evidence"), 0) + 1
+    out.insert(at, flow)
+    after = next((i for i, s in enumerate(out) if s.id == "lab"), len(out) - 1) + 1
+    out[after:after] = [declare, replay, coverage]
+    return out
 
 
 def onboarding(
@@ -186,4 +263,7 @@ GLOSSARY = [
     ("Parity", "A production run of a bot compared with the same bot's run in the lab."),
     ("Fidelity replay", "A recording of the real app replayed against the demo app, step by "
                         "step, to find differences."),
+    ("Recording across applications", "One recorded flow that goes through several "
+                                      "applications and tabs; split into one recording per "
+                                      "application, the order across them kept."),
 ]  # fmt: skip

@@ -28,6 +28,20 @@
           setTimeout(tick, 1500);
         } else {
           document.getElementById("job-done").hidden = false;
+          const links = (j.result && j.result.links) || [];
+          const list = document.getElementById("job-links");
+          if (list && links.length) {
+            list.textContent = "";
+            links.forEach(function (l) {
+              const li = document.createElement("li");
+              const a = document.createElement("a");
+              a.href = String(l.href);
+              a.textContent = String(l.text);
+              li.appendChild(a);
+              list.appendChild(li);
+            });
+            list.hidden = false;
+          }
         }
       })
       .catch(function () { setTimeout(tick, 3000); });

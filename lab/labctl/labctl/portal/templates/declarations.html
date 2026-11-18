@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Twin Lab{% endblock %}
+{% block content %}
+{% set label = {'ok': 'ready', 'missing': 'not written', 'blocks': 'blocks a run', 'invalid': 'invalid'} %}
+<p class="small"><a href="{{ back }}">← back</a></p>
+<h1>{{ rec }}</h1>
+<p class="lead">Declare what judges the replica before you replay: the synthetic values to type, the data to start from, what must be true, what is out of scope, and which pictures to compare. Each file is checked by the same code the replay uses.</p>
+
+<div class="card" id="separation">
+  <h2>Kept apart from the build</h2>
+  <p class="small">These files live beside the recording at <code>{{ where }}/</code>. {{ guard_note }}</p>
+</div>
+
+<nav class="sectionnav" aria-label="Files">
+  {% for d in decls %}<a href="#{{ d.kind }}">{{ d.title }} <span class="pill {{ 'ok' if d.state == 'ok' else 'err' if d.state in ('invalid', 'blocks') else '' }}">{{ label[d.state] }}</span></a>{% endfor %}
+  <a href="#replay">Replay</a>
+</nav>
+
+{% for d in decls %}
+<section class="card" id="{{ d.kind }}">
+  <h2>{{ d.title }} <span class="pill {{ 'ok' if d.state == 'ok' else 'err' if d.state in ('invalid', 'blocks') else '' }}">{{ label[d.state] }}</span></h2>
+  <p class="small muted">{{ d.help }} File: <code>{{ d.name }}</code>.</p>
+  {% if d.hard %}<ul class="small problems">{% for p in d.hard %}<li><b>Not valid:</b> {{ p }}</li>{% endfor %}</ul>{% endif %}
+  {% if d.problems %}<div class="flash error" role="status"><b>Blocks a run:</b><ul class="small problems">{% for p in d.problems %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}
+  {% if d.todo %}<p class="small"><span class="pill warn">TODO</span> still in this file at line {{ d.todo | join(", ") }}. A TODO is a value nobody has given: it blocks its step or case.</p>{% endif %}
+  <form method="post" action="{{ prefix }}/files/{{ d.kind }}">
+    <label for="text-{{ d.kind }}">Contents of {{ d.name }}</label>
+    <textarea id="text-{{ d.kind }}" name="text" rows="14" spellcheck="false" autocomplete="off">{{ d.text }}</textarea>
+    <button type="submit" data-busy="Saving…">Save and check</button>
+  </form>
+  <form method="post" action="{{ prefix }}/files/{{ d.kind }}/template" class="inline">
+    <button type="submit" class="secondary" data-busy="Writing…">{{ 'Complete the template' if d.kind == 'bindings' else 'Write a template' }}</button>
+  </form>
+  <p class="small muted">The template lists what the recording shows (shapes and counts, never values), with TODO where you give a value. {% if d.kind != 'bindings' %}It never overwrites a file that exists.{% else %}Values you gave are kept.{% endif %}</p>
+</section>
+{% endfor %}
+
+<section class="card" id="replay">
+  <h2>Replay</h2>
+  {% if replay_note %}<p class="flash error" role="status">{{ replay_note }}</p>
+  {% else %}
+  {% if blocked %}<div class="flash error" role="status"><b>Blocking a run:</b><ul class="small problems">{% for b in blocked %}<li>{{ b }}</li>{% endfor %}</ul></div>{% endif %}
+  {% for n in notes %}<p class="small muted">{{ n }}</p>{% endfor %}
+  {% if app_id and not lab_up %}<p class="small"><span class="pill warn">lab stopped</span> A replay needs the running replica: <a href="/apps/{{ app_id }}#lab">start the lab for {{ app_id }}</a>.</p>{% endif %}
+  <form method="post" action="{{ prefix }}/replay">
+    <div class="row">
+      <div><label for="viewport">Viewport</label><select id="viewport" name="viewport"><option value="">as the pictures file says</option><option value="desktop">desktop (1280 x 720)</option><option value="mobile">mobile (390 x 844)</option></select></div>
+    </div>
+    {% if blocked %}<label><input type="checkbox" name="anyway" value="1"> Run anyway (the result will be BLOCKED where a value is missing)</label>{% endif %}
+    <button type="submit" {{ 'disabled' if app_id and not lab_up }} data-busy="Starting…">Replay</button>
+  </form>
+  <p class="small muted">The replay runs as a job; its log, report and pictures are linked from the job page. The result is a scoped verdict, never an average.</p>
+  {% endif %}
+</section>
+{% endblock %}

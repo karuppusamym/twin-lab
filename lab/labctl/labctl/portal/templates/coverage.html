@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Coverage {{ app_id }} · Twin Lab{% endblock %}
+{% block content %}
+<p class="small"><a href="{{ back }}">← {{ app_id }}</a></p>
+<h1>Coverage matrix: {{ app_id }}</h1>
+<p class="lead">Every requirement of the replica, what shows it, what independently checks it, and what to ask the application owner for. An unobserved case is never counted as verified.</p>
+<form method="post" action="/apps/{{ app_id }}/coverage" class="inline"><button type="submit" data-busy="Building…">{{ "Build the matrix again" if c else "Build the matrix" }}</button></form>
+{% if c %}
+<a class="button secondary" href="/apps/{{ app_id }}/coverage.md">Markdown</a> <a class="button secondary" href="/apps/{{ app_id }}/coverage.json">JSON</a>
+<div class="card verdict {{ 'ok' if c.claim else 'warn' }}" id="claim" style="margin-top:14px">
+  <div class="nexthead">{{ "Claim" if c.claim else "Not claimable" }}</div>
+  <p>{{ c.claim_text }}</p>
+  <p class="small" id="freshness"><span class="pill sentence {{ 'ok' if fresh == 'current' else 'warn' }}">{% if fresh == 'current' %}Built {{ c.generated_at[:16] | replace("T", " ") }} UTC and still current.{% else %}Out of date: {{ why | join("; ") }}. Build it again.{% endif %}</span></p>
+</div>
+
+<section class="card" id="counts">
+  <h2>Counts</h2>
+  <p class="small">Denominator: <b>{{ c.denominator }}</b> row(s), <b>{{ c.required }}</b> required. {% for s in statuses %}{% if c.counts[s] %}<span class="pill {{ 'ok' if s in ('VERIFIED', 'EXCLUDED') else 'err' if s == 'BLOCKED' else 'warn' }}">{{ s }} {{ c.counts[s] }}</span> {% endif %}{% endfor %}</p>
+  <div class="scroll"><table class="small">
+    <thead><tr><th>Category</th>{% for s in statuses %}<th>{{ s | lower }}</th>{% endfor %}</tr></thead><tbody>
+    {% for cat, n in c.by_category.items() %}<tr><td>{{ cat }}</td>{% for s in statuses %}<td>{{ n[s] }}</td>{% endfor %}</tr>{% endfor %}
+  </tbody></table></div>
+  {% if c.notes %}<ul class="small">{% for n in c.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+</section>
+
+<section class="card" id="requests">
+  <h2>Evidence requests</h2>
+  <p class="small muted">Plain words you can send to the application owner (or do yourself, for the lab's own work).</p>
+  {% if c.requests %}<ul class="small">{% for r in c.requests %}<li><span class="pill {{ '' if r.audience == 'owner' else 'warn' }}">{{ 'ask the owner' if r.audience == 'owner' else 'for the lab' }}</span> {{ r.text }}</li>{% endfor %}</ul>
+  {% else %}<p class="small">None: every required row is verified or excluded.</p>{% endif %}
+</section>
+
+<section class="card" id="rows">
+  <h2>Rows</h2>
+  <div class="scroll"><table class="small rows">
+    <thead><tr><th>Status</th><th>Category</th><th>Requirement</th><th>Evidence</th><th>Assertion</th><th>Note</th></tr></thead><tbody>
+    {% for r in c.rows %}
+      <tr><td><span class="pill {{ 'ok' if r.status in ('VERIFIED', 'EXCLUDED') else 'err' if r.status == 'BLOCKED' else 'warn' }}">{{ r.status | lower }}</span></td><td>{{ r.category }}</td><td>{{ r.label }}</td><td>{{ r.evidence[:3] | join("; ") }}</td><td>{{ r.assertion or "" }}{% if r.assertion_result %} ({{ r.assertion_result }}){% endif %}</td><td>{{ r.declaration or r.note or "" }}</td></tr>
+    {% endfor %}
+  </tbody></table></div>
+</section>
+{% else %}
+<p class="small muted" id="no-coverage">No matrix has been built for this app yet. It is built from the app's model, brief, recordings, declared cases and kept replay reports.</p>
+{% endif %}
+{% endblock %}

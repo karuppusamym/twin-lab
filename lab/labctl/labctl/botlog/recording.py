@@ -14,7 +14,11 @@ The recorder also writes (all optional, so older recordings load unchanged):
   recorded (see labctl.locate.resolve);
 - `blank`: a typed value that was empty or only spaces (the value itself, as it is not data);
 - `nav` on a `goto` (`navigate`, `reload`, `back_forward`, `push`, `replace`, `pop`) and
-  `caused_by` (the seq of the click or key press that caused a submit or navigation).
+  `caused_by` (the seq of the click or key press that caused a submit or navigation);
+- `tab`, `opener` and `origin`: the tab a step happened in, the tab that opened it, and the
+  top-level page's origin; a recording that used several tabs also has the actions `tab-open`,
+  `tab-switch` and `tab-close`, and `storage` (browser storage keys and masked shapes, read by
+  labctl.har).
 
 Only request shapes are taken from the HAR (method, URL path, status, timing). Headers, cookies
 and bodies are never read.
@@ -54,6 +58,20 @@ class RecStep:
     blank: str | None = None  # type: the value was empty or spaces only (kept, it is no data)
     nav: str | None = None  # goto: how the page was reached
     caused_by: int | None = None  # submit/goto: the step whose action caused it
+    tab: str | None = None  # the tab it happened in (t1, t2...)
+    opener: str | None = None  # the tab that opened that tab (a popup, target=_blank)
+    origin: str | None = None  # of the top-level page
+    # Added for the multi-app replay and R12; all optional, so older recordings load unchanged.
+    setup: str | None = None  # a setup event (the blank page a browser starts on): why
+    after: str | None = None  # "navigation": observed at the page load it caused, not here
+    caused_by_outside: dict | None = None  # {app, step}: the cause went to another application
+    option_index: int | None = None  # select: the position of the option chosen
+    dialog: dict | None = None  # dialog: {kind: confirm|alert|prompt, choice: accept|dismiss}
+    files: list[dict] = field(default_factory=list)  # upload: name shape, type, size class
+    download: dict | None = None  # download: {name_shape, ext}
+    shadow: str | None = None  # open | closed: the target is inside a shadow root
+    surface: str | None = None  # canvas: an action no DOM element describes
+    service_worker: str | None = None  # the page registered a service worker
 
     @property
     def path(self) -> str | None:
@@ -220,9 +238,20 @@ def load(path: Path) -> Recording:
 def _extra(d: dict) -> dict:
     """The optional fields newer recorders write; anything malformed is left out."""
     out: dict = {}
-    for name in ("frame", "key", "nav", "blank"):
+    for name in ("frame", "key", "nav", "blank", "tab", "opener", "origin", "after", "shadow",
+                 "surface", "service_worker"):  # fmt: skip
         if isinstance(d.get(name), str):
             out[name] = d[name]
+    for name in ("caused_by_outside", "dialog", "download"):
+        if isinstance(d.get(name), dict):
+            out[name] = dict(d[name])
+    if isinstance(d.get("files"), list):
+        out["files"] = [dict(f) for f in d["files"] if isinstance(f, dict)]
+    if isinstance(d.get("option_index"), int) and not isinstance(d.get("option_index"), bool):
+        out["option_index"] = d["option_index"]
+    reason = setup_reason(d)
+    if reason:
+        out["setup"] = reason
     mods = d.get("modifiers")
     if isinstance(mods, list):
         out["modifiers"] = [m for m in mods if isinstance(m, str)]
@@ -232,6 +261,26 @@ def _extra(d: dict) -> dict:
     if isinstance(d.get("caused_by"), int):
         out["caused_by"] = d["caused_by"]
     return out
+
+
+BROWSER_PAGES = ("about:", "chrome:", "chrome-error:", "edge:", "devtools:", "chrome-search:")
+
+
+def setup_reason(d: dict) -> str | None:
+    """Why a step (as written in steps.jsonl) is a setup event, or None: the recorder says so
+    (`setup`), or, in an older recording, a page load of a blank tab or a browser-internal page.
+    Setup events stay in the recording for provenance and count in no application's steps,
+    proposal, sequence or coverage."""
+    if isinstance(d.get("setup"), str) and d["setup"]:
+        return d["setup"]
+    if str(d.get("action") or "") != "goto":
+        return None
+    url = str(d.get("url") or "")
+    if not url or url.startswith("about:"):
+        return "blank page"
+    if url.startswith(BROWSER_PAGES):
+        return "browser page"
+    return None
 
 
 def _mask_locator(cand: dict) -> dict:

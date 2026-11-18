@@ -8,6 +8,10 @@ Evidence for an app is discovered under `evidence/<app>/` (Git-ignored):
     *.sql                                                DDL exports
     openapi*.json|yaml|yml, *.postman_collection.json    API descriptions
     screenshots/                                         listed for the builder, not parsed
+
+A recording split from one that went through several applications (`labctl evidence split`) also
+has its sequence across them in `evidence/_sequences/<recording>.flow.yaml`; the brief then says
+where this app sits in that flow (labctl.multiapp.cross_app_section).
 """
 
 from __future__ import annotations
@@ -172,6 +176,13 @@ def generate(
             f"{bullet_list}\n\n"
         )
         text = text.replace(marker, section + marker, 1) if marker in text else f"{text}\n{section}"
+    # A recording that went through several applications: where this one sits in that flow.
+    from labctl import multiapp
+
+    cross = multiapp.cross_app_section(root, app_id)
+    if cross:
+        marker = "## Running in the lab"
+        text = text.replace(marker, cross + marker, 1) if marker in text else f"{text}\n{cross}"
     _write(brief_file, text)
     _write(schema_file, brief_mod.schema(result, root))
     write_workflow(root, app_id)

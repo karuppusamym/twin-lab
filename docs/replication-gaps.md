@@ -108,6 +108,23 @@ is a dated snapshot and should be read with this update.
   (R06). Evidence: `lab/labctl/tests/test_browser_only_apps.py`.
 - R05, R06, R08–R12: open.
 
+Status on 18 November 2026:
+
+- R05, R06, R08, R11: implemented. Evidence: `test_acceptance_cases.py`,
+  `test_browser_baseline.py`, `test_visual_fidelity.py`, `test_fidelity_fingerprint.py`. Mobile
+  pictures need approved images; database outcome cases were tested with a stand-in.
+- R06 capture: the recorder now keeps storage keys with masked shapes.
+- R09: implemented. `labctl coverage <app>` and the portal's coverage page;
+  `test_coverage_matrix.py`.
+- R10: implemented for reading (recording, replay report, coverage and declaration pages;
+  `test_portal_replication.py`). The declaration files are still edited as files.
+- R12: implemented. The table is `labctl/behaviour/capabilities.py`; `test_capability_fixtures.py`.
+- Multi-application trial (`docs/multi-app-recording-trial.md`): split references, observation
+  boundaries, the origin-to-replica map, setup events and scope exclusions are fixed;
+  `test_replay_across_apps.py`. A 108-step recording over two applications replays in one run;
+  a replica with a wrong value or a missing page fails at the step concerned.
+- Not yet done: the trial's second round against an application with a real API and database.
+
 The section below is the status when this document was first written.
 
 ## Current status
@@ -115,3 +132,10 @@ The section below is the status when this document was first written.
 No replication gap above is marked fixed by this document update. The demonstrated result remains
 13 passing explicit paired checkpoints for a browser-only sample, with the capture/replay gaps
 listed above. Next implementation task: R01-R04, with an independent complete-flow acceptance test.
+
+## Multi-application follow-up
+
+See [the two-application, five-page trial](multi-app-recording-trial.md): 23 paired business
+checks passed, but strict replay did not. New concrete fixes are split reference renumbering,
+submit/navigation snapshot boundaries and per-origin replica routing. Source-against-source
+replay reproduced the two submission failures. These findings are not marked fixed.

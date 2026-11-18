@@ -1,0 +1,37 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: twinlab-showcase-app
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: showcase
+    app.kubernetes.io/component: app-image
+    app.kubernetes.io/name: twinlab-showcase-app-image
+    app.kubernetes.io/managed-by: labctl
+spec:
+  runPolicy: Serial
+  source:
+    type: Git
+    git:
+      uri: https://github.com/karuppusamym/twin-lab.git
+      ref: main
+    contextDir: apps/showcase
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: twinlab-showcase-app:latest
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: '2'
+      memory: 3Gi
+  successfulBuildsHistoryLimit: 3
+  failedBuildsHistoryLimit: 3
+  triggers: []

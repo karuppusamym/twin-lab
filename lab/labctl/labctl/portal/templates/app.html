@@ -50,6 +50,14 @@
 <section class="card" id="evidence">
   <h2>1 · Evidence</h2>
   <p class="small muted">Everything here stays on this machine (<code>evidence/{{ app_id }}/</code>, never committed). Recordings may contain customer data; only value-free shapes go into the brief.</p>
+  {% if lineage %}
+  <div id="lineage" style="overflow-wrap:anywhere">
+    <h3>Part of a flow across applications</h3>
+    <ul class="small">{% for l in lineage %}
+      <li>From recording <a href="/recordings/{{ l.recording }}">{{ l.recording }}</a>{% if l.siblings %}, with {% for s in l.siblings %}<a href="/apps/{{ s }}">{{ s }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if l.handovers %} ({{ l.handovers }} hand-over(s)){% endif %}. Sequence: <code>{{ l.sequence }}</code></li>
+    {% endfor %}</ul>
+  </div>
+  {% endif %}
   <div class="scroll"><table class="small">
     <thead><tr><th>Kind</th><th>Item</th><th></th></tr></thead><tbody>
     {% for kind, items in [("recording", evidence.recordings), ("DDL", evidence.ddl), ("API description", evidence.openapi), ("screenshot", evidence.screenshots)] %}
@@ -189,12 +197,12 @@
   {% if not app %}<p class="muted">Generate the brief first.</p>
   {% else %}
     {% if app.lab %}
-      <p>Front door <code>http://127.0.0.1:{{ app.lab.port }}</code> · database {% if browser_only %}none: the business data is in the browser{% elif app.lab.db_port %}(through the slowdown proxy) <code>127.0.0.1:{{ app.lab.db_port }}</code>{% else %}SQLite file, no port{% endif %}</p>
-      {% if browser_only %}<p class="small muted" id="data-location">Business data: <b>in the browser</b>{% if data_info and data_info.storage %} ({{ data_info.storage | join(", ") }}){% else %} (storage kind not observed{% if data_info and data_info.referenced %}; scripts reference {{ data_info.referenced | join(", ") }}{% endif %}){% endif %}{% if data_info and data_info.keys %}, keys {{ data_info.keys | join(", ") }}{% else %}, keys not observed{% endif %}. The lab only hosts the files.</p>{% endif %}
+      <p>Front door <code>http://127.0.0.1:{{ app.lab.port }}</code> · database {% if browser_only %}none: no server database{% elif app.lab.db_port %}(through the slowdown proxy) <code>127.0.0.1:{{ app.lab.db_port }}</code>{% else %}SQLite file, no port{% endif %}</p>
+      {% if browser_only %}<p class="small muted" id="data-location">Business data: <b>{{ (data_info.label if data_info and data_info.label else "browser (transient or unknown persistence)") }}</b>{% if data_info and data_info.storage %} ({{ data_info.storage | join(", ") }} observed){% else %}; no browser storage was observed{% if data_info and data_info.referenced %} (scripts reference {{ data_info.referenced | join(", ") }}, which is not evidence of what is stored){% endif %}{% endif %}{% if data_info and data_info.keys %}, keys {{ data_info.keys | join(", ") }}{% else %}, keys not observed{% endif %}. The absence of server writes is not evidence of localStorage. The lab only hosts the files.</p>{% endif %}
       {% if status %}
         <p>{% if status.running %}<span class="pill ok">running</span>{% else %}<span class="pill">stopped</span>{% endif %}
           {% for svc, st in status.services.items() %}<span class="pill">{{ svc }}: {{ st }}</span> {% endfor %}
-          {% if status.health and browser_only %}<span class="pill {{ 'ok' if status.health.app == 'ok' else 'err' }}">hosting: {{ status.health.app }}</span> <span class="pill">business data: in the browser (not checked by the lab)</span>
+          {% if status.health and browser_only %}<span class="pill {{ 'ok' if status.health.app == 'ok' else 'err' }}">hosting: {{ status.health.app }}</span> <span class="pill">business data: no server database (not checked by the lab)</span>
           {% elif status.health %}<span class="pill {{ 'ok' if status.health.app == 'ok' and status.health.db == 'ok' else 'err' }}">app {{ status.health.app }}, db {{ status.health.db }}</span>{% endif %}</p>
         {% if status.error %}<p class="small muted">{{ status.error }}</p>{% endif %}
         {% if lab_unreachable %}<p><span class="pill err">lab not reachable</span> <span class="small muted">its lab agent did not answer; whether readiness is still current cannot be confirmed.</span></p>{% endif %}
@@ -247,7 +255,7 @@
       {% endif %}
       {% if browser_only %}
       <details open><summary>Database: not applicable</summary>
-        <p class="small muted">Not applicable: this app keeps its data in the browser, so there is no database to choose. The lab runs with no database container.</p>
+        <p class="small muted">Not applicable: no server write was observed, so there is no database to choose. The lab runs with no database container.</p>
       </details>
       {% else %}
       <details {{ 'open' if db_current != 'postgres' }}><summary>Database: {{ db_label }}</summary>
@@ -271,7 +279,7 @@
 <section class="card" id="data">
   <h2>5 · Data</h2>
   {% if browser_only %}
-  <p id="data-na"><span class="pill">not applicable</span> This app keeps its data in the browser, so the lab has no database to load, reset, baseline or save as a pack. Loading test data, Reset, baselines, named data packs and row-change checks do not apply; they are not offered. To start from clean data, clear the site's storage in the browser or use a fresh browser context.</p>
+  <p id="data-na"><span class="pill">not applicable</span> No server write was observed for this app, so the lab has no database to load, reset, baseline or save as a pack. Loading test data, Reset, baselines, named data packs and row-change checks do not apply; they are not offered. To start from clean data, use a fresh browser context (and clear the site's storage if the app is known to use it).</p>
   {% elif not running %}<p class="muted">Start the app to load data.</p>{% else %}
   {% if lab_info and lab_info.baseline %}<p class="small">Baseline: <b>{{ lab_info.baseline.label or lab_info.baseline.id }}</b> <span class="muted">{{ lab_info.baseline.loaded_at }}</span></p>{% endif %}
   <div>
@@ -340,10 +348,12 @@
   {% endif %}
 </section>
 
+{% include "replication_section.html" %}
+
 <section class="card" id="conditions">
   <h2>6 · Conditions</h2>
   <p class="small muted">Make the app{% if not browser_only %} or its database{% endif %} slow, or fail now and then, to see how automations cope. Applies immediately; no restart.</p>
-  {% if browser_only %}<p class="small muted" id="conditions-na">Web conditions (slow or failing requests to the app) apply. Database conditions do not: not applicable, this app keeps its data in the browser.{% if db_only_conditions %} Not offered: {{ db_only_conditions | join(", ") }}.{% endif %}</p>{% endif %}
+  {% if browser_only %}<p class="small muted" id="conditions-na">Web conditions (slow or failing requests to the app) apply. Database conditions do not: not applicable, this app has no server database.{% if db_only_conditions %} Not offered: {{ db_only_conditions | join(", ") }}.{% endif %}</p>{% endif %}
   {% if not running %}<p class="muted">Start the app to set conditions.</p>{% else %}
   <p>Now: <b>{{ condition.id if condition and condition.id else "normal" }}</b></p>
   <form method="post" action="/apps/{{ app_id }}/condition" class="row">
@@ -357,7 +367,7 @@
 
 <section class="card" id="sessions">
   <h2>7 · Sessions</h2>
-  <p class="small muted">Record what an automation does: start, run the bot as you normally would, stop. You get every request with its waiting time{% if browser_only %}. Row changes are not applicable: this app keeps its data in the browser{% else %} and every row it changed{% endif %}.</p>
+  <p class="small muted">Record what an automation does: start, run the bot as you normally would, stop. You get every request with its waiting time{% if browser_only %}. Row changes are not applicable: this app has no server database{% else %} and every row it changed{% endif %}.</p>
   {% if not running %}<p class="muted">Start the app to record sessions.</p>{% else %}
   {% if lab_info and lab_info.session %}
     <p><span class="pill warn">recording</span> session <code>{{ lab_info.session }}</code></p>

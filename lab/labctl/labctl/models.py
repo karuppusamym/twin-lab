@@ -270,6 +270,12 @@ class DataStack(Contract):
     script_keys: list[str] = []  # key names written as literals in the page's scripts (not seen)
     shape: dict = {}  # key -> shape of the stored record, values masked
     evidence: list[str] = []
+    # The five findings: server | storage | navigation | transient | unknown (trial P1). `kind` is
+    # only what decides on a database; this says what the recording shows about persistence.
+    persistence: Literal["server", "storage", "navigation", "transient", "unknown"] | None = None
+    label: str | None = (
+        None  # the finding in words, e.g. "browser (transient or unknown persistence)"
+    )
     overridden: bool = False  # a person named the kind (`labctl brief --data`)
 
 

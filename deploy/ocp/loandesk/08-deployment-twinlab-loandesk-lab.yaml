@@ -1,0 +1,229 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: twinlab-loandesk-lab
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: loandesk
+    app.kubernetes.io/component: lab
+    app.kubernetes.io/name: twinlab-loandesk-lab
+    app.kubernetes.io/managed-by: labctl
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"twinlab-loandesk-agent:latest"},"fieldPath":"spec.template.spec.initContainers[?(@.name==\"sqlite-init\")].image"},{"from":{"kind":"ImageStreamTag","name":"twinlab-loandesk-agent:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"agent\")].image"},{"from":{"kind":"ImageStreamTag","name":"twinlab-loandesk-app:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"app\")].image"}]'
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: loandesk
+      app.kubernetes.io/component: lab
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: twinlab
+        app.kubernetes.io/instance: loandesk
+        app.kubernetes.io/component: lab
+        app.kubernetes.io/name: twinlab-loandesk-lab
+        app.kubernetes.io/managed-by: labctl
+      annotations:
+        twinlab.io/schema-sha256: 384a04671a19a3bf
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: sqlite-init
+        image: image-registry.openshift-image-registry.svc:5000/twinlab/twinlab-loandesk-agent:latest
+        command:
+        - python
+        - -m
+        - lab_agent.sqlite_init
+        env:
+        - name: ADMIN_DATABASE_URL
+          value: sqlite:////var/lib/twinlab-db/loandesk.db
+        - name: SCHEMA_PATH
+          value: /lab/schema.sql
+        volumeMounts:
+        - name: schema
+          mountPath: /lab
+          readOnly: true
+        - name: sqlite
+          mountPath: /var/lib/twinlab-db
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+      - name: agent
+        image: image-registry.openshift-image-registry.svc:5000/twinlab/twinlab-loandesk-agent:latest
+        env:
+        - name: LAB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: twinlab-loandesk-secrets
+              key: lab-token
+        - name: APP_ID
+          value: loandesk
+        - name: APP_UPSTREAM
+          value: http://127.0.0.1:8080
+        - name: APP_HEALTH_PATH
+          value: /api/health
+        - name: APP_VERSION
+          value: main
+        - name: ADMIN_DATABASE_URL
+          value: sqlite:////var/lib/twinlab-db/loandesk.db
+        - name: SCHEMA_PATH
+          value: /lab/schema.sql
+        - name: STATE_DIR
+          value: /var/lib/twinlab
+        - name: LAB_PORT
+          value: '9000'
+        ports:
+        - name: http
+          containerPort: 9000
+        volumeMounts:
+        - name: schema
+          mountPath: /lab
+          readOnly: true
+        - name: state
+          mountPath: /var/lib/twinlab
+        - name: sqlite
+          mountPath: /var/lib/twinlab-db
+        startupProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - |
+              import os, sys, urllib.error, urllib.request as u
+              r = u.Request("http://127.0.0.1:9000/_lab/health", headers={"X-Lab-Token": os.environ["LAB_TOKEN"]})
+              try:
+                  status = u.urlopen(r, timeout=4).status
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+              sys.exit(0 if status in (200, 503) else 1)
+          timeoutSeconds: 6
+          periodSeconds: 5
+          failureThreshold: 24
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - |
+              import os, sys, urllib.error, urllib.request as u
+              r = u.Request("http://127.0.0.1:9000/_lab/health", headers={"X-Lab-Token": os.environ["LAB_TOKEN"]})
+              try:
+                  status = u.urlopen(r, timeout=4).status
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+              sys.exit(0 if status in (200, 503) else 1)
+          timeoutSeconds: 6
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - |
+              import os, sys, urllib.error, urllib.request as u
+              r = u.Request("http://127.0.0.1:9000/_lab/health", headers={"X-Lab-Token": os.environ["LAB_TOKEN"]})
+              try:
+                  status = u.urlopen(r, timeout=4).status
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+              sys.exit(0 if status in (200, 503) else 1)
+          timeoutSeconds: 6
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      - name: app
+        image: image-registry.openshift-image-registry.svc:5000/twinlab/twinlab-loandesk-app:latest
+        env:
+        - name: DATABASE_URL
+          value: sqlite:////var/lib/twinlab-db/loandesk.db
+        - name: DB_ENGINE
+          value: sqlite
+        - name: DB_PATH
+          value: /var/lib/twinlab-db/loandesk.db
+        - name: DB_CONNECTION_STRING
+          value: Data Source=/var/lib/twinlab-db/loandesk.db
+        ports:
+        - name: app
+          containerPort: 8080
+        volumeMounts:
+        - name: sqlite
+          mountPath: /var/lib/twinlab-db
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          timeoutSeconds: 3
+          periodSeconds: 5
+          failureThreshold: 36
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          timeoutSeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          timeoutSeconds: 3
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 768Mi
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      volumes:
+      - name: schema
+        configMap:
+          name: twinlab-loandesk-schema
+      - name: state
+        persistentVolumeClaim:
+          claimName: twinlab-loandesk-agent-state
+      - name: sqlite
+        persistentVolumeClaim:
+          claimName: twinlab-loandesk-sqlite

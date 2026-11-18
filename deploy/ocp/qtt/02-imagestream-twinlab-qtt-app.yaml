@@ -1,0 +1,14 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: twinlab-qtt-app
+  namespace: twinlab
+  labels:
+    app.kubernetes.io/part-of: twinlab
+    app.kubernetes.io/instance: qtt
+    app.kubernetes.io/component: app-image
+    app.kubernetes.io/name: twinlab-qtt-app-image
+    app.kubernetes.io/managed-by: labctl
+spec:
+  lookupPolicy:
+    local: false
