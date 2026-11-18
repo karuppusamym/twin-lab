@@ -795,6 +795,14 @@ def _unstored(brief: Brief) -> list[str]:
             "it in BUILD-NOTES.md:\n", *rows, ""]  # fmt: skip
 
 
+def _read(repo_root: Path, rel: str) -> str:
+    path = Path(repo_root) / rel
+    try:
+        return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    except OSError:
+        return ""
+
+
 def _fields(screen: Screen) -> list[str]:
     """The screen's form fields: what each posts as, its type, what it accepts, its options."""
     rows = []
@@ -803,14 +811,18 @@ def _fields(screen: Screen) -> list[str]:
             continue
         kind = el.tag if el.tag != "input" else f"input {el.type or 'text'}"
         accepts = ", ".join(k if v is True else f"{k} {v}" for k, v in (el.rules or {}).items())
-        options = ", ".join(f"`{o}`" for o in el.options[:12]) + (" ..." if len(el.options) > 12
-                                                                    else "")  # fmt: skip
+        values = el.option_values if len(el.option_values) == len(el.options) else []
+        options = ", ".join((f"`{v}` {o}" if v else f"`{o}`" if not values else f"`\"\"` {o}")
+                            for o, v in zip(el.options[:12], values or [""] * len(el.options),
+                                            strict=False)) + (
+            " ..." if len(el.options) > 12 else "")  # fmt: skip
         rows.append(f"| `{el.selector}` | {el.label or '-'} | `{el.name or '-'}` | {kind} | "
                     f"{accepts or '-'} | {options or '-'} |")  # fmt: skip
     if not rows:
         return []
     return ["\nFields (posted as `name`; *Accepts* is what the field's own attributes say; nothing "
-            "required or limited beyond that was recorded, except as *Messages* show):\n",
+            "required or limited beyond that was recorded, except as *Messages* show; *Options* "
+            "are the code each option posts, then its label, as the page has them):\n",
             "| Field | Label | Posted as | Type | Accepts | Options |",
             "|---|---|---|---|---|---|", *rows]  # fmt: skip
 
@@ -967,6 +979,12 @@ def render(brief: Brief, repo_root: Path) -> str:
             files = ", ".join(f"`{f}`" for f in screen.files)
             w(f"\nRead: {files}. Reproduce what these files render and do on this screen, "
               "including elements nothing names: they decide layout and behaviour.\n")  # fmt: skip
+            if any("<tl-frame" in _read(repo_root, f) for f in screen.files):
+                w("The snapshot has a `<tl-frame data-tl-frame=\"…\">` element right after a frame: "
+                  "it is not part of the page. The recorder put there the document the frame "
+                  "showed, so the snapshot is complete; that document is its own screen in this "
+                  "brief (the frame's `src`). Do not render a `tl-frame` element and do not copy "
+                  "the ids inside it into this page: the frame loads them.\n")  # fmt: skip
         else:
             w("")
 

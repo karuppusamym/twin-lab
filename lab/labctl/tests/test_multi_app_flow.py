@@ -33,6 +33,7 @@ import flow as fixture_flow  # noqa: E402
 
 from labctl import multiapp, recorder  # noqa: E402
 from labctl import split as sp  # noqa: E402
+from labctl.behaviour import bindings as bnd  # noqa: E402
 from labctl.botlog.recording import load as load_rec  # noqa: E402
 
 
@@ -419,9 +420,11 @@ def test_build_all_gives_each_app_its_evidence_flow_brief_and_package(recorded, 
         )
         assert a.package and (root / a.package).is_file()
         assert "server database" in a.data
-        assert any("bindings.yaml" in n for n in a.needs) and any(
+        # the replay values are generated with the seed: no value is left for a person to give
+        assert not any("bindings.yaml" in n for n in a.needs) and any(
             "draft flow" in n for n in a.needs
         )
+        assert (root / "apps" / a.id / "steps" / f"{recorded.rec.name}.values.yaml").is_file()
         assert any("choose the database" in n for n in a.needs)
     # what each brief names, its own and nothing of the other's
     brief_o = (root / orders.brief).read_text("utf-8")
@@ -539,6 +542,152 @@ def test_the_packages_say_what_a_builder_needs(recorded, built):
     assert 'is typed into `input[name="orderRef"]`' in part
 
 
+def _values(root: Path, app: str, rec: str) -> dict:
+    return yaml.safe_load((root / "apps" / app / "steps" / f"{rec}.values.yaml").read_text("utf-8"))
+
+
+def _seed_db(root: Path, app: str):
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.executescript((root / "apps" / app / "db" / "schema.sql").read_text("utf-8"))
+    db.executescript((root / "apps" / app / "db" / "seed.sql").read_text("utf-8"))
+    return db
+
+
+def test_the_seed_and_the_replay_values_reproduce_what_the_recording_showed(recorded, built):
+    """The trial's data gap: a search the recording shows finding 12 rows over 3 pages must find
+    12 rows over 3 pages on the seed, with the word the replay types; and so on."""
+    root, rec = recorded.root, recorded.rec.name
+    db = _seed_db(root, "orders")
+    numbers = [r[0] for r in db.execute('select "number" from orders order by "number"')]
+    assert numbers == [f"ORD-{n}" for n in range(1001, 1024)]  # lowest to highest seen, no gaps
+    vo, vb = _values(root, "orders", rec), _values(root, "billing", rec)
+    found, by_number, nothing = vo["searches"]
+    assert (found["recorded_rows"], found["recorded_pages"], found["page_size"]) == (12, 3, 5)
+    hits = [r[0] for r in db.execute('select "number" from orders where lower(customer) like ? '
+                                     'order by "number"', (f"%{found['value'].lower()}%",))]  # fmt: skip
+    assert len(hits) == 12 and hits == found["seeded_matches"]
+    assert found["with"] == {"by": "customer"} and by_number["with"] == {"by": "number"}
+    # the new order is the highest seeded number + 1; billing types it, and orders searches it
+    assert by_number["value"] == "ORD-1024" and by_number["value"] not in numbers
+    assert nothing["recorded_rows"] == 0 and nothing["value"] not in numbers
+    refs = [s for s in vb["steps"] if s["field"] == 'input[name="orderRef"]']
+    assert [s["value"] for s in refs][1:] == ["ORD-1024", "ORD-1024"]
+    name = next(s["value"] for s in vo["steps"] if s["field"] == "input#customerName")
+    assert next(s["value"] for s in vb["steps"] if s["field"] == 'input[name="payer"]') == name
+    assert any("ORD-1024" in a and "highest seeded + 1" in a for a in vb["across"])
+    # billing listed no invoice before writing its first: no seeded invoice
+    assert _seed_db(root, "billing").execute("select count(*) from invoices").fetchone() == (0,)
+    # the values are where the replays read them: each part's and the whole recording's bindings
+    for app, doc in (("orders", vo), ("billing", vb)):
+        got = bnd.load(root / "evidence" / app / rec / bnd.FILE)
+        assert {s["n"]: s["value"] for s in doc["steps"]} == got.values
+        assert got.generated == set(got.values)
+    whole = bnd.load(recorded.rec / bnd.FILE)
+    assert {s["global"]: s["value"] for d in (vo, vb) for s in d["steps"]} == whole.values
+    # ... and in the package, with the seed and the instruction to load exactly it
+    t_o = _zip_texts(root / built.summary.apps[0].package)
+    assert {"apps/orders/db/seed.sql", "apps/orders/db/seed.json",
+            f"apps/orders/steps/{rec}.values.yaml"} <= set(t_o)  # fmt: skip
+    assert "load **exactly** the rows of `apps/orders/db/seed.sql`" in t_o["BUILD_TASK.md"]
+    assert "## Seed data and replay values" in t_o["apps/orders/BRIEF.md"]
+    assert "Load exactly [`db/seed.sql`]" in t_o["apps/orders/BRIEF.md"]
+
+
+def test_formats_validation_triggers_and_computed_values_are_stated(recorded, built):
+    root, rec = recorded.root, recorded.rec.name
+    vo, vb = _values(root, "orders", rec), _values(root, "billing", rec)
+    shown = {d["element"]: d for d in vb["display"]}
+    assert "two decimals" in shown["[data-field=amount]"]["format"]
+    assert shown["[data-field=total]"].get("computed") and "rule is unknown" in shown[
+        "[data-field=total]"]["shows"]  # fmt: skip
+    assert "NET30" in shown["[data-field=terms]"]["shows"]  # the code, not the label
+    amount = next(s for s in vb["steps"] if s["field"] == 'input[name="amount"]'
+                  and "refused" not in s["why"])  # fmt: skip
+    assert re.fullmatch(r"\d+\.\d\d", amount["value"])  # typed as it will be shown
+    saved = {d["element"]: d for d in vo["display"]}
+    assert saved["dd#savedTotal"].get("computed") and saved["dd#savedCustomer"]["echo"]
+    assert "`no`, `yes`" in saved["dd#savedGift"]["format"]
+    rules = {v["element"]: v for v in vo["validations"]}
+    qty = rules["span#quantityError"]
+    assert qty["refused"][0]["value"] == "0" and qty["accepted"][0]["value"] == "2"
+    assert "from 1 to 99" in " ".join(qty["rule"])
+    ref = next(v for v in vb["validations"] if "order reference" in v["message"])
+    assert ref["accepted"][0]["value"] == "ORD-1024" and "`ORD-` + 4 digits" in " ".join(
+        ref["rule"]
+    )
+    assert not re.fullmatch(r"ORD-\d{4}", ref["refused"][0]["value"])
+    # the draft acceptance beside each part: required only for what the package states
+    acc = yaml.safe_load(
+        (root / "evidence" / "billing" / rec / "acceptance.yaml").read_text("utf-8")
+    )
+    assert any("total" in x and "rule unknown" in x for x in acc["excluded"])
+    assert not any("total" in str(c.get("locator")) for c in acc["cases"])
+    assert any(c["locator"] == "[data-field=amount]" for c in acc["cases"])
+    brief_b = (root / "apps" / "billing" / "BRIEF.md").read_text("utf-8")
+    assert "Computed values: `[data-field=total]`" in brief_b and "not judge" in brief_b
+
+
+def test_the_smaller_points_the_blind_builders_reported(recorded, built):
+    root = recorded.root
+    brief_o = (root / "apps" / "orders" / "BRIEF.md").read_text("utf-8")
+    brief_b = (root / "apps" / "billing" / "BRIEF.md").read_text("utf-8")
+    # a GET only a link points to, and a link out of scope: one instruction
+    assert "`GET /orders/new/customer` (linked from `a#backToCustomer`" in brief_o
+    assert "`GET /logout` (linked from `a#signOut`" in brief_o
+    out = brief_o.split("### Links that leave the scope", 1)[1].split("\n### ", 1)[0]
+    assert "`/customers`: `a#navCustomers`" in out and "redirect (303) to `/orders/search`" in out
+    task = _zip_texts(root / built.summary.apps[0].package)["BUILD_TASK.md"]
+    assert "redirect (303) to the first in-scope screen" in task
+    # identifiers: lowest and highest seen, not a claim that every number was seen
+    assert "lowest seen `ORD-1001`, highest seen `ORD-1023`; 12 different values" in brief_o
+    assert "not every number in between" in brief_o
+    # several requests for one action: listed as recorded, not explained
+    assert "the recording does not say more than that" in brief_o
+    # option codes as the page posts them, the same in the model
+    model = yaml.safe_load((root / "apps" / "orders" / "model.yaml").read_text("utf-8"))
+    assert model["codes"]["items.product"] == ["chair", "lamp", "shelf"]
+    assert "`lamp` Desk lamp" in brief_o and "`NET30` 30 days" in brief_b
+    # a selector that matches several elements carries the locator the replay uses
+    steps = json.loads(
+        (root / "apps/billing/steps" / f"{recorded.rec.name}.json").read_text("utf-8")
+    )
+    nav = next(s for s in steps["steps"] if s.get("selector") == "a.nav__item")
+    assert nav["target"] == '[data-testid="nav-lookup"]'
+    assert 'found by [data-testid="nav-lookup"]' in brief_b
+    # the recorder's frame capture is explained, in the brief and in the snapshot
+    assert "`<tl-frame" in brief_b and "is not part of the page" in brief_b
+    start = (root / "apps/billing/pages/billing-start.html").read_text("utf-8")
+    assert "A <tl-frame> element is not part of the page" in start.splitlines()[0]
+    # a checkbox posted as a string into a BOOLEAN column
+    assert "posts `vat=1` when ticked" in brief_b and "`invoices.vat` is BOOLEAN" in brief_b
+
+
+def test_the_generated_values_replay_on_an_application_holding_the_seed(recorded, built):
+    """The source application's own code, its data replaced by the generated seed, replayed with
+    the generated values: what a rebuild that follows the package must pass."""
+    from labctl.behaviour import fidelity
+
+    rows = json.loads((recorded.root / "apps/orders/db/seed.json").read_text("utf-8"))["orders"]
+    fresh = fixture_apps.serve()
+    try:
+        orders = fresh.apps["orders"]
+        orders.orders = {r["number"]: fixture_apps.Order(r["number"], r["customer"], "", "", "lamp",
+                                                         1, "", False, "", r["order_date"],
+                                                         r["status"]) for r in rows}  # fmt: skip
+        part = recorded.root / "evidence" / "orders" / recorded.rec.name
+        expected = [
+            a for a, t, _ in fixture_flow.EXPECTED if t == "t1" and not a.startswith("tab-")
+        ]
+        report = fidelity.replay(part, fresh.orders, expected=expected, resolve_timeout_ms=4000)
+        assert report.status == "pass", report.markdown()
+        assert report.coverage.replayed == report.coverage.steps
+        assert "ORD-1024" in orders.orders  # the number the values said the new order gets
+    finally:
+        fresh.stop()
+
+
 def test_build_all_again_repeats_nothing_and_keeps_filled_bindings(recorded, built):
     root = recorded.root
     part = root / "evidence" / "orders" / recorded.rec.name
@@ -571,6 +720,9 @@ def test_no_typed_value_is_in_any_written_artifact(recorded, built):
             for name, text in _zip_texts(p).items():
                 texts[f"{p.name}!{name}"] = text.lower()
     assert len(texts) > 100
+    # the generated seed and replay values are among what is checked
+    assert {"apps/orders/db/seed.sql", f"apps/billing/steps/{recorded.rec.name}.values.yaml",
+            f"evidence/orders/{recorded.rec.name}/bindings.yaml"} <= set(texts)  # fmt: skip
     leaks = [(name, v) for name, text in texts.items() for v in values
              if any(f in text for f in forms(v))]  # fmt: skip
     assert leaks == []

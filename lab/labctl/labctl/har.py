@@ -1999,14 +1999,18 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
                     elements[sel] = Element(
                         selector=sel, label=el["label"], tag=el["tag"], name=el["name"],
                         type=el["type"], classes=el["classes"], options=el["options"],
-                        rules=el.get("rules") or {}, basis="observed", **{"from": [ev]},
+                        option_values=_option_values(el), rules=el.get("rules") or {},
+                        basis="observed", **{"from": [ev]},
                     )  # fmt: skip
                 else:
                     have.rules = have.rules or el.get("rules") or {}
                     have.label = have.label or el["label"]
-                    have.options = have.options + [
-                        o for o in el["options"] if o not in have.options
-                    ]
+                    for o, v in zip(el["options"], _option_values(el) or [None] * len(el["options"]),
+                                    strict=False):  # fmt: skip
+                        if o not in have.options:
+                            have.options = have.options + [o]
+                            if have.option_values:
+                                have.option_values = have.option_values + [v or ""]
                     have.classes = have.classes + [
                         c for c in el["classes"] if c not in have.classes
                     ]
@@ -2035,9 +2039,16 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
                 else "Structure, ids, classes and styles are real; every text and value is masked "
                 "(strict page-text mode)"
             )
+            framed = (
+                " A <tl-frame> element is not part of the page: the recorder put there the document "
+                "the frame before it showed (its own screen in the brief); do not build it or copy "
+                "its ids."
+                if "<tl-frame" in best.html
+                else ""
+            )
             out.write_text(
-                f"<!-- {acc.pattern}: value-free snapshot from {ev}. {said} (letters x/X, digits 9). "
-                "-->\n" + best.html,
+                f"<!-- {acc.pattern}: value-free snapshot from {ev}. {said} (letters x/X, digits 9)."
+                f"{framed} -->\n" + best.html,
                 encoding="utf-8",
                 newline="\n",  # generated files are LF on every OS (they go into Git and images)
             )
@@ -2519,6 +2530,14 @@ def _merge_type(a: str, b: str) -> str:
     return "text"
 
 
+def _option_values(el: dict) -> list[str]:
+    """The codes a select's options post, in option order ([] when the page gave none)."""
+    values = el.get("option_values") or []
+    if len(values) != len(el.get("options") or []) or not any(values):
+        return []
+    return [v or "" for v in values]
+
+
 def _code(option: str) -> str | None:
     """An option's label as a code (`In progress` -> `IN_PROGRESS`); None for placeholders and
     for anything that looks like data (digits, masked text)."""
@@ -2602,8 +2621,10 @@ def _form_columns(info: sanitize.PageInfo, pattern: str, heads: list[str], table
         col = _column_name(f["label"] if f["type"] != "radio" else None, f["name"], f["id"])
         if not col or col in NOT_A_COLUMN:
             continue
-        g = groups.setdefault(col, {"kind": f["type"] or f["tag"], "options": []})
+        g = groups.setdefault(col, {"kind": f["type"] or f["tag"], "options": [], "values": []})
         g["options"] += f["options"]
+        g["values"] += [v for v, o in zip(_option_values(f), f["options"], strict=False)
+                        if v and not PLACEHOLDER.match(" ".join(o.split()))]  # fmt: skip
         if f["type"] == "radio" and f["label"]:
             g["options"].append(f["label"])
     for col, g in groups.items():
@@ -2611,6 +2632,15 @@ def _form_columns(info: sanitize.PageInfo, pattern: str, heads: list[str], table
                 "checkbox": "boolean"}.get(g["kind"])  # fmt: skip
         t.add(col, _guess_type(col, kind))
         codes = [_code(o) for o in g["options"] if not PLACEHOLDER.match(" ".join(o.split()))]
+        values = list(dict.fromkeys(g["values"]))
+        if (
+            values
+            and len(values) == len(dict.fromkeys(codes))
+            and all(
+                CODE_VALUE.match(v.upper()) or re.fullmatch(r"[a-z][a-z0-9_]*", v) for v in values
+            )
+        ):
+            codes = values  # the codes the options post, as the page has them, not their labels
         if (2 <= len(codes) <= MAX_CODES and all(codes) and not NOT_CODE_FIELD.search(col)
                 and col not in ("id",)):  # fmt: skip
             t.codes.setdefault(col, {}).update(dict.fromkeys(codes))

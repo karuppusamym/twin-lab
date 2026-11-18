@@ -132,6 +132,9 @@ def facts(part: Path) -> Facts:
             row["global"] = s["global_seq"]
         if s.get("selector"):
             row["selector"] = _safe_selector(str(s["selector"]))
+            target = _target(s)
+            if target:
+                row["target"] = target
         for key in ("tab", "key", "nav", "caused_by", "frame"):
             if s.get(key) not in (None, "", []):
                 row[key] = s[key]
@@ -169,6 +172,34 @@ def facts(part: Path) -> Facts:
     return out
 
 
+SAFE_KINDS = ("testid", "id", "role", "label", "placeholder", "structure")
+
+
+def _target(step: dict) -> str | None:
+    """For a selector that is not an element's own id (`a.nav__item` may match several), the
+    ranked locator the replay finds the element by: the first recorded candidate that matched
+    exactly one element (a test id, role and name, label, or position in a structure). Names that
+    hold digits are left out: they may be data."""
+    from labctl import locate
+
+    sel = str(step.get("selector") or "")
+    if not sel or re.search(r"#[A-Za-z_][\w-]*$", sel.split(">>>")[-1].strip()):
+        return None
+    for cand in step.get("locators") or []:
+        kind = cand.get("kind")
+        if kind not in SAFE_KINDS:
+            continue
+        if kind == "structure":
+            return locate.describe(cand)
+        if cand.get("count") != 1:
+            continue
+        name = str(cand.get("name") or cand.get("text") or cand.get("value") or "")
+        if kind in ("role", "label", "placeholder") and re.search(r"\d", name):
+            continue
+        return locate.describe(cand)
+    return None
+
+
 def _effects(steps: list[dict]) -> list[dict]:
     """Per action a person took: what it sent, where it went, what it said. A submit or page
     load an action caused is folded into that action."""
@@ -191,8 +222,9 @@ def _effects(steps: list[dict]) -> list[dict]:
             continue
         rows.append({"n": s["n"], "global": s.get("global"), "screen": s.get("screen"),
                      "action": "browser back or forward" if back else s["action"],
-                     "selector": s.get("selector"), "key": s.get("key"),
+                     "selector": s.get("selector"), "target": s.get("target"), "key": s.get("key"),
                      "typed_shape": s.get("typed_shape"), "requests": list(dict.fromkeys(reqs)),
+                     "times": {r: reqs.count(r) for r in reqs if reqs.count(r) > 1},
                      "then": then, "messages": msgs})  # fmt: skip
     return rows
 
@@ -373,7 +405,10 @@ def write_steps(root: Path, app_id: str) -> tuple[list[Path], list[Facts]]:
             "A, digits 9; never the value), the requests each step caused (method, address "
             "pattern, status) and the page that followed (`then`). `n` is this application's "
             "step number; `global`, when present, the number in the whole recording across "
-            "applications that the brief cites.",
+            "applications that the brief cites. `target`, where the selector is not an element's "
+            "own id (it may match several elements), is the ranked locator the replay finds the "
+            "element by. The value the acceptance replay types at each step, when generated, is "
+            "in `<recording>.values.yaml` beside this file.",
             "steps": f.steps,
         }
         path.write_bytes(json.dumps(doc, indent=1, ensure_ascii=False).replace("\r\n", "\n")
@@ -396,7 +431,11 @@ def effects_section(found: list[Facts], app_id: str) -> str:
            "are this application's own, "
            f"in `apps/{app_id}/steps/<recording>.json`; the number in brackets is the whole "
            "recording's, which *Part of a flow across applications* cites. Typed values appear "
-           "only as their shape (letters A, digits 9).\n"]  # fmt: skip
+           "only as their shape (letters A, digits 9). The requests are listed as recorded: each "
+           "is given to the last action logged before it started, so one action can list several "
+           "(×2: the same request twice) and the action after it none; the recording does not "
+           "say more than that. Where the selector is not an element's own id, *found by* is how "
+           "the replay finds the element (the first recorded locator that matched only it).\n"]  # fmt: skip
     for f in found:
         if len(found) > 1:
             out.append(f"Recording `{f.recording}`:\n")
@@ -406,17 +445,132 @@ def effects_section(found: list[Facts], app_id: str) -> str:
         ]
         for r in f.effects:
             what = r["action"] + (f" `{r['selector']}`" if r.get("selector") else "")
+            if r.get("target"):
+                what += f" (found by {r['target']})"
             if r.get("key"):
                 what += f" (key {r['key']})"
             if r.get("typed_shape"):
                 what += f" (typed shape `{r['typed_shape']}`)"
-            reqs = "<br>".join(f"`{x}`" for x in r["requests"]) or "-"
+            times = r.get("times") or {}
+            reqs = "<br>".join(f"`{x}`" + (f" ×{times[x]}" if x in times else "")
+                               for x in r["requests"]) or "-"  # fmt: skip
             msgs = "<br>".join(f'`{m["selector"]}`: "{m["text"]}"' for m in r["messages"]) or "-"
             out.append(f"| {_num(r)} | `{r.get('screen') or '-'}` | {what} | {reqs} | "
                        f"{'`' + r['then'] + '`' if r.get('then') else '-'} | {msgs} |")  # fmt: skip
         out.append("")
         out += _sign_in(f)
     return "\n".join(out) + "\n"
+
+
+def _first_screen(brief) -> str | None:
+    """The first in-scope screen after signing in: where a link out of scope is sent."""
+    for sc in brief.screens:
+        path = sc.screen.path or ""
+        if path and not re.search(r"log_?in|sign_?in|auth", path, re.I):
+            return path
+    return next((sc.screen.path for sc in brief.screens if sc.screen.path), None)
+
+
+def links_section(root: Path, app_id: str, brief, found: list[Facts]) -> str:
+    """Paths the in-scope pages link to that the route list does not name: a screen of this
+    brief reached by a link only, an answer the recording saw (a sign-out redirect), or a path
+    out of scope (keep the link; redirect to the first in-scope screen). And checkbox fields
+    whose column is a boolean."""
+    from labctl import multiapp
+    from labctl.behaviour import dom as domlib
+
+    routes = set(brief.routes)
+    screens = {sc.screen.path for sc in brief.screens if sc.screen.path}
+    others = {r.get("path") for _, data in multiapp.sequences_of(root, app_id)
+              for r in data.get("steps") or [] if r.get("app") != app_id and r.get("path")}  # fmt: skip
+    recorded: dict[str, tuple[str, str | None]] = {}
+    for f in found:
+        for e in f.effects:
+            for r in e["requests"]:
+                bits = r.split()
+                if len(bits) == 3:
+                    recorded.setdefault(f"{bits[0]} {bits[1]}", (bits[2], e.get("then")))
+    links: dict[str, list[tuple[str, str]]] = {}
+    boxes: list[tuple[str, str, str | None, str]] = []  # (selector, name, value, screen)
+    for sc in brief.screens:
+        for rel in sc.screen.files:
+            path = Path(root) / rel
+            if not path.is_file():
+                continue
+            html = path.read_text(encoding="utf-8", errors="replace")
+            for node in domlib._walk(domlib.parse_html(html)):
+                if any(a.tag == "tl-frame" for a in _ancestors(node)):
+                    continue
+                if node.tag == "a" and str(node.attrs.get("href") or "").startswith("/"):
+                    target = sanitize.route_pattern(urlsplit(node.attrs["href"]).path or "/")
+                    sel = (f"a#{node.id}" if node.id else
+                           f"a.{node.classes[0]}" if node.classes else f'a[href="{node.attrs["href"]}"]')  # fmt: skip
+                    if (sel, sc.screen.path) not in links.get(target, []):
+                        links.setdefault(target, []).append((sel, sc.screen.path))
+                if node.tag == "input" and (node.attrs.get("type") or "").lower() == "checkbox":
+                    sel = (f"input#{node.id}" if node.id else
+                           f'input[name="{node.attrs.get("name")}"]')  # fmt: skip
+                    if node.attrs.get("name") and sel not in [b[0] for b in boxes]:
+                        boxes.append((sel, node.attrs["name"], node.attrs.get("value"),
+                                      sc.screen.path))  # fmt: skip
+    serve, out_of_scope = [], []
+    first = _first_screen(brief)
+    for target, where in sorted(links.items()):
+        key = f"GET {target}"
+        if key in routes or target in others:
+            continue
+        sels = sorted({s for s, _ in where})
+        on = sorted({p for _, p in where})
+        src = f"linked from {', '.join(f'`{s}`' for s in sels)} on " + (
+            f"{len(on)} screens" if len(on) > 2 else ", ".join(f"`{p}`" for p in on)
+        )
+        if target in screens:
+            serve.append(f"- `{key}` ({src}): serve the screen `{target}` of this brief, the same "
+                         "page the recording showed there (it was reached through another request, "
+                         "never by this link).")  # fmt: skip
+        elif key in recorded:
+            status, then = recorded[key]
+            serve.append(
+                f"- `{key}` ({src}): recorded as `{key} {status}`"
+                + (f", then `{then}`" if then else "")
+                + ": answer the same way."
+            )
+        elif first:
+            out_of_scope.append(
+                f"- `{target}`: {', '.join(f'`{s}`' for s in sels)} ({src.split(' on ', 1)[1]})"
+            )
+    tables = {t: brief.table(t) for t in brief.tables}
+    bools = []
+    for sel, name, value, screen in boxes:
+        hit = [(t, c) for t, table in tables.items() for c in table.columns
+               if re.sub(r"[^a-z0-9]", "", c.name.lower()) == re.sub(r"[^a-z0-9]", "", name.lower())]  # fmt: skip
+        if hit and str(hit[0][1].type).upper().startswith("BOOL"):
+            t, c = hit[0]
+            bools.append(f"- `{sel}` on `{screen}` posts `{name}={value or 'on'}` when ticked and "
+                         f"nothing when not (so the route lists it as `{name}: string`); "
+                         f"`{t}.{c.name}` is BOOLEAN: store ticked as true and not ticked as false, "
+                         "and answer it as a JSON boolean, as the recorded answers did.")  # fmt: skip
+    out = []
+    if serve:
+        out += ["### Paths the pages link to that the route list does not name\n",
+                "The page snapshots link to these paths; the recording did not request them as a "
+                "route above. Answer each as said:\n", *serve, ""]  # fmt: skip
+    if out_of_scope:
+        out += ["### Links that leave the scope\n",
+                "These links lead to paths nothing in scope needs. Keep each element exactly as the "
+                "snapshot has it (id, classes and `href`), and make the app answer the path with a "
+                f"redirect (303) to `{first}`, the first in-scope screen after signing in. Build "
+                "nothing else for it; list each in BUILD-NOTES.md:\n", *out_of_scope, ""]  # fmt: skip
+    if bools:
+        out += ["### Checkbox fields and their columns\n", *bools, ""]
+    return "\n".join(out) + "\n" if out else ""
+
+
+def _ancestors(node):
+    cur = node.parent
+    while cur is not None:
+        yield cur
+        cur = cur.parent
 
 
 def _sign_in(f: Facts) -> list[str]:
@@ -448,8 +602,9 @@ def _sign_in(f: Facts) -> list[str]:
             "every user the same screens.", ""]  # fmt: skip
 
 
-def identifiers_section(found: list[Facts], tables: list[str]) -> str:
-    """Identifier patterns, the numbers generated after a save, and seed-data guidance."""
+def identifiers_section(found: list[Facts], tables: list[str], seeded: bool = False) -> str:
+    """Identifier patterns, the numbers generated after a save, and seed-data guidance (a
+    pointer to *Seed data and replay values* when `db/seed.sql` was generated)."""
     ids = [i for f in found for i in f.ids]
     gen = [g for f in found for g in f.generated]
     lists = [x for f in found for x in f.lists]
@@ -472,9 +627,12 @@ def identifiers_section(found: list[Facts], tables: list[str]) -> str:
     for i in merged.values():
         pattern = (f"`{i['prefix']}{i['sep']}` + {i['width']} digits" if i["width"]
                    else "a whole number")  # fmt: skip
-        seen = (f"seen from `{id_text(i, i['lowest'])}` to `{id_text(i, i['highest'])}` "
-                f"({i['distinct']} different values)" if i["distinct"] > 1
-                else f"one value seen, `{id_text(i, i['lowest'])}`")  # fmt: skip
+        span = i["highest"] - i["lowest"] + 1
+        seen = (f"lowest seen `{id_text(i, i['lowest'])}`, highest seen "
+                f"`{id_text(i, i['highest'])}`; {i['distinct']} different values were shown"
+                + (f" (not every number in between: the range holds {span})"
+                   if span > i["distinct"] else " (every number in between)")
+                if i["distinct"] > 1 else f"one value seen, `{id_text(i, i['lowest'])}`")  # fmt: skip
         out.append(f"- Pattern {pattern}, in {', '.join(i['where'])}: {seen}.")
     for g in gen:
         where = f"`{g['element']}` on `{g['screen']}`"
@@ -513,7 +671,10 @@ def identifiers_section(found: list[Facts], tables: list[str]) -> str:
                          f"`{id_text(i, i['highest'])}` (the highest seen; the evidence does not "
                          "show how many rows exist in all). A new record gets the highest number "
                          "+ 1.")  # fmt: skip
-    if seeds:
+    if seeded:
+        out += ["The rows to start with are generated: [`db/seed.sql`](db/seed.sql), see *Seed data "
+                "and replay values* below. A new record gets the highest number + 1.", ""]  # fmt: skip
+    elif seeds:
         names = ", ".join(f"`{t}`" for t in tables) or "the tables in `db/schema.sql`"
         out += [f"Seed data for {names} (synthetic values, the shapes and code lists this brief "
                 "gives):\n", *seeds, ""]  # fmt: skip

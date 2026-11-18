@@ -7,8 +7,9 @@ Full playbook for building a demo app: [docs/factory-playbook.md](docs/factory-p
 
 - Your input is `apps/<app>/BRIEF.md` and the source files it lists. Build only what it puts in
   scope, in the same framework and versions, with the same element ids and classes.
-- Write only under `apps/<app>/`. Never edit `BRIEF.md`, `db/schema.sql`, or `app.yaml` outside its
-  `run:` section.
+- Write only under `apps/<app>/`. Never edit `BRIEF.md`, `db/schema.sql`, `db/seed.sql`, or
+  `app.yaml` outside its `run:` section. When `db/seed.sql` exists, load exactly its rows at start:
+  the acceptance replay types the values in `steps/*.values.yaml` and depends on them.
 - Every rule stays `verification: hypothesis`. Never set `owner_approved` or `reference_verified`.
 - Return every response field the brief lists as *automations read*, with those names.
 - Do not change `automations/`, `flows/`, `lab/` or `conditions/` in the same pull request as an
@@ -42,5 +43,7 @@ loosen a check to make it pass.
 ## Hard rules
 
 - Synthetic data only. No real customer data, account numbers, hostnames or credentials.
-- Nothing under "Out of scope" in a brief is built, linked or stubbed.
+- Nothing under "Out of scope" in a brief is built, linked or stubbed. A link a recorded page
+  already has to a path out of scope stays as it is and is answered with a redirect to the first
+  in-scope screen, as the brief's *Links that leave the scope* says.
 - Unknown behaviour is listed as an assumption, not guessed silently.

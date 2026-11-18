@@ -460,8 +460,14 @@ def _merge_screen(have: Screen, new: Screen) -> None:
                 same.selector = el.selector  # the automation's selector is what must resolve
             for attr in ("label", "tag", "name", "type", "uia"):
                 setattr(same, attr, getattr(same, attr) or getattr(el, attr))
+            pairs = dict(zip(same.options, same.option_values or [""] * len(same.options),
+                             strict=False))  # fmt: skip
+            for o, v in zip(el.options, el.option_values or [""] * len(el.options), strict=False):
+                pairs.setdefault(o, v)
             for attr in ("classes", "options"):
                 setattr(same, attr, _union(getattr(same, attr), getattr(el, attr)))
+            if same.option_values or el.option_values:
+                same.option_values = [pairs.get(o, "") for o in same.options]
             same.rules = same.rules or el.rules
             same.actions = _union(same.actions, el.actions)
             same.from_ = _union(same.from_, el.from_)

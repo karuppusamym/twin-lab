@@ -561,7 +561,8 @@ def _read_model(obs: _Obs, root: Path, app: str) -> None:
                     )
                 )
                 if ent and col and CODE_NAME.search(col):
-                    obs.declared[ent].setdefault(col, [str(o) for o in el["options"] if o])
+                    codes = el.get("option_values") or el["options"]  # the codes posted, if seen
+                    obs.declared[ent].setdefault(col, [str(o) for o in codes if o])
 
 
 # --- resolving names against a schema -------------------------------------------------------------------
