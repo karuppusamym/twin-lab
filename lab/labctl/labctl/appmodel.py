@@ -154,6 +154,12 @@ class Stack(Contract):
     db: dict | None = None
     pinned: dict[str, str] = {}
     env: list[str] = []
+    # Recordings: the server technology (technology, framework, marker, confidence, web_server),
+    # client libraries (name, version, marker, confidence, role) and every marker seen. Cookie
+    # names, header product names and file names only; never a value.
+    server: dict | None = None
+    libraries: list[dict] = []
+    detected: list[dict] = []
     from_: list[str] = Field(default_factory=list, alias="from")
 
 

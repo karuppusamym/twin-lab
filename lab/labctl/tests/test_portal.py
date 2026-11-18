@@ -133,7 +133,7 @@ def test_evidence_upload_brief_and_package(repo):
     r = client.get("/apps/showcase/package")
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
     names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
-    assert "DEVIN_TASK.md" in names and "apps/showcase/BRIEF.md" in names
+    assert "BUILD_TASK.md" in names and "apps/showcase/BRIEF.md" in names
     assert "by hand" not in client.get("/apps/showcase").text  # a download records nothing
     pr = {"pr_url": "https://github.com/example/twin-lab/pull/7"}
     r = client.post("/apps/showcase/devin/manual", data=pr)

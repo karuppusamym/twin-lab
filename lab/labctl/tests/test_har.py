@@ -331,7 +331,9 @@ def test_no_recorded_value_reaches_the_model_the_brief_or_the_page_files(tmp_pat
         if value in text
     ]
     assert leaks == []
-    for word in ("Vanderbrook", "sessionid", "abc123token", "Ottilie"):
+    # A cookie's *name* may appear, as a fixed catalog label that identifies the technology
+    # ("sessionid cookie"); its value (in SECRETS) and every other recorded word may not.
+    for word in ("Vanderbrook", "7f3a9c1d2e", "abc123token", "Ottilie"):
         assert not any(word in text for text in outputs.values()), word
     # The application's own words survive, and so do the shapes.
     assert "Account number" in outputs["pages/Accounts-Search.aspx.html"]

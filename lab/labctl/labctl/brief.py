@@ -449,6 +449,57 @@ def app_yaml(brief: Brief, repo_root: Path) -> dict:
     }
 
 
+NOT_IDENTIFIED = "not identified — choose at onboarding"
+
+
+def _name_version(item: dict, key: str = "name") -> str:
+    return " ".join(str(item[k]) for k in (key, "version") if item.get(k))
+
+
+def detected_stack(stack) -> list[str]:
+    """Markdown lines for the technology a recording showed: what, the marker, how sure. Empty
+    when the stack did not come from a recording."""
+    server = stack.server or {}
+    if not (server or stack.libraries or any(f.startswith("har:") for f in stack.from_)):
+        return []
+    rows: list[tuple[str, str, str, str]] = []
+    front = stack.frontend or {}
+    if front.get("framework") and front.get("marker"):
+        sure = "guess" if front["framework"] == "server-rendered" else "certain"
+        rows.append(("Front end", _name_version(front, "framework"), front["marker"], sure))
+    else:
+        rows.append(("Front end", NOT_IDENTIFIED, "", ""))
+    if server.get("technology"):
+        what = server["technology"]
+        if server.get("framework"):
+            what += f" ({server['framework']})"
+        if server.get("version"):
+            what += f" {server['version']}"
+        marker = server["marker"]
+        if server.get("framework_marker") and server["framework_marker"] != marker:
+            marker += f"; {server['framework_marker']}"
+        rows.append(("Server technology", what, marker, server.get("confidence", "")))
+        for other in server.get("also", []):
+            rows.append(("Also seen", other["technology"], other["marker"], other["confidence"]))
+    else:
+        rows.append(("Server technology", NOT_IDENTIFIED, "", ""))
+    web = server.get("web_server")
+    rows.append(("Web server", _name_version(web) if web else NOT_IDENTIFIED,
+                 web["marker"] if web else "", web["confidence"] if web else ""))  # fmt: skip
+    ui = [x for x in stack.libraries if x.get("role") == "ui"]
+    rows.append(("UI components", ", ".join(_name_version(x) for x in ui) or NOT_IDENTIFIED,
+                 "; ".join(x["marker"] for x in ui[:3]), ui[0]["confidence"] if ui else ""))  # fmt: skip
+    libs = [x for x in stack.libraries if x.get("role") != "ui"]
+    rows.append(("Client libraries", ", ".join(_name_version(x) for x in libs) or NOT_IDENTIFIED,
+                 "; ".join(x["marker"] for x in libs[:3]), libs[0]["confidence"] if libs else ""))  # fmt: skip
+    out = ["**Technology read from the recording.** Build with the same technology where it says so; "
+           "where it says *not identified*, choose at onboarding and record the choice in "
+           "BUILD-NOTES.md.\n",
+           "| Part | Detected | Marker | Confidence |", "|---|---|---|---|"]  # fmt: skip
+    out += [f"| {a} | {b} | {c} | {d} |" for a, b, c, d in rows]
+    return out + [""]
+
+
 def render(brief: Brief, repo_root: Path) -> str:
     model = brief.model
     out: list[str] = []
@@ -507,6 +558,8 @@ def render(brief: Brief, repo_root: Path) -> str:
             w("No evidence shows the backend: use FastAPI (the lab default) and say so in "
               f"BUILD-NOTES.md; database: {brief.db_engine}.")  # fmt: skip
         w("")
+    for line in detected_stack(model.stack):
+        w(line)
 
     w("## Build mode\n")
     w(f"This app is a **{brief.mode}**: {MODES[brief.mode]}. A bot that passes on it has been "

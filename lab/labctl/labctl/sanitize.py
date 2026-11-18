@@ -38,6 +38,48 @@ def safe_headers(headers: list[dict] | None) -> dict[str, str]:
     return out
 
 
+TECH_HEADERS = ("server", "x-powered-by", "x-aspnet-version", "x-aspnetmvc-version", "x-generator",
+                "x-drupal-cache", "x-pingback", "x-runtime", "x-turbo-charged-by", "via")  # fmt: skip
+PRODUCT_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_.+-]{0,39}(?:/\d[\w.]{0,15})?|\d+(?:\.\d+){1,3}")
+COOKIE_NAME = re.compile(r"^[A-Za-z0-9_.!#$%&'*+^`|~-]{1,64}$")
+
+
+def tech_headers(headers: list[dict] | None) -> dict[str, str]:
+    """The response headers that name software (`Server`, `X-Powered-By`...), reduced to product
+    tokens and versions: `Apache/2.4.41 (Ubuntu)` -> `Apache/2.4.41 Ubuntu`. Nothing else."""
+    out: dict[str, str] = {}
+    for h in headers or []:
+        name = str(h.get("name", "")).strip().lower()
+        if name not in TECH_HEADERS:
+            continue
+        value = str(h.get("value", ""))
+        if name in ("x-aspnet-version", "x-aspnetmvc-version"):
+            m = re.match(r"\s*(\d+(?:\.\d+){0,3})", value)
+            out[name] = m.group(1) if m else "present"
+        elif name == "x-pingback":
+            out[name] = "present"  # an address: only that the header exists is kept
+        else:
+            out[name] = " ".join(PRODUCT_TOKEN.findall(value)[:6])
+    return out
+
+
+def cookie_names(entry: dict) -> set[str]:
+    """The names of the cookies a request sent and a response set. Never a value."""
+    names: set[str] = set()
+    req, resp = entry.get("request") or {}, entry.get("response") or {}
+    for side in (req, resp):
+        for c in side.get("cookies") or []:
+            names.add(str(c.get("name", "")))
+        for h in side.get("headers") or []:
+            hname = str(h.get("name", "")).lower()
+            value = str(h.get("value", ""))
+            if hname == "cookie":
+                names.update(p.split("=", 1)[0].strip() for p in value.split(";") if "=" in p)
+            elif hname == "set-cookie":
+                names.update(v.split("=", 1)[0].strip() for v in value.splitlines() if "=" in v)
+    return {n for n in names if COOKIE_NAME.match(n)}
+
+
 # --- values ----------------------------------------------------------------------------------------
 
 
@@ -206,6 +248,68 @@ KEEP_ATTRS = {
 }  # fmt: skip
 URL_ATTRS = {"href", "src", "action", "formaction", "poster", "data"}
 
+# What `_Page` notes about the technology a page uses: names of files, attributes, tags, fields.
+FACT_KINDS = ("script", "link", "attr", "tag", "name", "meta", "url", "flag", "id")
+ATTR_FACT = re.compile(
+    r"^(ng-app|ng-controller|ng-model|ng-repeat|ng-click|ng-bind|ng-if|data-ng-app|"
+    r"data-ng-controller|ng-version|_ngcontent|_nghost|ng-reflect|data-bs-toggle|data-bs-target|"
+    r"data-toggle|data-target|data-bind|data-turbo|data-turbolinks|data-controller|data-wicket|"
+    r"data-role|v-cloak|v-if|v-for|data-v-app)"
+)
+PRODUCT = re.compile(r"^[A-Za-z][A-Za-z0-9.!+-]*(?: \d+(?:\.\d+){0,3})?")
+FIELD_SKIP_TYPES = {"hidden", "submit", "button", "reset", "image", "file", "password"}
+
+
+def _asset_path(value: str) -> str:
+    """The path of a script or style address, without host, query or record numbers."""
+    return mask_identifiers(urlsplit(value).path)[-160:]
+
+
+CELL_INT = re.compile(r"^[-+]?(\d{1,3}(,\d{3})+|[1-9]\d*|0)$")
+CELL_DEC = re.compile(r"^[-+(]?[$€£¥]?\s?\d[\d,]*[.,]\d{1,6}\)?\s?%?$|^[-+]?[$€£¥]\s?\d[\d,]*\)?$|^\d+%$")
+CELL_DATE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}|\d{1,2}[/.]\d{1,2}[/.]\d{2,4}|\d{1,2}[- ][A-Za-z]{3,9}[- ,]+\d{2,4}|"
+    r"[A-Za-z]{3,9}\.? \d{1,2},? \d{4})$"
+)
+CELL_TIME = r"\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\s?([AaPp][Mm])?\s?(Z|[A-Z]{2,4}|[+-]\d{2}:?\d{2})?"
+CELL_DATETIME = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}|\d{1,2}[/.]\d{1,2}[/.]\d{2,4}|\d{1,2}[- ][A-Za-z]{3,9}[- ,]+\d{2,4}|"
+    r"[A-Za-z]{3,9}\.? \d{1,2},? \d{4})[T ,]+" + CELL_TIME + "$"
+)
+CELL_BOOL = {"yes", "no", "true", "false", "y", "n", "✓", "✗"}
+
+
+def cell_shape(text: str) -> str:
+    """The shape of one cell's text: integer, decimal, date, datetime, boolean or text."""
+    text = text.strip()
+    if text.lower() in CELL_BOOL:
+        return "boolean"
+    if CELL_INT.match(text) and not (len(text) > 1 and text.startswith("0")):
+        return "integer"
+    if CELL_DEC.match(text):
+        return "decimal"
+    if CELL_DATETIME.match(text):
+        return "datetime"
+    if CELL_DATE.match(text):
+        return "date"
+    return "text"
+
+
+def cell_type(texts: list[str]) -> str | None:
+    """The one type a column's cells share (None when every cell is empty); mixed is text."""
+    kinds = {cell_shape(t) for t in texts}
+    if not kinds:
+        return None
+    if len(kinds) == 1:
+        return kinds.pop()
+    if kinds <= {"integer", "decimal"}:
+        return "decimal"
+    if kinds <= {"date", "datetime"}:
+        return "datetime"
+    if kinds <= {"boolean", "text"} and "text" in kinds:
+        return "text"
+    return "text"
+
 
 class _Page(HTMLParser):
     """Rebuilds a page without values, and collects what the model needs from it."""
@@ -230,6 +334,14 @@ class _Page(HTMLParser):
         self.body_elements = 0
         self.in_body = False
         self.values: set[str] = set()  # words of every text and value masked
+        # Structural facts for technology detection: file names, attribute and tag names, field
+        # names, meta names. Never a value (see `_fact`).
+        self.facts: dict[str, set[str]] = {k: set() for k in FACT_KINDS}
+        self.headings: list[str] = []  # h1/h2 text, masked as any heading
+        self.fields: list[dict] = []  # form fields: the element dict and whether it is in a table
+        self.tables: list[dict] = []  # open tables being read
+        self.grids: list[dict] = []  # data grids: header labels and the type of each column
+        self.form_depth = 0
 
     # attributes ------------------------------------------------------------------------------
     def _attrs(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
@@ -275,8 +387,54 @@ class _Page(HTMLParser):
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._start(tag, attrs, closed=True)
 
+    # technology facts -----------------------------------------------------------------------
+    def _fact(self, kind: str, value: str) -> None:
+        value = value.strip()
+        bucket = self.facts[kind]
+        if value and len(value) <= 160 and len(bucket) < 300:
+            bucket.add(value)
+
+    def _facts(self, tag: str, a: dict[str, str], raw: dict[str, str]) -> None:
+        """Facts about the technology a page is built with. `a` is masked, `raw` is not; only
+        names and file names are taken from either, never an attribute value as such."""
+        if "-" in tag or ":" in tag:
+            self._fact("tag", tag)
+        for name in a:
+            m = ATTR_FACT.match(name)
+            if m:
+                self._fact("attr", m.group(1))
+        if tag in ("input", "select", "textarea", "form") and a.get("name"):
+            self._fact("name", a["name"])
+        if tag == "link" and a.get("href") and "icon" not in a.get("rel", ""):
+            self._fact("link", _asset_path(a["href"]))
+        if tag == "meta":
+            meta = a.get("name", "").lower()
+            if meta in ("csrf-param", "csrf-token", "generator", "_csrf", "_csrf_header", "viewport"):
+                self._fact("meta", meta)
+            if meta == "generator":
+                m = PRODUCT.match(raw.get("content", "").strip())
+                if m:
+                    self._fact("meta", f"generator:{m.group(0)}")
+        if tag in ("a", "form", "iframe", "frame") and (a.get("href") or a.get("action") or a.get("src")):
+            value = raw.get("href") or raw.get("action") or raw.get("src") or ""
+            if ";jsessionid" in value.lower():
+                self._fact("flag", "jsessionid-in-url")
+            path, _, query = value.partition("?")
+            path = mask_identifiers(urlsplit(path).path.split(";", 1)[0])
+            names = ",".join(q.split("=", 1)[0] for q in query.split("#")[0].split("&") if q)[:60]
+            self._fact("url", f"{path}?{names}" if names else path)
+
     def _start(self, tag: str, attrs, closed: bool) -> None:
+        raw_attrs = {k.lower(): (v or "") for k, v in attrs}
         attrs = mask_attributes(attrs)  # record numbers in ids and links never leave the evidence
+        if tag == "script" and not self.drop:
+            src = _asset_path(dict(attrs).get("src") or "")
+            if src:
+                self._fact("script", src)
+            if raw_attrs.get("id"):
+                self._fact("id", raw_attrs["id"])
+            if raw_attrs.get("type", "").lower() == "text/x-handlebars-template":
+                self._fact("flag", "handlebars-template")
         if self.drop:
             if tag in DROP_WITH_CONTENT and not closed:
                 self.drop += 1
@@ -303,6 +461,8 @@ class _Page(HTMLParser):
         if a.get("id"):
             self.ids.add(a["id"])
         self.classes.update(c for c in a.get("class", "").split() if c)
+        self._facts(tag, a, raw_attrs)
+        self._grid_start(tag, a, closed)
         self._element(tag, a)
 
         self.out.append(f"<{tag}{self._attrs(tag, attrs)}{' /' if closed else ''}>")
@@ -327,6 +487,8 @@ class _Page(HTMLParser):
             if el["label"]:  # the same masking as the attribute gets in the page itself
                 el["label"] = app_text(el["label"], self.known)
             self.elements.append(el)
+            if tag in ("input", "select", "textarea") and kind not in FIELD_SKIP_TYPES:
+                self.fields.append({"el": el, "frames": list(self.tables)})
             if self.open_label and self.open_label[-1]["wraps"] is None:
                 self.open_label[-1]["wraps"] = el
         if tag == "select":
@@ -351,7 +513,106 @@ class _Page(HTMLParser):
             if top == tag:
                 break
 
+    # data grids -----------------------------------------------------------------------------
+    def _grid_start(self, tag: str, a: dict[str, str], closed: bool) -> None:
+        if tag == "table":
+            if self.tables:
+                self.tables[-1]["nested"] = True
+            self.tables.append({"id": a.get("id") or None, "rows": [], "row": None, "cell": None,
+                                "nested": False, "head": False, "inputs": 0})  # fmt: skip
+            return
+        if not self.tables:
+            return
+        t = self.tables[-1]
+        if tag == "thead":
+            t["head"] = True
+        elif tag == "tbody":
+            t["head"] = False
+        elif tag == "tr":
+            self._grid_close_cell(t)
+            self._grid_close_row(t)
+            t["row"] = {"cells": [], "head": t["head"]}
+        elif tag in ("td", "th"):
+            self._grid_close_cell(t)
+            if t["row"] is None:
+                t["row"] = {"cells": [], "head": t["head"]}
+            span = a.get("colspan", "1")
+            t["cell"] = {"tag": tag, "text": [], "span": int(span) if span.isdigit() else 1,
+                         "scope": a.get("scope", ""), "controls": 0}  # fmt: skip
+        elif tag in ("input", "select", "textarea", "button") and t["cell"] is not None:
+            t["cell"]["controls"] += 1
+
+    @staticmethod
+    def _grid_close_cell(t: dict) -> None:
+        if t["cell"] is not None and t["row"] is not None:
+            t["row"]["cells"].append(t["cell"])
+        t["cell"] = None
+
+    @staticmethod
+    def _grid_close_row(t: dict) -> None:
+        if t["row"] is not None and t["row"]["cells"]:
+            t["rows"].append(t["row"])
+        t["row"] = None
+
+    def _grid_end(self, tag: str) -> None:
+        if not self.tables:
+            return
+        t = self.tables[-1]
+        if tag in ("td", "th"):
+            self._grid_close_cell(t)
+        elif tag == "tr":
+            self._grid_close_cell(t)
+            self._grid_close_row(t)
+        elif tag == "thead":
+            t["head"] = False
+        elif tag == "table":
+            self._grid_close_cell(t)
+            self._grid_close_row(t)
+            self.tables.pop()
+            grid = self._grid(t)
+            if grid:
+                t["is_grid"] = True
+                self.grids.append(grid)
+
+    def _grid(self, t: dict) -> dict | None:
+        """A data grid (a header row of th cells over repeated rows of td cells) as column labels
+        and the type each column's cells have. The cell texts themselves are dropped here."""
+        rows = t["rows"]
+        if t["nested"] or len(rows) < 2:
+            return None
+        head = next((r for r in rows[:2] if r["cells"] and all(c["tag"] == "th" for c in r["cells"])), None)
+        if head is None or len(head["cells"]) < 2:
+            return None
+        labels = []
+        for c in head["cells"]:
+            text = " ".join("".join(c["text"]).split())
+            labels.append(app_text(text, self.known, names=False) if text else "")
+        if sum(1 for x in labels if x) < 2:
+            return None
+        width = len(labels)
+        body = [
+            r for r in rows[rows.index(head) + 1 :]
+            if any(c["tag"] == "td" for c in r["cells"])
+            and width - 1 <= len(r["cells"]) <= width + 1
+            and all(c["span"] == 1 for c in r["cells"])
+        ]  # fmt: skip
+        if not body:
+            return None
+        types: list[str | None] = []
+        for i in range(width):
+            texts = [" ".join("".join(r["cells"][i]["text"]).split())
+                     for r in body if i < len(r["cells"])]  # fmt: skip
+            types.append(cell_type([x for x in texts if x]))
+        return {"id": t["id"], "headers": labels, "types": types, "rows": len(body),
+                "optional": [any(i >= len(r["cells"]) or not "".join(r["cells"][i]["text"]).strip()
+                                 for r in body) for i in range(width)]}  # fmt: skip
+
     def _end(self, tag: str) -> None:
+        self._grid_end(tag)
+        if tag in ("h1", "h2") and self.open_text and self.open_text[-1]["tag"] == tag:
+            text = " ".join("".join(self.open_text[-1]["text"]).split())
+            if text and len(self.headings) < 6:
+                self.headings.append(text)
         if tag == "label" and self.open_label:
             label = self.open_label.pop()
             text = " ".join("".join(label["text"]).split())
@@ -377,6 +638,8 @@ class _Page(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self.drop:
             return
+        if self.tables and self.tables[-1]["cell"] is not None:
+            self.tables[-1]["cell"]["text"].append(data)  # read for its shape only, then dropped
         keep = self._kept()
         if keep:
             own = next((t for t in reversed(self.stack) if t in KEEP_TEXT), "")
@@ -419,6 +682,9 @@ class _Page(HTMLParser):
             if el["id"] and el["id"] in self.labels and not el["label"]:
                 el["label"] = self.labels[el["id"]] or None
             el.pop("text", None)
+        self.fields = [
+            {**f["el"], "in_grid": any(t.get("is_grid") for t in f["frames"])} for f in self.fields
+        ]
 
 
 def _safe_url(value: str) -> str:
@@ -444,6 +710,10 @@ class PageInfo:
         self.classes = parser.classes
         self.elements = parser.elements
         self.markers = parser.markers
+        self.facts = parser.facts
+        self.headings = parser.headings
+        self.fields = parser.fields
+        self.grids = parser.grids
         self.title = parser.title
         self.values = parser.values
         self.body_elements = parser.body_elements

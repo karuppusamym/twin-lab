@@ -1,9 +1,10 @@
-"""Snapshots, loads and resets on SQL Server and Oracle, with the same behaviour as `data.Database`
-(Postgres): one transaction, validation before anything changes, children cleared with their
-parents, identity counters kept in step, every row read back for the baseline.
+"""Snapshots, loads and resets on SQL Server, Oracle and SQLite, with the same behaviour as
+`data.Database` (Postgres): one transaction, validation before anything changes, children cleared
+with their parents, identity counters kept in step, every row read back for the baseline.
 
-SQLAlchemy does the dialect work: `mssql+pymssql://user:pw@host:1433/db` and
-`oracle+oracledb://user:pw@host:1521/?service_name=FREEPDB1` (thin mode, no Oracle client). The
+SQLAlchemy does the dialect work: `mssql+pymssql://user:pw@host:1433/db`,
+`oracle+oracledb://user:pw@host:1521/?service_name=FREEPDB1` (thin mode, no Oracle client) and
+`sqlite:////var/lib/twinlab-db/app.db` (a file on a volume the app shares; see sqlite_engine). The
 calls are synchronous and run in a worker thread so the agent's event loop never waits on them.
 
 Differences from Postgres, by necessity:
@@ -11,7 +12,9 @@ Differences from Postgres, by necessity:
 - Circular foreign keys are handled by switching those constraints off for the load and back on
   (SQL Server NOCHECK/CHECK, Oracle DISABLE/ENABLE); that needs ALTER on the tables.
 - Identity counters are moved past the loaded rows (SQL Server DBCC CHECKIDENT, Oracle
-  START WITH LIMIT VALUE); without the right to, the load still succeeds and says so.
+  START WITH LIMIT VALUE); without the right to, the load still succeeds and says so. SQLite
+  numbers a rowid from MAX + 1 by itself; an AUTOINCREMENT table's counter is set.
+- SQLite: circular foreign keys are checked at commit (PRAGMA defer_foreign_keys).
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+import warnings
 from typing import Any
 
 import sqlalchemy as sa
@@ -39,13 +43,43 @@ from lab_agent.schema import Column, ForeignKey, Schema, Table
 from lab_agent.values import JsonValue, row_to_json
 
 log = logging.getLogger("lab_agent.sqldb")
+# SQLite keeps NUMERIC as a number; SQLAlchemy says so on every read. Values are still given back
+# as decimals with the column's scale, which is what the agent reports.
+warnings.filterwarnings("ignore", message=r"Dialect sqlite\+pysqlite does \*not\* support Decimal")
 
 
 def engine_of(url: str) -> str:
-    """'postgresql', 'mssql', 'oracle' or 'other', from a database URL."""
+    """'postgresql', 'mssql', 'oracle', 'sqlite' or 'other', from a database URL."""
     scheme = url.split(":", 1)[0].split("+", 1)[0].lower()
     return {"postgres": "postgresql", "postgresql": "postgresql", "mssql": "mssql",
-            "sqlserver": "mssql", "oracle": "oracle"}.get(scheme, "other")  # fmt: skip
+            "sqlserver": "mssql", "oracle": "oracle", "sqlite": "sqlite"}.get(scheme, "other")  # fmt: skip
+
+
+SQLITE_BUSY_MS = 30_000  # how long the agent waits for the app's write lock
+
+
+def sqlite_engine(url: str) -> Engine:
+    """A SQLite engine for a file the demo app uses at the same time: WAL (readers never block
+    the writer), a busy timeout instead of an immediate "database is locked", foreign keys
+    enforced, and real transactions (BEGIN on begin; pysqlite's own handling would start them
+    late, so a snapshot would not be one consistent read)."""
+    engine = sa.create_engine(url, connect_args={"timeout": SQLITE_BUSY_MS / 1000})
+
+    @sa.event.listens_for(engine, "connect")
+    def _connect(dbapi_conn, _record) -> None:
+        dbapi_conn.isolation_level = None  # SQLAlchemy issues BEGIN itself (below)
+        cur = dbapi_conn.cursor()
+        cur.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_MS}")
+        if url.split("?", 1)[0] not in ("sqlite://", "sqlite:///:memory:"):
+            cur.execute("PRAGMA journal_mode = WAL")
+        cur.execute("PRAGMA foreign_keys = ON")
+        cur.close()
+
+    @sa.event.listens_for(engine, "begin")
+    def _begin(conn) -> None:
+        conn.exec_driver_sql("BEGIN")
+
+    return engine
 
 
 def kind_of(t: T.TypeEngine) -> tuple[str, str, int | None]:
@@ -106,6 +140,8 @@ class SqlDatabase:
 
     @property
     def engine(self) -> Engine:
+        if self._engine is None and self.engine_name == "sqlite":
+            self._engine = sqlite_engine(self.url)
         if self._engine is None:
             args: dict[str, Any] = {"pool_pre_ping": True}
             if self.engine_name == "mssql":
@@ -124,6 +160,7 @@ class SqlDatabase:
         tables: dict[str, Table] = {}
         for name in names:
             cols = []
+            rowid = self._sqlite_rowid(conn, name) if self.engine_name == "sqlite" else None
             for pos, c in enumerate(insp.get_columns(name, schema=self.schema_name), start=1):
                 dtype, udt, length = kind_of(c["type"])
                 ident = c.get("identity")
@@ -132,6 +169,8 @@ class SqlDatabase:
                     identity = "ALWAYS" if ident.get("always") else "BY DEFAULT"
                 elif self.engine_name == "mssql" and c.get("autoincrement") is True:
                     identity = "BY DEFAULT"
+                elif c["name"] == rowid:
+                    identity = "BY DEFAULT"  # SQLite numbers it when no value is given
                 cols.append(Column(
                     name=c["name"], data_type=dtype, udt_name=udt, nullable=bool(c["nullable"]),
                     default=str(c["default"]) if c.get("default") is not None else None,
@@ -154,6 +193,14 @@ class SqlDatabase:
                                  primary_key=list(pk.get("constrained_columns") or []),
                                  foreign_keys=fks)  # fmt: skip
         return Schema(tables=tables), meta
+
+    @staticmethod
+    def _sqlite_rowid(conn: Connection, table: str) -> str | None:
+        """The column that is the table's rowid (a lone `INTEGER PRIMARY KEY`), if any."""
+        pk = conn.exec_driver_sql(
+            "SELECT name, type FROM pragma_table_info(?) WHERE pk > 0", (table,)
+        ).all()
+        return pk[0][0] if len(pk) == 1 and str(pk[0][1]).strip().upper() == "INTEGER" else None
 
     def _sa_table(self, meta: sa.MetaData, name: str) -> sa.Table:
         key = f"{self.schema_name}.{name}" if self.schema_name else name
@@ -207,6 +254,10 @@ class SqlDatabase:
 
     def _constraints(self, conn: Connection, names: list[str], on: bool) -> None:
         """Foreign keys of `names` off (for a load with circular references) or back on."""
+        if self.engine_name == "sqlite":
+            if not on:  # checked at COMMIT instead of per row; resets itself after the commit
+                conn.exec_driver_sql("PRAGMA defer_foreign_keys = ON")
+            return
         for name in names:
             if self.engine_name == "mssql":
                 q = self._quoted(name)
@@ -231,6 +282,22 @@ class SqlDatabase:
     def _reseed(self, conn: Connection, schema: Schema, names: list[str]) -> list[str]:
         """Identity counters past the highest loaded value. Returns notes when not allowed."""
         notes = []
+        if self.engine_name == "sqlite":
+            # A rowid numbers itself from MAX + 1. Only a table declared AUTOINCREMENT keeps a
+            # counter (sqlite_sequence), which a reset must put back too.
+            has_seq = conn.exec_driver_sql(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'"
+            ).first()
+            for name in names if has_seq else []:
+                col = next((c for c in schema.tables[name].columns if c.identity), None)
+                if col is None:
+                    continue
+                prep = self.engine.dialect.identifier_preparer
+                high = conn.execute(sa.text(
+                    f"SELECT MAX({prep.quote(col.name)}) FROM {self._quoted(name)}")).scalar()  # fmt: skip
+                conn.execute(sa.text("UPDATE sqlite_sequence SET seq = :s WHERE name = :t"),
+                             {"s": int(high or 0), "t": name})  # fmt: skip
+            return notes
         for name in names:
             for col in schema.tables[name].columns:
                 if not col.identity:

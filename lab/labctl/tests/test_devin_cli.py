@@ -47,7 +47,7 @@ def test_manual_path_package_then_attach_pr(repo):
     zips = list((repo / ".lab-state" / "packages").glob("twinlab-demo-*.zip"))
     assert len(zips) == 1
     with zipfile.ZipFile(zips[0]) as zf:
-        assert "`acme/twin-lab`" in zf.read("DEVIN_TASK.md").decode()
+        assert "`acme/twin-lab`" in zf.read("BUILD_TASK.md").decode()
     job_id = next(line.split()[-1] for line in result.output.splitlines() if "Manual job" in line)
     assert "attach-pr" in result.output
 

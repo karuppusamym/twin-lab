@@ -299,23 +299,49 @@ def _check_routes(
                     )
 
 
-def _check_tables(auto: Automation, b: Bindings, report: Report, basis_by_app: dict) -> None:
+def _sqlite_columns(root: Path | None, lab_id: str) -> list[tuple[str, str]]:
+    """Tables and columns of a SQLite lab, from its lab agent (the file has no network address)."""
+    from labctl import lab as lab_mod
+
+    if root is None:
+        raise lab_mod.LabError("no repository given to reach the lab agent")
+    tables = lab_mod.agent(root, lab_id).info().get("tables") or []
+    return [(t["name"].lower(), c["name"].lower()) for t in tables for c in t.get("columns", [])]
+
+
+def _check_tables(
+    auto: Automation, b: Bindings, report: Report, basis_by_app: dict,
+    root: Path | None = None, labs: dict | None = None,
+) -> None:  # fmt: skip
     touches = [t for t in auto.touches if isinstance(t, DbTouch)]
     if not touches:
         return
     try:
         import psycopg
     except ImportError:
-        report.errors.append("psycopg is not installed; tables not checked")
-        return
+        psycopg = None
     for touch in touches:
         url = b.apps[touch.app].db
+        sqlite = b.apps[touch.app].db_engine == "sqlite"
+        if psycopg is None and not sqlite:
+            report.errors.append("psycopg is not installed; tables not checked")
+            continue
         try:
-            with psycopg.connect(url, connect_timeout=10) as conn:
-                rows = conn.execute(
-                    "SELECT lower(table_name), lower(column_name) FROM information_schema.columns "
-                    "WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
-                ).fetchall()
+            if sqlite:
+                # The bot cannot reach a SQLite lab's database at all: that blocks it. The
+                # tables are still checked (through the lab agent), so the report is complete.
+                report.items.append(Item("table", touch.app, "database", "failed",
+                                         "this app's lab runs on SQLite: there is no database "
+                                         "address for a bot that reads or writes tables; run it "
+                                         "against a Postgres or SQL Server lab"))  # fmt: skip
+                rows = _sqlite_columns(root, (labs or {}).get(touch.app, touch.app))
+            else:
+                with psycopg.connect(url, connect_timeout=10) as conn:
+                    rows = conn.execute(
+                        "SELECT lower(table_name), lower(column_name) FROM "
+                        "information_schema.columns "
+                        "WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
+                    ).fetchall()
         except Exception as exc:  # noqa: BLE001
             report.items.append(
                 Item("table", touch.app, "database", "failed", f"cannot connect: {_short(exc)}")
@@ -474,7 +500,7 @@ def check(
     try:
         _check_screens(automation, b, args, report, basis_by_app)
         _check_routes(automation, b, values, report, basis_by_app)
-        _check_tables(automation, b, report, basis_by_app)
+        _check_tables(automation, b, report, basis_by_app, root, labs)
     finally:
         if reset:
             _reset(root, lab_ids, report, "after")

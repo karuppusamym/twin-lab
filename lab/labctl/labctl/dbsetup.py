@@ -1,8 +1,8 @@
 """Create a demo app's tables on any database engine, from its `db/schema.sql`.
 
 The schema file is parsed (labctl.data.ddl: any dialect, views become tables) and the tables are
-created through SQLAlchemy, which writes the right SQL for SQL Server, Oracle or Postgres: one
-schema file serves every engine. Existing tables are left alone (`checkfirst`), so this is safe
+created through SQLAlchemy, which writes the right SQL for SQL Server, Oracle, Postgres or SQLite:
+one schema file serves every engine. Existing tables are left alone (`checkfirst`), so this is safe
 to run on every start.
 """
 
@@ -66,7 +66,12 @@ def metadata(schema_sql: str, engine: str, schema: str | None = None) -> sa.Meta
                 target = f"{schema}.{c.references[0]}" if schema else c.references[0]
                 args.append(sa.ForeignKey(f"{target}.{c.references[1]}"))
             if c.autoincrement and c.primary_key:
-                args.append(sa.Identity(always=False))
+                args.append(sa.Identity(always=False))  # SQLite ignores it: see below
+                if engine == "sqlite" and isinstance(kind, sa.Integer):
+                    # Only a column declared exactly INTEGER PRIMARY KEY is SQLite's rowid and
+                    # numbers itself (MAX + 1, so a reset gives the same ids again); BIGINT
+                    # would not. SQLite integers are 64-bit either way.
+                    kind = sa.Integer()
             cols.append(sa.Column(c.name, kind, *args, primary_key=c.primary_key,
                                   nullable=c.nullable and not c.primary_key,
                                   unique=c.unique and not c.primary_key))  # fmt: skip

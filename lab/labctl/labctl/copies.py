@@ -1,6 +1,6 @@
 """Copies of an app's lab, one per run: `labctl lab copy showcase` starts `showcase.run-1`, a lab
 of its own (database, agent, app) on free ports, with the data the app's lab has as its
-baseline. A run on a copy cannot disturb anyone, and anyone cannot disturb it. Drop it after.
+baseline. On SQLite the copy has its own database file (its own volume) and no database port. A run on a copy cannot disturb anyone, and anyone cannot disturb it. Drop it after.
 
 The copy uses the app's image and schema; only the Compose project, the ports and the data are
 its own. Its record (ports, where its data came from) is kept in `.lab-state/copies/`.
@@ -73,7 +73,7 @@ def _used_ports(root: Path) -> set[int]:
             continue
         used |= {p for p in (lab.get("port"), lab.get("db_port")) if isinstance(p, int)}
     for rec in listing(root):
-        used |= {rec.get("port"), rec.get("db_port")}
+        used |= {p for p in (rec.get("port"), rec.get("db_port")) if isinstance(p, int)}
     return used
 
 
@@ -117,10 +117,10 @@ def create(
     app = load_app(root, app_id)
     if app.lab is None:
         raise CopyError(f"apps/{app_id}/app.yaml has no `lab:` section")
-    if dbservers.choice(app.lab.database) not in ("postgres", "sqlserver"):
+    if dbservers.choice(app.lab.database) not in ("postgres", "sqlserver", "sqlite"):
         raise CopyError(
             f"{app_id} runs on the server {app.lab.database!r}: a copy needs a database of its own, "
-            "so copies run on Twin Lab's own databases (postgres or sqlserver) only"
+            "so copies run on Twin Lab's own databases (postgres, sqlserver or sqlite) only"
         )
     name = name or _next_name(root, app_id)
     if not NAME.match(name):

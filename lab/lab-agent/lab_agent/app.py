@@ -109,7 +109,7 @@ class LabAgent:
         self.known_tables = {t.lower() for t in only or []}
         self.engine_name = engine_of(settings.admin_database_url or "postgresql://")
         self.database: Database | SqlDatabase | None = None
-        if settings.admin_database_url and self.engine_name in ("mssql", "oracle"):
+        if settings.admin_database_url and self.engine_name in ("mssql", "oracle", "sqlite"):
             schema_name = settings.db_schema if settings.db_schema != "public" else None
             self.database = SqlDatabase(settings.admin_database_url, schema_name, only)
         elif settings.admin_database_url:
@@ -141,6 +141,8 @@ class LabAgent:
         self._upgrade_baseline_rows()
         self._upgrade_history()
         self.sessions = SessionStore(self.state_dir, s.app_id, s.app_version)
+        if self.engine_name == "sqlite" and s.admin_database_url:
+            await self._prepare_sqlite()
         self.client = httpx.AsyncClient(
             transport=self.transport,
             timeout=httpx.Timeout(s.upstream_timeout_s, connect=10.0),
@@ -161,6 +163,29 @@ class LabAgent:
             await self.db_proxy.start("0.0.0.0", s.db_proxy_port)
             log.info("db link proxy on :%s -> %s", s.db_proxy_port, s.db_upstream)
         log.info("lab agent for %s: proxying to %s", s.app_id, s.app_upstream)
+
+    async def _prepare_sqlite(self) -> None:
+        """The database file and the app's tables (labctl runs this before the app starts; here
+        again so an agent started on its own has them too). Never stops the agent."""
+        from lab_agent.sqlite_init import prepare
+
+        try:
+            made = await asyncio.to_thread(
+                prepare, self.settings.admin_database_url, self.settings.schema_path
+            )
+            if made:
+                log.info("sqlite: created %s", ", ".join(made))
+        except Exception as exc:  # noqa: BLE001 - reported by /_lab/health and /_lab/info
+            log.error("sqlite: the database could not be prepared: %s", exc)
+
+    def _unavailable(self, condition: AgentCondition) -> list[dict[str, str]]:
+        """Parts of a condition this lab cannot honour, said so instead of silently ignored."""
+        db = condition.db
+        if self.engine_name == "sqlite" and db is not None and (db.latency_ms or db.jitter_ms):
+            return [{"part": "db", "message": (
+                "slow database is not available on sqlite: the app opens the database file "
+                "directly, so there is no database connection to slow down")}]  # fmt: skip
+        return []
 
     async def shutdown(self) -> None:
         if self.db_proxy is not None:
@@ -413,6 +438,7 @@ class LabAgent:
                 "version": s.app_version,
                 "upstream": s.app_upstream,
                 "tables": tables,
+                "db_engine": self.engine_name if self.database is not None else None,
                 "db_error": db_error,
                 "condition": self.engine.condition.id,
                 "baseline": self._baseline_meta(),
@@ -733,10 +759,14 @@ class LabAgent:
     # condition
 
     def _condition_body(self) -> dict[str, Any]:
-        return {
+        body = {
             **self.engine.condition.model_dump(mode="json"),
             "applied_at": self.condition_applied_at,
         }
+        unavailable = self._unavailable(self.engine.condition)
+        if unavailable:  # only then, so replies on other engines are as before
+            body["unavailable"] = unavailable
+        return body
 
     async def get_condition(self, request: Request) -> Response:
         return JSONResponse(self._condition_body())
@@ -757,6 +787,14 @@ class LabAgent:
             )
         except ValueError as exc:
             return error(422, "LAB_CONDITION_INVALID", str(exc))
+        unavailable = self._unavailable(condition)
+        if unavailable and not (condition.http or condition.faults):
+            # Nothing of it could be applied: refuse, so nobody runs "under" it by mistake.
+            return error(422, "LAB_CONDITION_UNAVAILABLE",
+                         f"{unavailable[0]['message']}; nothing was applied",
+                         unavailable=unavailable)  # fmt: skip
+        for part in unavailable:  # the web part applies; the reply lists what does not
+            log.warning("condition %s: %s", condition.id, part["message"])
         self.condition_applied_at = iso(utcnow())
         write_json(
             self.state_dir / "condition.json",

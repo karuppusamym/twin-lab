@@ -149,6 +149,17 @@ the page around it.
 - **Pictures of text inside images** are read only on canvases, not in `<img>`. The picture of
   every step is kept for a person to look at.
 
+## One recording, several applications
+
+A person often crosses applications in one recording. `labctl evidence split <recording>` groups
+the steps by the site of the page they happened on and writes a proposal to edit: rename an
+application, merge two, split one host by path, leave one out. Sign-on pages are left out by
+default, and an iframe from another site is listed under its page's application so it can be
+made its own. `--apply` then writes one recording per application under `evidence/<app>/`, each
+step keeping its number in the whole recording, and the sequence across applications in
+`evidence/_sequences/<recording>.flow.yaml`. Requests are assigned by their Referer and time, so
+check the proposal's step counts before applying.
+
 ## Privacy
 
 A HAR or a database export from a real system holds customer data, cookies and tokens. So:

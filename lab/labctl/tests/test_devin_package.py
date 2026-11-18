@@ -61,7 +61,7 @@ def test_package_holds_exactly_the_build_inputs(tmp_path):
     assert path.parent == tmp_path / "out"
     assert path.name.startswith("twinlab-demo-") and len(path.stem) == len("twinlab-demo-") + 8
     assert names(path) == {
-        "DEVIN_TASK.md",
+        "BUILD_TASK.md",
         "MANIFEST.json",
         "AGENTS.md",
         "docs/factory-playbook.md",
@@ -144,7 +144,7 @@ def test_prompt_names_repo_branch_app_and_every_step(tmp_path):
     text = pkg.prompt(repo, "demo", "acme/twin-lab")
     for needle in [
         "`acme/twin-lab`",
-        "devin/demo-<yyyymmdd-hhmm>",
+        "build/demo-01234567",
         "AGENTS.md",
         "docs/factory-playbook.md",
         "apps/demo/BRIEF.md",
@@ -186,7 +186,7 @@ def test_prompt_is_the_task_file_in_the_package(tmp_path):
     repo = make_repo(tmp_path / "repo")
     path = pkg.build(repo, "demo", tmp_path / "out", repo="acme/twin-lab")
     with zipfile.ZipFile(path) as zf:
-        assert zf.read("DEVIN_TASK.md").decode() == pkg.prompt(repo, "demo", "acme/twin-lab")
+        assert zf.read("BUILD_TASK.md").decode() == pkg.prompt(repo, "demo", "acme/twin-lab")
 
 
 def test_prompt_without_repo_tells_devin_to_ask(tmp_path):

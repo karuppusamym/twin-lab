@@ -136,7 +136,7 @@ def package(
         "\nNext:\n"
         "  1. Open https://app.devin.ai and start a new session.\n"
         f"  2. Attach {path.name}.\n"
-        "  3. Paste the whole of DEVIN_TASK.md (inside the zip) as the message, unchanged.\n"
+        "  3. Paste the whole of BUILD_TASK.md (inside the zip) as the message, unchanged.\n"
         "  4. Wait for Devin to open the pull request; answer if it asks.\n"
         f"  5. {step5}"
     )
