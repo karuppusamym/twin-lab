@@ -376,6 +376,51 @@ def test_replay_across_applications_is_taken_only_when_the_replay_can(world, cli
     assert "saved and valid" in flash(saved) and (multi / "acceptance.yaml").is_file()
 
 
+def test_replica_addresses_for_a_replay_across_applications(world, client, monkeypatch):
+    rows = [
+        {"id": "orders", "origin": "https://orders.test", "lab": "http://127.0.0.1:8101"},
+        {"id": "billing", "origin": "https://billing.test", "lab": ""},
+    ]
+    src = [r["origin"] for r in rows]
+    # the lab port is the default; a typed address replaces it and is not waited for as a lab
+    mapping, apps, on_lab, wrong = rep.chosen_replicas(rows, src, ["", "http://box.test:9000/"])
+    assert not wrong and apps == ["orders", "billing"] and on_lab == ["orders"]
+    assert mapping == {
+        "https://orders.test": "http://127.0.0.1:8101",
+        "https://billing.test": "http://box.test:9000",
+    }
+    # no address at all, not an address, and the real application are each refused
+    for typed, said in (
+        ("", "no replica address"),
+        ("box.test:9000", "is not an address"),
+        ("http://box.test/path", "is not an address"),
+        ("https://orders.test", "recorded source"),
+        ("https://BILLING.test/", "recorded source"),
+    ):
+        _, _, _, wrong = rep.chosen_replicas(rows, src, ["", typed])
+        assert len(wrong) == 1 and said in wrong[0], (typed, wrong)
+
+    multi = world / "evidence" / "_recordings" / "multi2"
+    multi.mkdir(parents=True)
+    (multi / "steps.jsonl").write_text(
+        '{"seq":1,"url":"https://orders.test/x","action":"goto"}\n'
+        '{"seq":2,"url":"https://billing.test/y","action":"goto"}\n',
+        encoding="utf-8",
+    )
+    (multi / "recording.har").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(rep, "replica_rows", lambda root, info: rows)
+    page = client.get("/recordings/multi2/files")
+    assert page.status_code == 200 and 'id="replicas"' in page.text
+    assert 'value="http://127.0.0.1:8101"' in page.text and "https://billing.test" in page.text
+    if rep.replica_param(fidelity.replay) is not None:
+        refused = client.post(
+            "/recordings/multi2/replay",
+            data={"source": src, "replica": ["", "https://orders.test"]},
+            follow_redirects=False,
+        )
+        assert "recorded source" in flash(refused)
+
+
 # --- the report page --------------------------------------------------------------------------------
 
 

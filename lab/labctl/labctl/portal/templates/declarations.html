@@ -43,6 +43,22 @@
   {% for n in notes %}<p class="small muted">{{ n }}</p>{% endfor %}
   {% if app_id and not lab_up %}<p class="small"><span class="pill warn">lab stopped</span> A replay needs the running replica: <a href="/apps/{{ app_id }}#lab">start the lab for {{ app_id }}</a>.</p>{% endif %}
   <form method="post" action="{{ prefix }}/replay">
+    {% if replicas %}
+    <table class="small" id="replicas">
+      <caption>Where each application's replica runs</caption>
+      <thead><tr><th scope="col">Application</th><th scope="col">Recorded at</th><th scope="col">Replica address</th></tr></thead>
+      <tbody>
+      {% for r in replicas %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td><code>{{ r.origin }}</code><input type="hidden" name="source" value="{{ r.origin }}"></td>
+        <td><input type="url" name="replica" value="{{ r.lab }}" placeholder="http://127.0.0.1:8101" aria-label="Replica address for {{ r.id }}" {{ 'required' if not r.lab }}></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted">Filled from each application's lab port. Change an address to replay against a replica running elsewhere. A recorded address is refused: the replay never touches the real application.</p>
+    {% endif %}
     <div class="row">
       <div><label for="viewport">Viewport</label><select id="viewport" name="viewport"><option value="">as the pictures file says</option><option value="desktop">desktop (1280 x 720)</option><option value="mobile">mobile (390 x 844)</option></select></div>
     </div>

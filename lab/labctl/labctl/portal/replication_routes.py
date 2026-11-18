@@ -35,7 +35,8 @@ def register(portal, ctx: SimpleNamespace) -> None:
             raise HTTPException(404, f"No recording {name} across applications")
         return info, f"/recordings/{info['name']}/files"
 
-    def declarations_page(request: Request, *, rec, prefix, title, back, app_id, replay_note):
+    def declarations_page(request: Request, *, rec, prefix, title, back, app_id, replay_note,
+                          replicas=None):  # fmt: skip
         decls = rep.declarations(root, rec)
         blocked = [f"{d['name']}: {p}" for d in decls for p in d["hard"] + d["problems"]]
         return ctx.page(
@@ -43,7 +44,7 @@ def register(portal, ctx: SimpleNamespace) -> None:
             blocked=blocked, notes=rep.notes(root, rec), guard_note=rep.GUARD_NOTE, app_id=app_id,
             rec=rec.name, where=rec.relative_to(root).as_posix() if root in rec.parents else rec.name,
             replay_note=replay_note, lab_up=rep.lab_running(root, app_id) if app_id else None,
-            kinds=rep.KINDS)  # fmt: skip
+            kinds=rep.KINDS, replicas=replicas or [])  # fmt: skip
 
     def save(prefix: str, rec, kind: str, text: str):
         if kind not in rep.FILES:
@@ -127,21 +128,22 @@ def register(portal, ctx: SimpleNamespace) -> None:
     @portal.get("/recordings/{name}/files", response_class=HTMLResponse)
     def multi_recording(request: Request, name: str):
         info, prefix = combined(name)
-        mapping, apps = rep.replica_map(root, info)
+        rows = rep.replica_rows(root, info)
         from labctl.behaviour import fidelity
 
         takes = rep.replica_param(fidelity.replay)
         note = None
-        if len(mapping) < 2:
-            note = ("Create the applications first, and give each a lab port: a replay across "
-                    "applications needs every included application's replica.")  # fmt: skip
+        if len(rows) < 2:
+            note = ("Create the applications first: a replay across applications needs every "
+                    "included application's replica.")  # fmt: skip
         elif takes is None:
             note = ("Replaying the whole flow across applications is not available in this build "
                     "(the replay takes one base address). Replay each application's own recording "
                     "from its page.")  # fmt: skip
         page = declarations_page(request, rec=info["path"], prefix=prefix, app_id=None,
                                  title=f"{info['name']}: values and checks across applications",
-                                 back=f"/recordings/{info['name']}", replay_note=note)  # fmt: skip
+                                 back=f"/recordings/{info['name']}", replay_note=note,
+                                 replicas=rows)  # fmt: skip
         return page
 
     @portal.post("/recordings/{name}/files/{kind}")
@@ -155,16 +157,20 @@ def register(portal, ctx: SimpleNamespace) -> None:
         return template(prefix, info["path"], kind)
 
     @portal.post("/recordings/{name}/replay")
-    def multi_replay(name: str, viewport: str = Form(""), anyway: str = Form("")):
+    def multi_replay(name: str, viewport: str = Form(""), anyway: str = Form(""),
+                     source: list[str] = Form([]), replica: list[str] = Form([])):  # fmt: skip
         info, prefix = combined(name)
         from labctl.behaviour import fidelity
 
-        mapping, apps = rep.replica_map(root, info)
-        if rep.replica_param(fidelity.replay) is None or len(mapping) < 2:
+        rows = rep.replica_rows(root, info)
+        if rep.replica_param(fidelity.replay) is None or len(rows) < 2:
             return ctx.back(prefix, "Replay across applications is not available here: it needs "
-                            "every application's lab port and a replay that takes a replica map. "
+                            "the created applications and a replay that takes a replica map. "
                             "Replay each application's own recording instead.", "error")  # fmt: skip
-        down = [a for a in apps if not rep.lab_running(root, a)]
+        mapping, apps, on_lab, wrong = rep.chosen_replicas(rows, source, replica)
+        if wrong:
+            return ctx.back(prefix + "#replay", "Not started: " + "; ".join(wrong), "error")
+        down = [a for a in on_lab if not rep.lab_running(root, a)]
         if down:
             return ctx.back(prefix, "Start the lab of: " + ", ".join(down), "error")
         stop = rep.blockers(root, info["path"])

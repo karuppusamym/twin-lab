@@ -178,6 +178,9 @@ through UI Automation / the bridge and press buttons with **real mouse clicks** 
 checking the app owns the foreground window and the point; the cursor is put back), because
 WinForms raises no Invoke event a recorder could hear for a pattern call. The live tests run only
 on request: `TWINLAB_DESKTOP_GUI=1 python -m pytest -m desktop_gui`.
+A run prints `Windows fatal exception: code 0x8001010d` thread dumps: UI Automation raises and
+handles that error itself and pytest's fault handler reports it. The lookups succeed; add
+`-p no:faulthandler` for a quiet log.
 
 ## Limits
 

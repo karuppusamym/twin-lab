@@ -487,27 +487,53 @@ def report_view(root: Path, state: Path, app_id: str, name: str) -> dict | None:
             "visual_pics": {v.id: [pic(v.before), pic(v.after_path), pic(v.diff)] for v in report.visual}}  # fmt: skip
 
 
-def replica_map(root: Path, rec_info: dict) -> tuple[dict[str, str], list[str]]:
-    """{source origin: replica address} and the apps, from a combined recording's saved proposal
-    and each included application's lab port."""
+REPLICA_ADDRESS = re.compile(r"^https?://[A-Za-z0-9.\-]+(:\d{1,5})?$")
+
+
+def replica_rows(root: Path, rec_info: dict) -> list[dict]:
+    """One row per included application of a combined recording: its id, its source origin and
+    the replica address known so far (its lab port), for the replay form."""
     from labctl import multiapp, repo
     from labctl import split as split_mod
 
     prop_path = multiapp.proposal_file(rec_info["path"])
     if not prop_path.is_file():
-        return {}, []
-    prop = split_mod.load(prop_path)
-    mapping: dict[str, str] = {}
-    apps: list[str] = []
-    for e in prop.apps:
+        return []
+    rows = []
+    for e in split_mod.load(prop_path).apps:
         if not e.include:
             continue
         model, _ = repo.load(root / "apps" / e.id / "app.yaml", "app")
-        if model is None or model.lab is None:
-            continue
-        mapping[e.origin] = f"http://127.0.0.1:{model.lab.port}"
-        apps.append(e.id)
-    return mapping, apps
+        lab = f"http://127.0.0.1:{model.lab.port}" if model is not None and model.lab else ""
+        rows.append({"id": e.id, "origin": e.origin, "lab": lab})
+    return rows
+
+
+def chosen_replicas(rows: list[dict], sources: list[str], addresses: list[str]):
+    """The replica map a person entered on the replay form, over the lab ports. Returns
+    (mapping, apps, apps replayed on their own lab, problems). An address must be a plain
+    http(s) origin and never a source origin of the recording: a replay types and clicks, and
+    must not reach the real application."""
+    typed = {s.strip(): a.strip().rstrip("/") for s, a in zip(sources, addresses, strict=False)}
+    real = {r["origin"].rstrip("/").lower() for r in rows}
+    mapping: dict[str, str] = {}
+    apps: list[str] = []
+    on_lab: list[str] = []
+    problems: list[str] = []
+    for r in rows:
+        address = typed.get(r["origin"]) or r["lab"]
+        if not address:
+            problems.append(f"{r['id']}: no replica address and no lab port")
+        elif not REPLICA_ADDRESS.match(address):
+            problems.append(f"{r['id']}: {address!r} is not an address like http://host:port")
+        elif address.lower() in real:
+            problems.append(f"{r['id']}: {address} is a recorded source, not a replica")
+        else:
+            mapping[r["origin"]] = address
+            apps.append(r["id"])
+            if address == r["lab"]:
+                on_lab.append(r["id"])
+    return mapping, apps, on_lab, problems
 
 
 def lab_running(root: Path, app_id: str) -> bool:

@@ -2,6 +2,19 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — Portal: replica addresses for a replay across applications
+- The page of a recording across applications now lists each included application with the
+  address it was recorded at and a field for its replica address, filled from the lab port.
+  Type another address to replay against a replica running elsewhere; only a lab the replay
+  uses is required to be running.
+- A replica address must be a plain `http(s)://host:port`. An address the recording was made
+  at is refused: a replay never touches the real application.
+- Desktop tests: the `Windows fatal exception: code 0x8001010d` thread dumps in a
+  `TWINLAB_DESKTOP_GUI=1` run are not a recorder fault. UI Automation raises and handles that
+  error inside `ElementFromPoint`; pytest's fault handler prints every such exception. Measured
+  on the WinForms flow: 12 of 12 element lookups succeeded in 3 to 9 ms. `labctl desktop record`
+  does not print it. Run the tests with `-p no:faulthandler` for a quiet log.
+
 ## 2026-11-18 — Seed data and replay values in the build packages (the blind rebuild's data gap)
 - **One planner for the seed and the replay values** (`labctl/seedplan.py`, run by `labctl brief`
   and `labctl evidence build-all`). From an app's recordings it writes `apps/<app>/db/seed.sql`
