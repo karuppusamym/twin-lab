@@ -2,6 +2,31 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-18 — Desktop recorder: the four faults the certification runs found
+- WPF and Java Swing are now CAPTURE VERIFIED, as WinForms: all three pass detect, capture (20
+  expected actions each) and self-replay (WinForms and WPF 29 of 36 steps verified, 7 covered by
+  the steps around them; Swing 29 of 32, 3 covered; none failed). Gates and expected lists are
+  unchanged; the faults were in the recorder (`labctl/desktop/recorder.py`, `java.py`, `jab.py`).
+- Swing, order: an item chosen in a combo box without mouse or key was found only by the tree
+  comparison after the next click's batch and written after that click. The window's tree is now
+  asked for in the hook when a click or a key arrives; a change it already shows goes before
+  that input.
+- Swing, a click lost or put on the wrong control (about one run in three): the idle tree
+  comparison could read a window while a click took effect (a message box closing, a menu
+  opening) and replace the window's last good tree with a torn one, in which the waiting click
+  was then looked up. A tree read while its window closes is dropped, a torn reading is read
+  again, an idle reading is dropped when an input arrived meanwhile, and the hook notes where
+  the window is.
+- WPF, a selection the application makes itself (the grid selects the saved row after Save) is
+  no longer a `select` step: it is an `effects` entry of the step that caused it, which verify
+  neither replays nor counts. A row the user selects (a mouse press or a key in that grid) is
+  still a step. WinForms raises no selection event at that moment.
+- WPF, a message box written before the click that opened it: the click took the time of its
+  Invoke event, read after a slow call into the application. It keeps the time of the mouse
+  press.
+- Left open: a script that selects a list row by a pattern call alone is taken for the
+  application's doing; in Swing, a selection made without input just before a click that opens
+  a menu is still written after that click ([09-desktop.md](09-desktop.md), Limits).
 ## 2026-11-18 — Certification matrix: Angular, JSF and the three desktop toolkits run
 - The matrix ([certification-matrix.md](certification-matrix.md)) now has real results for
   seven of its nine entries. Angular 21.2.26 and JSF 2.3 (Mojarra) run on the two Caseboard

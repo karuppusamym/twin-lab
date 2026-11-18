@@ -3,8 +3,8 @@
   "technology": "WPF",
   "version": ".NET 6",
   "surface": "desktop",
-  "result": "PARTIAL",
-  "reason": "self-replay failed: verify pass: 0 failed, 1 not performed, of 37 step(s); first: step 32 (select) the item selected holds data (its name was not recorded); not replayed",
+  "result": "CAPTURE VERIFIED",
+  "reason": "rebuild not run: no rebuild replay report is named in the entry",
   "date": "2026-11-18",
   "gates": {
     "detect": {
@@ -33,24 +33,24 @@
     },
     "capture": {
       "status": "PASS",
-      "detail": "20 expected action(s), all in the recording (37 action(s) recorded)",
+      "detail": "20 expected action(s), all in the recording (36 action(s) recorded)",
       "facts": {
         "expected": 20,
-        "captured": 37,
+        "captured": 36,
         "missing": [],
-        "steps": 37
+        "steps": 36
       }
     },
     "self-replay": {
-      "status": "FAIL",
-      "detail": "verify pass: 0 failed, 1 not performed, of 37 step(s); first: step 32 (select) the item selected holds data (its name was not recorded); not replayed",
+      "status": "PASS",
+      "detail": "29 of 36 step(s) verified against a fresh start, 7 covered by the steps around them, 0 failed",
       "facts": {
         "status": "pass",
-        "steps": 37,
+        "steps": 36,
         "replayed": 29,
         "implied": 7,
         "failed": 0,
-        "skipped": 1
+        "skipped": 0
       }
     },
     "rebuild": {
@@ -60,8 +60,6 @@
     }
   },
   "not_covered": [
-    "self-replay does not pass yet; after Save the application selects the saved row again, which is recorded as a select on a data row, and verify does not perform a selection that holds data",
-    "intermittent; in some runs the recording has the message box opening before the Save click that caused it, and verify then fails at that step",
     ".NET Framework 4.x builds",
     "data templates, virtualised lists, third-party controls",
     "a rebuild by a coding agent"
