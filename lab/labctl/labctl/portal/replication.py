@@ -287,13 +287,16 @@ def artifacts_root(state: Path, app_id: str) -> Path:
 def resolve_artifact(state: Path, app_id: str, rel: str) -> Path | None:
     """A kept picture, or None. Only files under the state folder's artifacts for this app, only
     pictures, never through `..`, an absolute path or a link that leaves the folder."""
-    if not rel or rel.startswith(("/", "\\")) or ":" in rel:
+    if not rel or rel.startswith(("/", "\\")) or ":" in rel or " " in rel:
         return None
     parts = Path(rel.replace("\\", "/")).parts
     if any(p in ("..", ".", "") for p in parts):
         return None
     base = artifacts_root(state, app_id).resolve()
-    target = (base / Path(*parts)).resolve()
+    try:
+        target = (base / Path(*parts)).resolve()
+    except (ValueError, OSError):
+        return None
     if base not in target.parents or target.suffix.lower() not in ARTIFACT_TYPES:
         return None
     return target if target.is_file() else None
