@@ -29,7 +29,8 @@ HERE = Path(__file__).parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(HERE / "fixtures" / "lookapp"))
 
-import app as lookapp  # noqa: E402
+import lookapp  # noqa: E402
+
 from labctl import lookfeel, sanitize  # noqa: E402
 from labctl.builder import package as pkg  # noqa: E402
 
