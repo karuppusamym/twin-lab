@@ -2,9 +2,9 @@
 for verify. Windows only.
 
 Patterns (Invoke, Value, Toggle, SelectionItem, ExpandCollapse) act on controls without moving
-the mouse or typing on the keyboard, so nothing reaches another application. `key()` is the one
-exception: it sends real key presses (SendInput), and only when a window of the driven process
-is in the foreground; otherwise it refuses.
+the mouse or typing on the keyboard, so nothing reaches another application. `key()` and
+`keys()` are the exceptions: they send real key presses (SendInput), and only when a window of
+the driven process is in the foreground; otherwise they refuse.
 """
 
 from __future__ import annotations
@@ -82,6 +82,28 @@ class Driver:
         except Exception:  # noqa: BLE001
             pass
         self.win.set_value(el, text)
+        self.pause()
+
+    def keys(self, window, selector: str, text: str) -> None:
+        """Type `text` into a control with real key presses (SendInput, one key per character),
+        as a person would: for a field that raises no event when its Value pattern sets it
+        (WPF's PasswordBox), so that a recorder sees typing at all. The field is emptied through
+        its Value pattern first. Each key is sent only while the driven process owns the
+        foreground window and the control has the keyboard focus; else DriveError."""
+        el = self.control(window, selector)
+        top = self.win.root_window(window.CurrentNativeWindowHandle or 0) or 0
+        if top and self.win.foreground() != top:
+            self.win.user32.SetForegroundWindow(top)
+            time.sleep(0.3)
+        el.SetFocus()
+        self.win.set_value(el, "")
+        time.sleep(0.2)
+        for ch in text:
+            fg = self.win.foreground()
+            if not fg or self.win.window_pid(fg) not in self.pids or not el.CurrentHasKeyboardFocus:
+                raise DriveError(f"{selector} does not have the keyboard focus; not typing")
+            _send_char(ch)
+            time.sleep(0.03)
         self.pause()
 
     def press(self, window, selector: str) -> str:
@@ -205,6 +227,17 @@ VK = {"Enter": 0x0D, "Tab": 0x09, "Esc": 0x1B, "Ctrl": 0x11, "Alt": 0x12, "Shift
 
 
 def _send_chord(chord: str) -> None:
+    keys = [VK.get(k, ord(k.upper()) if len(k) == 1 else 0) for k in chord.split("+")]
+    _send_input([(k, 0, 0) for k in keys] + [(k, 0, 2) for k in reversed(keys)])  # 2: key up
+
+
+def _send_char(ch: str) -> None:
+    """One character as a key press that carries the character itself (KEYEVENTF_UNICODE)."""
+    _send_input([(0, ord(ch), 4), (0, ord(ch), 4 | 2)])
+
+
+def _send_input(seq: list[tuple[int, int, int]]) -> None:
+    """Key events (virtual key, scan code or character, flags) through SendInput."""
     import ctypes
     from ctypes import wintypes
 
@@ -219,10 +252,8 @@ def _send_chord(chord: str) -> None:
         _anonymous_ = ("u",)
         _fields_ = [("type", wintypes.DWORD), ("u", _U)]
 
-    keys = [VK.get(k, ord(k.upper()) if len(k) == 1 else 0) for k in chord.split("+")]
-    seq = [(k, 0) for k in keys] + [(k, 2) for k in reversed(keys)]  # 2: KEYEVENTF_KEYUP
     arr = (INPUT * len(seq))()
-    for i, (vk, flags) in enumerate(seq):
+    for i, (vk, scan, flags) in enumerate(seq):
         arr[i].type = 1
-        arr[i].ki = KI(vk, 0, flags, 0, 0)
+        arr[i].ki = KI(vk, scan, flags, 0, 0)
     ctypes.windll.user32.SendInput(len(seq), arr, ctypes.sizeof(INPUT))

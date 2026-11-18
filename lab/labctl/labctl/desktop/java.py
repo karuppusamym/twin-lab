@@ -254,6 +254,8 @@ class JavaRecorder(Recorder):
             except Exception:  # noqa: BLE001 - queue.Empty
                 return
             kind = ev["kind"]
+            if kind == "typing":
+                continue  # a character key (for UI Automation password fields): typing is polled
             self._flush_typing()  # what was typed comes before the action that follows it
             if kind in ("click", "double_click", "right_click"):
                 # The window as it was before the click (its last snapshot) says what was under

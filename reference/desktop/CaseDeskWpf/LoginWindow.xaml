@@ -1,0 +1,32 @@
+<!-- Sign-in dialog. Any user name with the synthetic password "demo" signs in. -->
+<Window x:Class="CaseDeskWpf.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AutomationProperties.AutomationId="LoginForm"
+        Title="Sign in" ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
+        SizeToContent="WidthAndHeight"
+        FocusManager.FocusedElement="{Binding ElementName=txtUser}">
+    <Grid Margin="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="94" />
+            <ColumnDefinition Width="180" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="34" />
+            <RowDefinition Height="34" />
+            <RowDefinition Height="38" />
+        </Grid.RowDefinitions>
+        <Label x:Name="lblUser" Grid.Row="0" Grid.Column="0" Content="_User name"
+               Target="{Binding ElementName=txtUser}" VerticalAlignment="Center" />
+        <TextBox x:Name="txtUser" Grid.Row="0" Grid.Column="1" Height="23" TabIndex="1" />
+        <Label x:Name="lblPassword" Grid.Row="1" Grid.Column="0" Content="_Password"
+               Target="{Binding ElementName=txtPassword}" VerticalAlignment="Center" />
+        <PasswordBox x:Name="txtPassword" Grid.Row="1" Grid.Column="1" Height="23" TabIndex="3" />
+        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom">
+            <Button x:Name="btnSignIn" Content="_Sign in" Width="85" Height="25" TabIndex="4"
+                    IsDefault="True" Click="SignIn" />
+            <Button x:Name="btnCancel" Content="Cancel" Width="85" Height="25" Margin="10,0,0,0"
+                    TabIndex="5" IsCancel="True" />
+        </StackPanel>
+    </Grid>
+</Window>

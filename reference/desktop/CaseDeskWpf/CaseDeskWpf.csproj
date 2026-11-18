@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- CaseDeskWpf: the CaseDesk reference application in WPF, for Twin Lab's desktop recorder.
+       Same screens, behaviour and control names as ../CaseDesk (WinForms). Synthetic data only,
+       held in memory. No NuGet packages, so it builds offline. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>CaseDeskWpf</AssemblyName>
+    <RootNamespace>CaseDeskWpf</RootNamespace>
+    <Product>CaseDesk</Product>
+    <Company>Twin Lab reference</Company>
+    <AssemblyTitle>CaseDesk case management (WPF reference)</AssemblyTitle>
+    <Version>1.2.0</Version>
+  </PropertyGroup>
+
+</Project>

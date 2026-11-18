@@ -1,0 +1,46 @@
+<!-- Detail dialog of one case: text boxes, a status combo box, an urgent check box, Save and
+     Cancel. Resolving or closing a case needs a summary of at least 10 characters. -->
+<Window x:Class="CaseDeskWpf.CaseDetailWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AutomationProperties.AutomationId="CaseDetailForm"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" SizeToContent="WidthAndHeight"
+        ShowInTaskbar="False">
+    <Grid Margin="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="94" />
+            <ColumnDefinition Width="240" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="32" />
+            <RowDefinition Height="32" />
+            <RowDefinition Height="70" />
+            <RowDefinition Height="32" />
+            <RowDefinition Height="32" />
+            <RowDefinition Height="38" />
+        </Grid.RowDefinitions>
+        <Label x:Name="lblCaseNo" Grid.Row="0" Content="Case No" VerticalAlignment="Center" />
+        <TextBox x:Name="txtCaseNo" Grid.Row="0" Grid.Column="1" Height="23" IsReadOnly="True"
+                 IsTabStop="False" />
+        <Label x:Name="lblCustomer" Grid.Row="1" Content="_Customer"
+               Target="{Binding ElementName=txtCustomer}" VerticalAlignment="Center" />
+        <TextBox x:Name="txtCustomer" Grid.Row="1" Grid.Column="1" Height="23" TabIndex="1" />
+        <Label x:Name="lblSummary" Grid.Row="2" Content="Su_mmary"
+               Target="{Binding ElementName=txtSummary}" VerticalAlignment="Top" />
+        <TextBox x:Name="txtSummary" Grid.Row="2" Grid.Column="1" Height="60" TabIndex="3"
+                 AcceptsReturn="True" TextWrapping="Wrap" VerticalAlignment="Top" />
+        <Label x:Name="lblStatus" Grid.Row="3" Content="S_tatus"
+               Target="{Binding ElementName=cboStatus}" VerticalAlignment="Center" />
+        <ComboBox x:Name="cboStatus" Grid.Row="3" Grid.Column="1" Width="160" Height="23"
+                  HorizontalAlignment="Left" TabIndex="5" />
+        <CheckBox x:Name="chkUrgent" Grid.Row="4" Grid.Column="1" Content="_Urgent" TabIndex="6"
+                  HorizontalAlignment="Left" VerticalAlignment="Center" />
+        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom">
+            <Button x:Name="btnSave" Content="_Save" Width="80" Height="25" TabIndex="7"
+                    Click="Save" />
+            <Button x:Name="btnCancel" Content="Cancel" Width="80" Height="25" Margin="10,0,0,0"
+                    TabIndex="8" IsCancel="True" />
+        </StackPanel>
+    </Grid>
+</Window>

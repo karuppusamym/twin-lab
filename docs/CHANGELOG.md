@@ -97,6 +97,31 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
 - `tools/audit_replication_gates.py` is the audit's probe; it exits 0 now. Tests:
   `test_audit_gates.py`.
 
+## 2026-11-18 — WPF recorded and verified on a live application
+- WPF was covered by fixtures only. `reference/desktop/CaseDeskWpf/` is CaseDesk in WPF
+  (.NET 6, no NuGet package): the same screens, behaviour and control names as the WinForms
+  one, with a `flow.py` that drives the same scripted flow. Three live tests record it, check
+  the steps, the `uia:AutomationId=...` locators, that no typed value is stored and that the
+  toolkit detected is WPF (certain, from `FrameworkId WPF`), replay it with `desktop verify`
+  to a passing report, and find the deliberately wrong build. Run:
+  `TWINLAB_DESKTOP_GUI=1 python -m pytest tests/test_desktop_gui.py -m desktop_gui -k wpf`.
+- Fixed in the recorder, each found on the live app: a click on a button, check box or menu
+  item was recorded on the TextBlock that draws its caption, with no locator when the click
+  closed the window; a menu's drop-down and a combo box's list (WPF `Popup` windows) were
+  recorded as windows opening and closing, with the menu steps put in them; the combo box's
+  items were not read; a check box gave two toggle steps, the second without a state; Enter on
+  the default button gave a key step and a click (now one key step that names the button as
+  `invoked`); typing in a PasswordBox gave no step at all (now a key pressed while it has the
+  focus does; the key is not kept); the snapshot of a window that was closing was kept without
+  its content.
+- Fixed in `verify`: Enter was not replayed, because a WPF control has no window of its own
+  (the key is now posted to its top-level window); the items of a menu that was open in only
+  one of the two trees were reported missing or extra.
+- `Driver.keys` types with real key presses, only while the control has the keyboard focus.
+- Left open (listed in `09-desktop.md`): a password set by a pattern call or pasted is not
+  recorded; a row the application selects itself is recorded as a `select` step that `verify`
+  skips; UWP/WinUI, Win32/MFC and JavaFX are still fixtures only.
+
 ## 2026-11-18 — Roles and session lifecycle, recorded and replayed on a local fixture
 - A fixture application with two roles (`lab/labctl/tests/fixtures/roles/roles_app.py`): sign-in,
   a clerk and a supervisor, a page and a menu entry for the supervisor only (a clerk gets a

@@ -14,21 +14,21 @@ A desktop recording is a folder holding:
 A step: `{"seq", "ts", "surface": "desktop", "action", "process", "pid", "window": {"selector",
 "title", "props"}, "target": {"selector", "matches", "path", "candidates", "props", "index"},
 "selector", "via", "tree", "screenshot", "url": null, "dom": null}` plus, by action,
-`typed_shape`, `item`, `state`, `key`, `menu_path`, `focus_after`. `action` is one of `click`,
-`double_click`, `right_click`, `type`, `select`, `toggle`, `expand`, `collapse`, `menu`, `key`,
-`window_open`, `window_close`, `menu_open`, `focus`. `url` and `dom` are the web recorder's fields,
+`typed_shape`, `item`, `state`, `key`, `menu_path`, `focus_after`, `invoked`. `action` is one of
+`click`, `double_click`, `right_click`, `type`, `select`, `toggle`, `expand`, `collapse`, `menu`,
+`key`, `window_open`, `window_close`, `menu_open`, `focus`. `url` and `dom` are the web recorder's fields,
 kept empty, so desktop and web steps can share one timeline (`labctl.desktop.split.interleave`).
 
 How each action is seen (and where UI Automation events were not enough):
 
 | Action | Source |
 |---|---|
-| click, double_click, right_click | low-level mouse hook (WH_MOUSE_LL) on a thread of its own, then `ElementFromPoint`; dropped when a pattern event for the same control follows within 0.8 s |
-| click on a button by a pattern (a script, an accessibility tool) | `Invoke_Invoked` event, when the toolkit raises it |
-| type | `ValueProperty` change events (shape only, computed in the handler); also read once when focus leaves an edit control, for toolkits that raise no value events |
+| click, double_click, right_click | low-level mouse hook (WH_MOUSE_LL) on a thread of its own, then `ElementFromPoint` (the caption a WPF button, check box or menu item draws is taken as the control); dropped when a pattern event for the same control follows within 0.8 s |
+| click on a button by a pattern (a script, an accessibility tool) | `Invoke_Invoked` event, when the toolkit raises it; one that follows a key press within 0.4 s is what the key did (Enter on the default button) and is noted on the key step as `invoked` |
+| type | `ValueProperty` change events (shape only, computed in the handler); also read once when focus leaves an edit control, for toolkits that raise no value events; in a password field, a character key pressed while it has the focus (WPF's PasswordBox raises no value event; the key itself is not kept) |
 | select | `SelectionItem_ElementSelected` event |
 | toggle, expand, collapse | `ToggleState` / `ExpandCollapseState` property change events |
-| menu | `Invoke_Invoked` on a MenuItem; `menu_open` when a menu window appears (polled) |
+| menu | `Invoke_Invoked` on a MenuItem; `menu_open` when a menu window appears (polled; a WPF `Popup` window that holds menu items is one) |
 | key (Enter, Tab, Esc, F-keys, Delete, chords with Ctrl or Alt) | low-level keyboard hook; plain characters are never recorded |
 | window_open, window_close, focus (between windows) | polled every 250 ms (EnumWindows, GetForegroundWindow) |
 
@@ -54,6 +54,7 @@ from labctl.desktop import FORMAT, SURFACE, detect, locator, privacy, require
 DEBUG = bool(_os.environ.get("TWINLAB_DESKTOP_DEBUG"))
 SETTLE_S = 0.4
 CLICK_GRACE_S = 0.8
+KEY_GRACE_S = 0.4  # an Invoke event this soon after a key press is what the key did
 MAX_BATCH_S = 3.0
 POLL_S = 0.25
 NAMED_KEYS = {0x0D: "Enter", 0x09: "Tab", 0x1B: "Esc", 0x2E: "Delete", 0x21: "PageUp",
@@ -68,6 +69,20 @@ POPUP_CLASSES = (
     "WindowsForms10.Window.808.",
     "WindowsForms10.Window.20808.",
 )  # 808: tool strip drop-downs
+# Keys that put a character into a field (or take one out). Which key is never looked at
+# further: the hook only says "a key was typed", for password fields that raise no value event.
+TYPING_KEYS = {0x08, 0x20, 0xE7, *range(0x30, 0x3A), *range(0x41, 0x5B), *range(0x60, 0x70),
+               *range(0xBA, 0xC1), *range(0xDB, 0xE0), 0xE2}  # fmt: skip
+
+
+def popup_content(raw: dict | None) -> set[str]:
+    """What a WPF popup window holds: {"MenuItem"} for a menu's drop-down, {"ListItem"} for a
+    combo box's list. WPF shows both in a top-level window of its own whose window class is the
+    application's `HwndWrapper[...]` and whose UI Automation element is a Window of class
+    `Popup`, so neither the window class nor the control type says which it is."""
+    if not raw or raw.get("type") != "Window" or raw.get("cls") != "Popup":
+        return set()
+    return {n.get("type") for n, _a, _i in locator.walk(raw)} & {"MenuItem", "ListItem", "ToolTip"}
 
 
 def _now() -> str:
@@ -177,6 +192,9 @@ class _Hooks(threading.Thread):
                         if chord:
                             self.out.put({"kind": "key", "key": chord, "t": time.time(),
                                           "injected": bool(info.flags & 0x10)})  # fmt: skip
+                        elif info.vk in TYPING_KEYS:
+                            # Not which key: only that one was typed (see Recorder._typing).
+                            self.out.put({"kind": "typing", "t": time.time()})
             except Exception:  # noqa: BLE001
                 pass
             return user32.CallNextHookEx(None, code, wparam, lparam)
@@ -328,6 +346,10 @@ class Recorder:
                     value = None  # the value itself goes no further
                 elif prop == win.P_TOGGLE:
                     ev["kind"], ev["state"] = "toggle", win.TOGGLE.get(value)
+                    if ev["state"] is None:
+                        # WPF raises the event a second time with a value that is no toggle
+                        # state: the state is then read from the control.
+                        ev["state"] = win.toggle_state(sender)
                 elif prop == win.P_EXPAND:
                     ev["kind"], ev["state"] = "expand", win.EXPAND.get(value)
                 else:
@@ -379,7 +401,7 @@ class Recorder:
             if self.use_hooks:
 
                 def resolve(x, y, hwnd):
-                    el = win.element_from_point(x, y)
+                    el = win.click_target(win.element_from_point(x, y))
                     return el, win.describe_now(el, hwnd or 0)
 
                 hooks = _Hooks(self.q, lambda pid: pid in self.pids, resolve)
@@ -435,21 +457,24 @@ class Recorder:
         for hwnd in now:
             if hwnd in self.windows or hwnd in self.popups:
                 continue
-            el_type, cls = None, win.class_name(hwnd)
+            el_type, cls, holds = None, win.class_name(hwnd), set()
             if cls in win.IGNORED_CLASSES:
                 continue
             try:
-                el_type = win.CONTROL_TYPES.get(win.element_from_handle(hwnd).CurrentControlType)
+                el = win.element_from_handle(hwnd)
+                el_type = win.CONTROL_TYPES.get(el.CurrentControlType)
+                if el_type == "Window" and el.CurrentClassName == "Popup":
+                    holds = popup_content(win.capture(hwnd)) or {"Popup"}  # a WPF popup
             except Exception:  # noqa: BLE001
                 pass
             self._register(hwnd)
-            if el_type in POPUP_TYPES or cls.startswith(POPUP_CLASSES):
+            if el_type in POPUP_TYPES or cls.startswith(POPUP_CLASSES) or holds:
                 owner = self._owner_window(hwnd)
                 self.popups[hwnd] = owner
                 self.popup_owner[hwnd] = owner
-                if cls == "ComboLBox" or el_type == "List":
+                if cls == "ComboLBox" or el_type == "List" or "ListItem" in holds:
                     self._combo_list(hwnd)
-                if el_type == "Menu" or cls == "#32768" or "808" in cls:
+                if el_type == "Menu" or cls == "#32768" or "808" in cls or "MenuItem" in holds:
                     snap = self._snapshot(hwnd)
                     if snap is not None:
                         self.trees[hwnd] = snap
@@ -531,12 +556,12 @@ class Recorder:
                 )
             if kind in ("click", "double_click", "right_click"):
                 try:
-                    el = ev.get("el") or win.element_from_point(ev["x"], ev["y"])
+                    el = ev.get("el") or win.click_target(win.element_from_point(ev["x"], ev["y"]))
                     desc = win.describe(el)
-                    if not desc or desc.get("pid") not in self.pids:
-                        desc = ev.get(
-                            "quick"
-                        )  # gone already (the click closed it): what the hook saw
+                    if not desc or desc.get("pid") not in self.pids or not desc.get("window"):
+                        # Gone already (the click closed it), or no longer in any window (an
+                        # item of a WPF menu that closed): what the hook saw.
+                        desc = ev.get("quick") or desc
                 except Exception:  # noqa: BLE001
                     desc = None
                 if not desc or desc.get("pid") not in self.pids:
@@ -550,6 +575,8 @@ class Recorder:
                            "injected": ev.get("injected"), "hwnd": win.foreground()})  # fmt: skip
             elif kind == "value":
                 self._typed(ev)
+            elif kind == "typing":
+                self._typing(ev)
             elif kind == "focus":
                 self._focus(ev)
             elif kind in ("invoke", "select", "toggle", "expand"):
@@ -568,9 +595,18 @@ class Recorder:
                     and a.get("state") == state and ev["t"] - a["t"] < 0.6):  # fmt: skip
                 return
         # A mouse click on the same control a moment before was this action.
+        before = len(self.pending)
         self.pending = [a for a in self.pending if not (
             a.get("provisional") and a.get("desc") and self._same(a["desc"], desc)
             and 0 <= ev["t"] - a["t"] < CLICK_GRACE_S)]  # fmt: skip
+        if kind == "invoke" and len(self.pending) == before:
+            # No click on it: a key pressed a moment before did this (Enter presses the default
+            # button, Esc the cancel button, an access key its control; WPF raises Invoke for
+            # each). The key step is what the user did; it notes the control the key pressed.
+            for a in reversed(self.pending):
+                if a["kind"] == "key" and 0 <= ev["t"] - a["t"] < KEY_GRACE_S:
+                    a.setdefault("invoked_desc", desc)
+                    return
         base = {"desc": desc, "t": ev["t"], "raw_kind": kind, "state": state}
         if kind == "invoke":
             menu = desc.get("type") == "MenuItem"
@@ -595,6 +631,8 @@ class Recorder:
         for a in reversed(self.pending):
             if a["kind"] == "type" and a["desc"].get("rid") == desc.get("rid"):
                 a["shape"] = ev.get("shape")
+                if a.get("via") == "keyboard-hook":
+                    a["via"] = "uia-value-event"  # the toolkit does say it: the better source
                 self.last_activity = time.monotonic()
                 break
         else:
@@ -602,6 +640,23 @@ class Recorder:
                        "password": ev.get("password", False), "via": "uia-value-event"})  # fmt: skip
         if self.focus and self.focus.get("rid") == desc.get("rid"):
             self.typed_since_focus = True
+
+    def _typing(self, ev: dict) -> None:
+        """A character key was pressed. It matters only while a password field has the keyboard
+        focus: WPF's PasswordBox raises no value event and gives no value to compare when focus
+        leaves it, so the key press is the only sign that something was typed there. Nothing
+        about the key is kept, not even how many there were."""
+        desc = self.focus
+        if not desc or not desc.get("password"):
+            return
+        for a in reversed(self.pending):
+            if a["kind"] == "type" and a["desc"].get("rid") == desc.get("rid"):
+                self.last_activity = time.monotonic()
+                break
+        else:
+            self._add({"kind": "type", "desc": desc, "shape": None, "t": ev["t"],
+                       "password": True, "via": "keyboard-hook"})  # fmt: skip
+        self.typed_since_focus = True
 
     def _value_shape(self, rid: tuple) -> tuple[bool, str | None] | None:
         """The current value of the focused control, as (is_password, shape)."""
@@ -728,7 +783,9 @@ class Recorder:
         if not hwnd or win.window_pid(hwnd) not in self.pids:
             return None
         raw = win.capture(hwnd)
-        if raw is None:
+        if raw is None or not win.user32.IsWindowVisible(hwnd):
+            # Gone while it was read: a window that is closing gives a tree without its
+            # content (WPF takes the content away before the window itself goes).
             return None
         clean = privacy.clean(raw, self.known, self.structure)
         return raw, clean
@@ -859,6 +916,8 @@ class Recorder:
             step["key"] = a.get("key")
             if a.get("focus_desc"):
                 step["focus_after"] = self._locate(a["focus_desc"], [snap, before])["selector"]
+            if a.get("invoked_desc"):
+                step["invoked"] = self._locate(a["invoked_desc"], [before, snap])["selector"]
         elif kind == "menu" and desc:
             step["menu_path"] = self._menu_path(desc, [before, snap])
         tree_snap = snap if kind != "window_close" else None
@@ -866,6 +925,8 @@ class Recorder:
             tree_snap = a.get("snap") or self._snapshot(a["hwnd"])
             step["window"] = {k: self._window_info(a["owner"], self.trees.get(a["owner"])).get(k)
                               for k in ("selector", "title", "props")}  # fmt: skip
+            if step["window"].get("selector"):
+                self.last_window = dict(step["window"])  # the window the menu belongs to
         if tree_snap is not None:
             rel = f"trees/{seq:04d}.json"
             clean = json.loads(json.dumps(tree_snap[1]))
