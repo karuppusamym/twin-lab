@@ -67,9 +67,12 @@ TABLE: list[dict] = [
      "status": SUPPORTED, "test": f"{MULTI}::test_the_unsplit_recording_passes_within_declared_scope",
      "note": "an origin map sends each application's steps to its replica; no request reaches "
              "a source or an unmapped origin"},
-    {"id": "desktop-citrix", "capability": "Desktop, Citrix and other non-DOM applications",
+    {"id": "desktop-citrix", "capability": "Desktop and other non-DOM applications in web replay",
      "status": UNSUPPORTED, "test": f"{MODULE}::test_canvas_interaction_is_reported",
-     "note": "never advertised as covered by DOM replay"},
+     "note": "web DOM replay does not cover desktop applications; the desktop recorder "
+             "(`labctl desktop ...`, docs/09-desktop.md) covers WinForms, WPF, UWP and Win32 "
+             "through UI Automation and Java Swing through the Access Bridge. Citrix/RDP, "
+             "Delphi, Qt, VB6 and PowerBuilder are out of scope by decision"},
 ]  # fmt: skip
 
 

@@ -122,9 +122,9 @@ the shape of the web detection.
 | Java Swing / AWT | **recorded and verified live** through the Java Access Bridge (CaseDeskSwing) |
 | WPF, UWP / WinUI, Win32 / MFC | same UI Automation path; detection and model proven with fixtures only, not on a live app |
 | JavaFX | UI Automation (JavaFX is its own provider from 8u40); fixtures only |
-| Electron / CEF | detected; **use the web recorder** (`labctl evidence attach` to `--remote-debugging-port`) |
-| Delphi/VCL, Qt, VB6, PowerBuilder | detected and reported **not supported** |
-| Citrix / RDP / remote windows | detected: **no control tree — not supported by this recorder** (only pixels arrive) |
+| Electron / CEF | detected (fixtures only); **use the web recorder** (`labctl evidence attach` to `--remote-debugging-port`) |
+| Delphi/VCL, Qt, VB6, PowerBuilder | detected and reported **not supported** (out of scope by decision) |
+| Citrix / RDP / remote windows | detected: **no control tree — not supported by this recorder** (only pixels arrive; out of scope by decision) |
 
 **Java Access Bridge.** The JVM must load it: for every Java program of the user with
 `jabswitch -enable` (then restart the application; a person decides that, it changes their
@@ -194,4 +194,5 @@ on request: `TWINLAB_DESKTOP_GUI=1 python -m pytest -m desktop_gui`.
 - Window titles are masked by rule (digits, after `:`, words seen as data); a title that holds a
   name never seen elsewhere in the recording is kept.
 - WPF, UWP/WinUI, Win32/MFC and JavaFX run through the same UI Automation code but were not
-  recorded live here.
+  recorded live here; they, and the Electron hand-off, are tested on fixtures only. Proven live:
+  WinForms and Swing.
