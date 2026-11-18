@@ -280,6 +280,11 @@ DATA_PATTERNS = re.compile(
     r"|\d+[.,]\d+"  # decimals, amounts
 )
 WORD = re.compile(r"[^\W\d_]{2,}")
+# Words that join a sentence and are never a value: kept (written lower-case) in the text of an
+# element that holds a value, when it also says words of the interface (`Signed in as Xxx`).
+FUNCTION_WORDS = frozenset(
+    "a an and are as at be by for from in into is of on or the to was were with".split()
+)
 
 
 def _example_token(token: str) -> bool:
@@ -342,6 +347,9 @@ def interface_text(
     bare = [_bare(p) for p in parts]
     # (a word masked already, `Xxxx`, is not a name next to which another one would be)
     title = [bool(NAME_WORD.match(b)) and not re.fullmatch(r"X+x*", b) for b in bare]
+    # a holder that also says some of the interface's own words (`Signed in as Xxx`) keeps the
+    # words that join them; one that holds only a value keeps nothing
+    joins = holder and any(b.lower() in vocab for b in bare if WORD.search(b))
     out = []
     for i, part in enumerate(parts):
         if part.isspace() or not part:
@@ -356,7 +364,12 @@ def interface_text(
             seen = any(title[j] and bare[j].lower() in known for j in neighbours) or not any(
                 WORD.search(b) and b.lower() not in known for b in bare)  # fmt: skip
         if (
-            (holder and WORD.search(part) and low not in vocab)
+            (
+                holder
+                and WORD.search(part)
+                and low not in vocab
+                and not (joins and bare[i] in FUNCTION_WORDS)
+            )
             or seen
             or run
             or (low and low in vary)
@@ -428,6 +441,18 @@ DATA_NAME = re.compile(r"[a-z][a-z_.:-]{0,39}")
 def _has_name_word(value: str, known: set[str]) -> bool:
     """Whether a lower-case name holds a word the recording shows as a name (`data-who="smith"`)."""
     return any(w in known for w in re.split(r"[_.:-]+", value) if w)
+
+
+CODE_NAME = re.compile(r"[A-Za-z][A-Za-z_.:-]{0,39}")
+
+
+def code_words(*codes: str) -> set[str]:
+    """The words of the codes a page's own markup gives a choice (an option's `value`, the id a
+    label is `for`, a radio button's id or value): `in-progress` -> in, progress. Only codes
+    written as names (letters and separators, no digit): anything else could be a record's key.
+    A choice whose text only repeats these words is the application's code list (`Open` for
+    `value="open"`): the snapshot carries the code already, so the text tells nothing more."""
+    return name_words(*(c for c in codes if c and CODE_NAME.fullmatch(c)))
 
 
 def name_words(*names: str) -> set[str]:
@@ -557,6 +582,8 @@ class _Page(HTMLParser):
         self.open_text: list[dict] = []  # element whose kept text is being read
         self.select: dict | None = None
         self.option: list[str] | None = None
+        self.codes: dict[str, set[str]] = {}  # open option or label -> its code_words()
+        self.title_words: set[str] = set()  # words the (masked) <title> of this page kept
         self.markers: dict[str, str] = {}
         self.title = ""
         self.body_elements = 0
@@ -600,7 +627,7 @@ class _Page(HTMLParser):
                 # Only harmless metadata stays: tokens (csrf), user names and the like go.
                 value = value if kind_ in ("viewport", "generator", "content-type") else ""
             elif name in TEXT_ATTRS:
-                value = self._attr_text(value)
+                value = self._attr_text(value, tag)
             elif name == "style":
                 value = re.sub(r"url\([^)]*\)", "url(#)", value)  # no recorded addresses or tokens
             elif (name.startswith("data-") and not self.strict and DATA_NAME.fullmatch(value)
@@ -783,15 +810,23 @@ class _Page(HTMLParser):
             return "interface"
         return "interface"
 
-    def _attr_text(self, value: str) -> str:
+    def _attr_text(self, value: str, tag: str = "") -> str:
+        """A tooltip, `aria-label`, placeholder or `alt`. On a control it is that control's
+        label, read as one: a word the data also shows (`Open the help pages`) is masked only
+        next to another such word or when it is the whole text. Runs of Title-case words
+        (names) are masked everywhere."""
         if self.strict:
             return mask(value)
-        return interface_text(value, self.known, self.vocab)
+        label = tag in ("input", "select", "textarea", "button")
+        return interface_text(value, self.known, self.vocab, label=label)
 
     def _element(self, tag: str, a: dict[str, str]) -> None:
         kind = a.get("type", "").lower()
         if tag == "label":
             self.open_label.append({"for": a.get("for"), "text": [], "wraps": None})
+            self.codes["label"] = code_words(a.get("for") or "")
+        elif tag == "input" and kind in ("radio", "checkbox") and "label" in self.codes:
+            self.codes["label"] |= code_words(a.get("id") or "", a.get("value") or "")
         el = None
         if a.get("id") or (tag in INTERACTIVE and a.get("name") and kind != "hidden"):
             el = {"tag": tag, "id": a.get("id") or None, "name": a.get("name") or None,
@@ -801,7 +836,7 @@ class _Page(HTMLParser):
             if tag == "input" and kind in BUTTON_TYPES and a.get("value"):
                 el["label"] = a["value"]
             if el["label"]:  # the same masking as the attribute gets in the page itself
-                el["label"] = self._attr_text(el["label"])
+                el["label"] = self._attr_text(el["label"], tag)
             # What a form field accepts, from its own attributes (never what it held).
             if tag in ("input", "select", "textarea"):
                 rules = {k: a[k] for k in ("required", "min", "max", "minlength", "maxlength",
@@ -822,6 +857,7 @@ class _Page(HTMLParser):
             self.select = el or {"options": []}
         if tag == "option":
             self.option = []
+            self.codes["option"] = code_words(a.get("value") or "")
             # The code the option posts: kept only when it reads like a code (letters first, at
             # most two digits); anything else could be data and is masked.
             value = a.get("value")
@@ -960,6 +996,8 @@ class _Page(HTMLParser):
             text = " ".join("".join(self.open_text[-1]["text"]).split())
             if text and len(self.headings) < 6:
                 self.headings.append(text)
+        if tag in ("label", "option"):
+            self.codes.pop(tag, None)
         if tag == "label" and self.open_label:
             label = self.open_label.pop()
             text = " ".join("".join(label["text"]).split())
@@ -982,6 +1020,8 @@ class _Page(HTMLParser):
             text = " ".join("".join(item["text"]).split())
             if tag == "title" and not self.title:
                 self.title = text
+                # what the title says after masking, the page says already: see handle_data
+                self.title_words = {w for w in words(text) if not re.fullmatch(r"x+", w)}
             if item["el"] is not None and not item["el"]["label"]:
                 item["el"]["label"] = text or None
 
@@ -1013,7 +1053,13 @@ class _Page(HTMLParser):
             # options and messages: those change with what the app says, not with the data
             vary = set() if ctx == "message" or own in VOCAB_TAGS else self.vary.get(key, set())
             label = own in LABEL_TAGS or own in ("option", "optgroup")  # code lists are labels too
-            text = interface_text(data, self.known, self.vocab, vary, names=own not in LABEL_TAGS,
+            vocab = self.vocab
+            code = self.codes.get(own) if own in ("option", "label") else None
+            if code and words(data) and words(data) <= code | vocab:
+                vocab = vocab | code  # the choice's text repeats its own code: see code_words()
+            elif ctx == "holder" and self.title_words:
+                vocab = vocab | self.title_words  # the application's name, as the title has it
+            text = interface_text(data, self.known, vocab, vary, names=own not in LABEL_TAGS,
                                   holder=ctx == "holder", label=label)  # fmt: skip
             # the interface's own words: what such a place says, unless it reads like a name
             if (
@@ -1061,14 +1107,26 @@ class _Page(HTMLParser):
 
 def _style(css: str) -> str:
     """A style sheet as the application wrote it, without addresses (`url(...)`) and with the
-    text of `content:` strings masked (the one place CSS can carry words)."""
+    text of `content:` strings masked (the one place CSS can carry words; a string without a
+    word, such as an icon font's glyph, stays)."""
     css = re.sub(r"url\([^)]*\)", "url(#)", css)
     css = re.sub(r"@import\s+[^;]+;", "", css)
     return re.sub(
         r"(content\s*:\s*)(\"[^\"]*\"|'[^']*')",
-        lambda m: m.group(1) + mask(m.group(2)),
+        lambda m: m.group(1) + (m.group(2) if css_symbol(m.group(2)) else mask(m.group(2))),
         css,
         flags=re.IGNORECASE,
+    )
+
+
+CSS_ESCAPE = re.compile(r"\\[0-9a-fA-F]{1,6} ?|\\.")
+
+
+def css_symbol(string: str) -> bool:
+    """Whether a CSS string holds no word: only escapes (an icon font's glyph, a backslash and
+    its code point), punctuation, symbols or single letters. Such a string is kept as it is."""
+    return not WORD.search(CSS_ESCAPE.sub(" ", string)) and not re.search(
+        r"\d{3}", CSS_ESCAPE.sub(" ", string)
     )
 
 

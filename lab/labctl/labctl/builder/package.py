@@ -141,6 +141,10 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
             continue
         if isinstance(data, dict) and data.get("app") == app_id and not path.is_symlink():
             found[f"flows/{path.name}"] = path
+    # The look (labctl.lookfeel): style sheets, design tokens, rendered pictures, texts.
+    from labctl import lookfeel
+
+    found.update(lookfeel.package_files(repo_root, app_id))
     shots = repo_root / "evidence" / app_id / "screenshots"
     if shots.is_dir():
         for path in sorted(shots.rglob("*")):
@@ -843,6 +847,18 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         else ""
     )
     package_only = _package_only_text(app_id, app, engine, bool(step_files), db_var)
+    # The look (labctl.lookfeel): its own section, its files in the lists, its check.
+    from labctl import lookfeel
+
+    look_section = lookfeel.task_text(repo_root, app_id)
+    look_files = f", `{app}/look/**`" if look_section else ""
+    look_check = lookfeel.check_step(repo_root, app_id)
+    if look_check:
+        shots_text = (f" `{app}/look/screens/*.png` are pictures of the screens, rendered "
+                      "without data: your screens must match them (see *Same look*)."
+                      + (shots_text if shots else ""))  # fmt: skip
+        package_only = package_only.replace("exact text where the brief says.",
+                                            "exact text where the brief says." + look_check, 1)  # fmt: skip
     return f"""# Twin Lab build task: `{app_id}`
 
 You are a coding agent. Build the demo app `{app_id}` for Twin Lab from its build brief and hand
@@ -873,7 +889,7 @@ Keep **every recorded selector, element id, class, `name`, iframe and shadow-DOM
 exactly as the brief's screen tables and `{app}/pages/*.html` show them: automations find
 elements by these, and a changed id breaks them silently.
 
-## Database
+{look_section}## Database
 
 {database_section}
 
@@ -891,7 +907,7 @@ elements by these, and a changed id breaks them silently.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/pages/*.html` and `{app}/steps/*` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
@@ -936,7 +952,7 @@ later). Keep the exact result of each one for steps 5 and 6.
 {health_check} in
    the brief opens and shows its listed selectors; each route in the brief answers on its method
    and path; each rule in `{app}/app.yaml` behaves as written; nothing out of scope answers
-   (expect 404). Remove the containers and the network afterwards.
+   (expect 404).{look_check} Remove the containers and the network afterwards.
 {conformance_step}
 
 ## 5. Build notes
@@ -982,6 +998,14 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None) 
     _check_inputs(repo_root, app_id)
     task = prompt(repo_root, app_id, repo).encode("utf-8")
     files = _collect(repo_root, app_id)
+    from labctl import lookfeel  # refuses a look that holds data, or a picture it did not render
+
+    look_problems = lookfeel.package_check(repo_root, app_id)
+    if look_problems:
+        raise PackageError(
+            f"cannot package {app_id}: the look (apps/{app_id}/look) failed the privacy check: "
+            + "; ".join(look_problems[:10])
+        )
     entries: list[tuple[str, bytes]] = [(TASK_FILE, task)]
     entries += [(rel, _content(path)) for rel, path in files]
     listing = [
