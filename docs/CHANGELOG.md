@@ -2,6 +2,19 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-17 — First build by a Claude agent; replay of a person's recording
+- A Claude (Sonnet) agent built `loandesk`, a loan search on SQLite, from the build package
+  alone. What the trial showed is fixed here: the task names the database chosen for the demo
+  app (`lab.database`), not the real system's; it says the schema file is in the real system's
+  dialect and must be translated; it says what to do with an in-scope element that leads out
+  of scope; a failed Claude session shows its last message in the build status.
+- **Fidelity replay works on a recording a person made.** A masked record id
+  (`#loan-L-999999`) is matched to the first element of that shape; `--value 6:#field=text`
+  gives the value typed at one step; a field whose value was supplied is not compared by
+  format; a per-record element counts as the same when both pages have at least one.
+- Left open: the standalone `claude` command needs an account with credit; a step that lands
+  on an out-of-scope screen still shows as different.
+
 ## 2026-11-17 — Any coding agent builds; several apps in one recording; SQLite
 - **One recording, several applications.** `labctl evidence split <recording>` proposes the
   applications in a recording (by the site each step's page belongs to; sign-on pages are left

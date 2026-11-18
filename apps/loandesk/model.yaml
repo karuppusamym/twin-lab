@@ -1,0 +1,3427 @@
+app: loandesk
+evidence:
+- id: har:error-cases
+  kind: har
+  ref: sha256:c03e76f7d1f64327
+  complete: []
+- id: har:loan-search
+  kind: har
+  ref: sha256:5f5ebc23315b7a46
+  complete: []
+- id: har:qc-review
+  kind: har
+  ref: sha256:1f60e78e1626fee0
+  complete: []
+- id: har:review-return
+  kind: har
+  ref: sha256:00aef66de51ae037
+  complete: []
+- id: ddl:ddl.sql
+  kind: ddl
+  ref: sha256:409b77fa8f28b4f2
+  complete:
+  - tables
+- id: flow:loandesk-loan-search
+  kind: flow
+  ref: demo team
+  complete: []
+stack:
+  frontend:
+    framework: server-rendered
+    rendering: server
+    marker: pages arrive with their content; no client framework marker
+  pinned: {}
+  env: []
+  server:
+    technology: Python
+    marker: 'Server header: gunicorn/uvicorn'
+    confidence: likely
+    web_server:
+      name: gunicorn/uvicorn
+      marker: 'Server header: gunicorn/uvicorn'
+      confidence: likely
+  libraries:
+  - name: Bootstrap
+    marker: navbar-nav / btn-primary / col-md-* classes
+    confidence: guess
+    role: ui
+  detected:
+  - kind: web
+    name: gunicorn/uvicorn
+    marker: 'Server header: gunicorn/uvicorn'
+    confidence: likely
+  - kind: ui
+    name: Bootstrap
+    marker: navbar-nav / btn-primary / col-md-* classes
+    confidence: guess
+  from:
+  - har:error-cases
+screens:
+- basis: observed
+  from:
+  - har:error-cases
+  - har:loan-search
+  - har:qc-review
+  - har:review-return
+  - flow:loandesk-loan-search
+  name: login
+  aliases:
+  - Sign in
+  path: /login
+  files:
+  - apps/loandesk/pages/login.html
+  ids:
+  - appHeader
+  - appTitle
+  - btnLogin
+  - content
+  - loginError
+  - loginForm
+  - password
+  - username
+  classes:
+  - app-footer
+  - app-header
+  - app-sub
+  - app-title
+  - btn
+  - btn-primary
+  - card
+  - content
+  - login-card
+  - msg
+  - msg-error
+  - page-login
+  elements:
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: header#appHeader
+    actions: []
+    tag: header
+    classes:
+    - app-header
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: a#appTitle
+    actions: []
+    tag: a
+    classes:
+    - app-title
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: main#content
+    actions: []
+    tag: main
+    classes:
+    - content
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: form#loginForm
+    actions: []
+    tag: form
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: input#username
+    label: Xxxx ID
+    actions:
+    - type
+    tag: input
+    name: username
+    type: text
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: input#password
+    label: Xxxxxxxx
+    actions:
+    - type
+    tag: input
+    name: password
+    type: password
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: button#btnLogin
+    label: Xxxx in
+    actions:
+    - submit
+    tag: button
+    type: submit
+    classes:
+    - btn
+    - btn-primary
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    selector: div#loginError
+    actions: []
+    tag: div
+    classes:
+    - msg
+    - msg-error
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: User ID
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Password
+    actions: []
+    classes: []
+    options: []
+  calls:
+  - method: POST
+    path: /login
+  snapshots: 33
+- basis: observed
+  from:
+  - har:error-cases
+  - har:loan-search
+  - har:qc-review
+  - har:review-return
+  name: queue
+  aliases: []
+  path: /queue
+  files:
+  - apps/loandesk/pages/queue.html
+  ids:
+  - appHeader
+  - appTitle
+  - btnClearFilters
+  - btnFilter
+  - btnLogout
+  - content
+  - currentUser
+  - mainNav
+  - mineOnly
+  - navAdmin
+  - navLoans
+  - navQueue
+  - open-R-9999
+  - queueFilters
+  - queueTable
+  - resultCount
+  - reviewSearch
+  - statusFilter
+  classes:
+  - app-footer
+  - app-header
+  - app-sub
+  - app-title
+  - assignee
+  - badge
+  - borrower
+  - btn
+  - btn-link
+  - check
+  - content
+  - count
+  - due-date
+  - filters
+  - grid
+  - loan-no
+  - main-nav
+  - open-review
+  - page-queue
+  - product
+  - review-no
+  - review-row
+  - status
+  - status-approved
+  - status-in_progress
+  - status-open
+  - status-returned
+  - status-submitted
+  - user-box
+  elements:
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: header#appHeader
+    actions: []
+    tag: header
+    classes:
+    - app-header
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: a#appTitle
+    actions: []
+    tag: a
+    classes:
+    - app-title
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: nav#mainNav
+    actions: []
+    tag: nav
+    classes:
+    - main-nav
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: a#navQueue
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: a#navLoans
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: span#currentUser
+    actions: []
+    tag: span
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: a#btnLogout
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: main#content
+    actions: []
+    tag: main
+    classes:
+    - content
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: form#queueFilters
+    actions: []
+    tag: form
+    classes:
+    - filters
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: select#statusFilter
+    label: Status
+    actions:
+    - select
+    tag: select
+    name: status
+    classes: []
+    options:
+    - All
+    - OPEN
+    - IN_PROGRESS
+    - SUBMITTED
+    - RETURNED
+    - APPROVED
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: input#reviewSearch
+    label: R-9999, L-999999 or name
+    actions:
+    - type
+    tag: input
+    name: q
+    type: text
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: input#mineOnly
+    label: Xxxxxxxx to me
+    actions:
+    - click
+    tag: input
+    name: mine
+    type: checkbox
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: button#btnFilter
+    label: Apply
+    actions:
+    - submit
+    tag: button
+    type: submit
+    classes:
+    - btn
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: a#btnClearFilters
+    actions: []
+    tag: a
+    classes:
+    - btn
+    - btn-link
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: p#resultCount
+    actions: []
+    tag: p
+    classes:
+    - count
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: table#queueTable
+    actions: []
+    tag: table
+    classes:
+    - grid
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:loan-search
+    - har:qc-review
+    - har:review-return
+    selector: a#open-R-9999
+    actions:
+    - click
+    tag: a
+    classes:
+    - open-review
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:review-return
+    selector: a#navAdmin
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  calls: []
+  snapshots: 25
+- basis: observed
+  from:
+  - har:error-cases
+  - har:qc-review
+  - har:review-return
+  name: reviews-item
+  aliases: []
+  path: /reviews/{id}
+  files:
+  - apps/loandesk/pages/reviews-item.html
+  ids:
+  - analystActions
+  - appHeader
+  - appTitle
+  - assignee
+  - auditRows
+  - auditTable
+  - backToQueue
+  - borrowerName
+  - branch
+  - btnApprove
+  - btnLogout
+  - btnReopen
+  - btnReturn
+  - btnSubmit
+  - checklist
+  - closingDate
+  - comment-CMP-01
+  - comment-CMP-02
+  - comment-CMP-03
+  - comment-COL-01
+  - comment-COL-02
+  - comment-COL-03
+  - comment-CRD-01
+  - comment-CRD-02
+  - comment-CRD-03
+  - comment-INC-01
+  - comment-INC-02
+  - comment-INC-03
+  - content
+  - currentUser
+  - dueDate
+  - errorMessage
+  - errorTitle
+  - findings
+  - findingsCount
+  - item-CMP-01
+  - item-CMP-02
+  - item-CMP-03
+  - item-COL-01
+  - item-COL-02
+  - item-COL-03
+  - item-CRD-01
+  - item-CRD-02
+  - item-CRD-03
+  - item-INC-01
+  - item-INC-02
+  - item-INC-03
+  - itemStatus-CMP-01
+  - itemStatus-CMP-02
+  - itemStatus-CMP-03
+  - itemStatus-COL-01
+  - itemStatus-COL-02
+  - itemStatus-COL-03
+  - itemStatus-CRD-01
+  - itemStatus-CRD-02
+  - itemStatus-CRD-03
+  - itemStatus-INC-01
+  - itemStatus-INC-02
+  - itemStatus-INC-03
+  - loanAmount
+  - loanNo
+  - loanSummary
+  - lockNotice
+  - mainNav
+  - message
+  - navAdmin
+  - navLoans
+  - navQueue
+  - noFindings
+  - product
+  - progress
+  - result-CMP-01
+  - result-CMP-02
+  - result-CMP-03
+  - result-COL-01
+  - result-COL-02
+  - result-COL-03
+  - result-CRD-01
+  - result-CRD-02
+  - result-CRD-03
+  - result-INC-01
+  - result-INC-02
+  - result-INC-03
+  - returnNotice
+  - returnReason
+  - returnReasonText
+  - reviewNo
+  - reviewStatus
+  - reviewSummary
+  - reviewType
+  - reviewerPanel
+  - save-CMP-01
+  - save-CMP-02
+  - save-CMP-03
+  - save-COL-01
+  - save-COL-02
+  - save-COL-03
+  - save-CRD-01
+  - save-CRD-02
+  - save-CRD-03
+  - save-INC-01
+  - save-INC-02
+  - save-INC-03
+  classes:
+  - actions
+  - actor
+  - app-footer
+  - app-header
+  - app-sub
+  - app-title
+  - audit
+  - audit-row
+  - badge
+  - btn
+  - btn-danger
+  - btn-primary
+  - btn-save-item
+  - btn-small
+  - buttons
+  - card
+  - category
+  - category-row
+  - check-item
+  - checklist
+  - columns
+  - comment-input
+  - content
+  - count
+  - detail
+  - empty
+  - error
+  - event
+  - finding
+  - finding-comment
+  - findings
+  - grid
+  - guidance
+  - item-code
+  - item-desc
+  - item-status
+  - main-nav
+  - msg
+  - msg-error
+  - msg-ok
+  - notice
+  - notice-locked
+  - notice-returned
+  - ok
+  - page-error
+  - page-review
+  - required
+  - result-select
+  - status-approved
+  - status-in_progress
+  - status-open
+  - status-returned
+  - status-submitted
+  - summary
+  - title-row
+  - user-box
+  - when
+  elements:
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: header#appHeader
+    actions: []
+    tag: header
+    classes:
+    - app-header
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: a#appTitle
+    actions: []
+    tag: a
+    classes:
+    - app-title
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: main#content
+    actions: []
+    tag: main
+    classes:
+    - content
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    selector: h1#errorTitle
+    label: Xxx found
+    actions: []
+    tag: h1
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    selector: p#errorMessage
+    actions: []
+    tag: p
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    selector: a#backToQueue
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: nav#mainNav
+    actions: []
+    tag: nav
+    classes:
+    - main-nav
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: a#navQueue
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: a#navLoans
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#currentUser
+    actions: []
+    tag: span
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: a#btnLogout
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#reviewNo
+    actions: []
+    tag: span
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#reviewStatus
+    actions: []
+    tag: span
+    classes:
+    - badge
+    - status-open
+    - status-in_progress
+    - status-submitted
+    - status-approved
+    - status-returned
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: div#message
+    actions: []
+    tag: div
+    classes:
+    - msg
+    - msg-error
+    - msg-ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: div#lockNotice
+    actions: []
+    tag: div
+    classes:
+    - notice
+    - notice-locked
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: div#returnNotice
+    actions: []
+    tag: div
+    classes:
+    - notice
+    - notice-returned
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#returnReasonText
+    actions: []
+    tag: span
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: section#loanSummary
+    actions: []
+    tag: section
+    classes:
+    - card
+    - summary
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#loanNo
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#borrowerName
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#product
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#loanAmount
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#closingDate
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#branch
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: section#reviewSummary
+    actions: []
+    tag: section
+    classes:
+    - card
+    - summary
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#reviewType
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#assignee
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#dueDate
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: dd#progress
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: table#checklist
+    actions: []
+    tag: table
+    classes:
+    - grid
+    - checklist
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-CRD-01
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-CRD-01
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-CRD-01
+    label: Xxxxxxx required for Xxxx
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    - required
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-CRD-01
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-CRD-01
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - error
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-CRD-02
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-CRD-02
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-CRD-02
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-CRD-02
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-CRD-02
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-CRD-03
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-CRD-03
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-CRD-03
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    - required
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-CRD-03
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-CRD-03
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-INC-01
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-INC-01
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-INC-01
+    label: Xxxxxxx required for Xxxx
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    - required
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-INC-01
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-INC-01
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-INC-02
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-INC-02
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-INC-02
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    - required
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-INC-02
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-INC-02
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-INC-03
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-INC-03
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-INC-03
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-INC-03
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-INC-03
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-COL-01
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-COL-01
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-COL-01
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-COL-01
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-COL-01
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-COL-02
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-COL-02
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-COL-02
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    - required
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-COL-02
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-COL-02
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-COL-03
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-COL-03
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-COL-03
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-COL-03
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-COL-03
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-CMP-01
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-CMP-01
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-CMP-01
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    - required
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-CMP-01
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-CMP-01
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-CMP-02
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-CMP-02
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-CMP-02
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-CMP-02
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-CMP-02
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tr#item-CMP-03
+    actions: []
+    tag: tr
+    classes:
+    - check-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: select#result-CMP-03
+    actions:
+    - select
+    tag: select
+    name: result
+    classes:
+    - result-select
+    options:
+    - -- Select --
+    - Xxxx
+    - Xxxx
+    - N/A
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: input#comment-CMP-03
+    actions:
+    - type
+    tag: input
+    name: comment
+    type: text
+    classes:
+    - comment-input
+    - required
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#save-CMP-03
+    label: Save
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-small
+    - btn-save-item
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#itemStatus-CMP-03
+    actions: []
+    tag: span
+    classes:
+    - item-status
+    - ok
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: span#findingsCount
+    actions: []
+    tag: span
+    classes:
+    - count
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: ul#findings
+    actions: []
+    tag: ul
+    classes:
+    - findings
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: p#noFindings
+    actions: []
+    tag: p
+    classes:
+    - empty
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: section#analystActions
+    actions: []
+    tag: section
+    classes:
+    - card
+    - actions
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#btnSubmit
+    label: Submit for approval
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-primary
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: button#btnReopen
+    label: Reopen review
+    actions: []
+    tag: button
+    type: button
+    classes:
+    - btn
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: table#auditTable
+    actions: []
+    tag: table
+    classes:
+    - grid
+    - audit
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:qc-review
+    - har:review-return
+    selector: tbody#auditRows
+    actions: []
+    tag: tbody
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:review-return
+    selector: a#navAdmin
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:review-return
+    selector: section#reviewerPanel
+    actions: []
+    tag: section
+    classes:
+    - card
+    - actions
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:review-return
+    selector: textarea#returnReason
+    label: Xxxxxx for returning (at least 15 characters)
+    actions:
+    - type
+    tag: textarea
+    name: reason
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:review-return
+    selector: button#btnApprove
+    label: Approve
+    actions: []
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-primary
+    options: []
+  - basis: observed
+    from:
+    - har:error-cases
+    - har:review-return
+    selector: button#btnReturn
+    label: Xxxxxx with reason
+    actions:
+    - click
+    tag: button
+    type: button
+    classes:
+    - btn
+    - btn-danger
+    options: []
+  calls:
+  - method: POST
+    path: /api/reviews/{id}/submit
+  - method: PUT
+    path: /api/reviews/{id}/items/{id2}
+  - method: POST
+    path: /api/reviews/{id}/return
+  snapshots: 60
+- basis: observed
+  from:
+  - har:loan-search
+  - flow:loandesk-loan-search
+  name: loans
+  aliases:
+  - Loan search
+  path: /loans
+  files:
+  - apps/loandesk/pages/loans.html
+  ids:
+  - appHeader
+  - appTitle
+  - btnLogout
+  - btnSearch
+  - content
+  - currentUser
+  - loan-L-999999
+  - loanCount
+  - loanQuery
+  - loanResults
+  - loanSearchForm
+  - mainNav
+  - navLoans
+  - navQueue
+  - noResults
+  - searchHint
+  classes:
+  - amount
+  - app-footer
+  - app-header
+  - app-sub
+  - app-title
+  - borrower
+  - branch
+  - btn
+  - btn-primary
+  - closing-date
+  - content
+  - count
+  - empty
+  - filters
+  - grid
+  - hint
+  - loan-link
+  - loan-no
+  - loan-row
+  - main-nav
+  - page-loans
+  - product
+  - user-box
+  elements:
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: header#appHeader
+    actions: []
+    tag: header
+    classes:
+    - app-header
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#appTitle
+    actions: []
+    tag: a
+    classes:
+    - app-title
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: nav#mainNav
+    actions: []
+    tag: nav
+    classes:
+    - main-nav
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#navQueue
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#navLoans
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: span#currentUser
+    actions: []
+    tag: span
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#btnLogout
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: main#content
+    actions: []
+    tag: main
+    classes:
+    - content
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: form#loanSearchForm
+    actions: []
+    tag: form
+    classes:
+    - filters
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: input#loanQuery
+    label: L-999999 or Xxxx
+    actions:
+    - type
+    tag: input
+    name: q
+    type: text
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: button#btnSearch
+    label: Xxxxxx
+    actions:
+    - submit
+    tag: button
+    type: submit
+    classes:
+    - btn
+    - btn-primary
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: p#searchHint
+    actions: []
+    tag: p
+    classes:
+    - hint
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: p#loanCount
+    actions: []
+    tag: p
+    classes:
+    - count
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: table#loanResults
+    actions: []
+    tag: table
+    classes:
+    - grid
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#loan-L-999999
+    actions:
+    - click
+    tag: a
+    classes:
+    - loan-link
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: p#noResults
+    actions: []
+    tag: p
+    classes:
+    - empty
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Loan number or borrower name
+    actions: []
+    classes: []
+    options: []
+  calls: []
+  snapshots: 13
+- basis: observed
+  from:
+  - har:loan-search
+  - flow:loandesk-loan-search
+  name: loans-item
+  aliases:
+  - Loan detail
+  path: /loans/{id}
+  files:
+  - apps/loandesk/pages/loans-item.html
+  ids:
+  - appHeader
+  - appTitle
+  - backToSearch
+  - borrowerName
+  - branch
+  - btnLogout
+  - closingDate
+  - coBorrowerName
+  - content
+  - currentUser
+  - interestRate
+  - loanAmount
+  - loanDetail
+  - loanNo
+  - loanOfficer
+  - loanReviews
+  - mainNav
+  - navLoans
+  - navQueue
+  - noLoanReviews
+  - product
+  - propertyState
+  classes:
+  - app-footer
+  - app-header
+  - app-sub
+  - app-title
+  - btn
+  - btn-link
+  - card
+  - content
+  - empty
+  - grid
+  - main-nav
+  - page-loan
+  - summary
+  - title-row
+  - user-box
+  elements:
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: header#appHeader
+    actions: []
+    tag: header
+    classes:
+    - app-header
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#appTitle
+    actions: []
+    tag: a
+    classes:
+    - app-title
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: nav#mainNav
+    actions: []
+    tag: nav
+    classes:
+    - main-nav
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#navQueue
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#navLoans
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: span#currentUser
+    actions: []
+    tag: span
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#btnLogout
+    actions: []
+    tag: a
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: main#content
+    actions: []
+    tag: main
+    classes:
+    - content
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: span#loanNo
+    actions: []
+    tag: span
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: a#backToSearch
+    actions:
+    - click
+    tag: a
+    classes:
+    - btn
+    - btn-link
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: section#loanDetail
+    actions: []
+    tag: section
+    classes:
+    - card
+    - summary
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#borrowerName
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#coBorrowerName
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#product
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#loanAmount
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#interestRate
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#closingDate
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#branch
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#loanOfficer
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: dd#propertyState
+    actions: []
+    tag: dd
+    classes: []
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: table#loanReviews
+    actions: []
+    tag: table
+    classes:
+    - grid
+    options: []
+  - basis: observed
+    from:
+    - har:loan-search
+    selector: tr#noLoanReviews
+    actions: []
+    tag: tr
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Borrower
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Co-borrower
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Product
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Amount
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Interest rate
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Closing date
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Branch
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Loan officer
+    actions: []
+    classes: []
+    options: []
+  - basis: described
+    from:
+    - flow:loandesk-loan-search
+    label: Property state
+    actions: []
+    classes: []
+    options: []
+  calls: []
+  snapshots: 2
+routes:
+- basis: observed
+  from:
+  - har:error-cases
+  - har:loan-search
+  - har:qc-review
+  - har:review-return
+  method: GET
+  path: /login
+  query: []
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 4
+    p50_ms: 2
+    p95_ms: 5
+    max_ms: 5
+- basis: observed
+  from:
+  - har:error-cases
+  - har:loan-search
+  - har:qc-review
+  - har:review-return
+  method: POST
+  path: /login
+  query: []
+  body:
+  - 'next: string'
+  - 'username: string'
+  - 'password: string'
+  tables: []
+  responses:
+    '303':
+      (content): x-unknown
+    '401':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 3
+    p50_ms: 28
+    p95_ms: 55
+    max_ms: 55
+- basis: observed
+  from:
+  - har:error-cases
+  - har:loan-search
+  - har:qc-review
+  - har:review-return
+  method: GET
+  path: /queue
+  query:
+  - status
+  - q
+  - mine
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 2
+    p50_ms: 7
+    p95_ms: 7
+    max_ms: 7
+- basis: observed
+  from:
+  - har:error-cases
+  - har:qc-review
+  - har:review-return
+  method: GET
+  path: /reviews/{id}
+  query: []
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+    '404':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 4
+    p50_ms: 6
+    p95_ms: 13
+    max_ms: 13
+- basis: observed
+  from:
+  - har:error-cases
+  - har:qc-review
+  method: POST
+  path: /api/reviews/{id}/submit
+  query: []
+  body: []
+  tables: []
+  responses:
+    '422':
+      detail:
+        code: string
+        message: string
+  sends: []
+  reads: []
+  timings:
+    count: 2
+    p50_ms: 5
+    p95_ms: 5
+    max_ms: 5
+- basis: observed
+  from:
+  - har:error-cases
+  - har:qc-review
+  method: PUT
+  path: /api/reviews/{id}/items/{id2}
+  query: []
+  body:
+  - 'result: string'
+  - 'comment: string'
+  tables: []
+  responses:
+    '200':
+      review_no: string
+      loan_no: string
+      borrower_name: string
+      product_code: string
+      product: string
+      review_type: string
+      status: string
+      due_date: string(date)
+      assignee: string
+      assignee_name: string
+      reviewer: 'null'
+      created_at: string(date-time)
+      updated_at: string(date-time)
+      submitted_at: 'null'
+      approved_at: 'null'
+      return_reason: 'null'
+      loan:
+        loan_no: string
+        borrower_name: string
+        co_borrower_name: 'null'
+        product_code: string
+        product: string
+        loan_amount: number
+        interest_rate: number
+        closing_date: string(date)
+        branch_code: string
+        branch_name: string
+        loan_officer: string
+        property_state: string
+      items:
+        '[]':
+          item_id: string
+          category: string
+          description: string
+          guidance: null|string
+          result: null|string
+          comment: null|string
+          updated_by: null|string
+          updated_at: null|string(date-time)
+      findings:
+        '[]':
+          item_id: string
+          category: string
+          description: string
+          comment: string
+      progress:
+        answered: integer
+        total: integer
+      audit:
+        '[]':
+          event: string
+          from_status: null|string
+          to_status: null|string
+          actor: string
+          detail: null|string
+          created_at: string(date-time)
+      locked: boolean
+      allowed:
+        edit_items: boolean
+        submit: boolean
+        reopen: boolean
+        approve: boolean
+        return: boolean
+    '422':
+      detail:
+        code: string
+        message: string
+  sends: []
+  reads: []
+  timings:
+    count: 2
+    p50_ms: 8
+    p95_ms: 8
+    max_ms: 8
+- basis: observed
+  from:
+  - har:error-cases
+  - har:review-return
+  method: POST
+  path: /api/reviews/{id}/return
+  query: []
+  body:
+  - 'reason: string'
+  tables: []
+  responses:
+    '422':
+      detail:
+        code: string
+        message: string
+  sends: []
+  reads: []
+  timings:
+    count: 1
+    p50_ms: 5
+    p95_ms: 5
+    max_ms: 5
+- basis: observed
+  from:
+  - har:loan-search
+  method: GET
+  path: /loans
+  query:
+  - q
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 5
+    p50_ms: 4
+    p95_ms: 17
+    max_ms: 17
+- basis: observed
+  from:
+  - har:loan-search
+  method: GET
+  path: /loans/{id}
+  query: []
+  body: []
+  tables: []
+  responses:
+    '200':
+      (content): text/html
+  sends: []
+  reads: []
+  timings:
+    count: 1
+    p50_ms: 16
+    p95_ms: 16
+    max_ms: 16
+tables:
+- basis: assumed
+  from:
+  - har:error-cases
+  - har:loan-search
+  - har:qc-review
+  - har:review-return
+  name: queue
+  columns:
+  - name: status
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: due_date
+    type: DATE
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: assignee
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: review_search
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: mine
+    type: BOOLEAN
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: product
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: assigned_to_me
+    type: BOOLEAN
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: assumed
+  from:
+  - har:loan-search
+  name: loan
+  columns:
+  - name: product
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: amount
+    type: NUMERIC
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: closing_date
+    type: DATE
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: branch
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: assumed
+  from:
+  - har:qc-review
+  - har:review-return
+  name: check
+  columns:
+  - name: check
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: result
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: assumed
+  from:
+  - har:qc-review
+  - har:review-return
+  name: audit
+  columns:
+  - name: when
+    type: TIMESTAMP
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: event
+    type: TEXT
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: declared
+  from:
+  - ddl:ddl.sql
+  name: users
+  columns:
+  - name: user_id
+    type: INTEGER
+    nullable: false
+    primary_key: true
+    unique: false
+    index: false
+    autoincrement: true
+  - name: username
+    type: VARCHAR(50)
+    nullable: false
+    primary_key: false
+    unique: true
+    index: false
+    autoincrement: false
+  - name: full_name
+    type: VARCHAR(100)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: email
+    type: VARCHAR(254)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: role
+    type: VARCHAR(20)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: password_hash
+    type: VARCHAR(200)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: is_active
+    type: BOOLEAN
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: created_at
+    type: TIMESTAMP
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: declared
+  from:
+  - ddl:ddl.sql
+  name: loans
+  columns:
+  - name: loan_id
+    type: INTEGER
+    nullable: false
+    primary_key: true
+    unique: false
+    index: false
+    autoincrement: true
+  - name: loan_no
+    type: VARCHAR(20)
+    nullable: false
+    primary_key: false
+    unique: true
+    index: false
+    autoincrement: false
+  - name: borrower_name
+    type: VARCHAR(120)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: co_borrower_name
+    type: VARCHAR(120)
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: product_code
+    type: VARCHAR(10)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: loan_amount
+    type: NUMERIC(12,2)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: interest_rate
+    type: NUMERIC(6,3)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: closing_date
+    type: DATE
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: branch_code
+    type: VARCHAR(10)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: branch_name
+    type: VARCHAR(80)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: loan_officer
+    type: VARCHAR(100)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: property_state
+    type: VARCHAR(2)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: created_at
+    type: TIMESTAMP
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: declared
+  from:
+  - ddl:ddl.sql
+  name: qc_reviews
+  columns:
+  - name: review_id
+    type: INTEGER
+    nullable: false
+    primary_key: true
+    unique: false
+    index: false
+    autoincrement: true
+  - name: review_no
+    type: VARCHAR(20)
+    nullable: false
+    primary_key: false
+    unique: true
+    index: false
+    autoincrement: false
+  - name: loan_id
+    type: INTEGER
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    references:
+    - loans
+    - loan_id
+    autoincrement: false
+  - name: review_type
+    type: VARCHAR(40)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: status
+    type: VARCHAR(20)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: true
+    autoincrement: false
+  - name: assigned_to
+    type: INTEGER
+    nullable: true
+    primary_key: false
+    unique: false
+    index: true
+    references:
+    - users
+    - user_id
+    autoincrement: false
+  - name: reviewer_id
+    type: INTEGER
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    references:
+    - users
+    - user_id
+    autoincrement: false
+  - name: due_date
+    type: DATE
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: return_reason
+    type: VARCHAR(500)
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: submitted_at
+    type: TIMESTAMP
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: approved_at
+    type: TIMESTAMP
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: created_at
+    type: TIMESTAMP
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: updated_at
+    type: TIMESTAMP
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: declared
+  from:
+  - ddl:ddl.sql
+  name: checklist_items
+  columns:
+  - name: checklist_item_id
+    type: INTEGER
+    nullable: false
+    primary_key: true
+    unique: false
+    index: false
+    autoincrement: true
+  - name: item_code
+    type: VARCHAR(10)
+    nullable: false
+    primary_key: false
+    unique: true
+    index: false
+    autoincrement: false
+  - name: category
+    type: VARCHAR(20)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: description
+    type: VARCHAR(200)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: guidance
+    type: VARCHAR(500)
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: sort_order
+    type: INTEGER
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: is_active
+    type: BOOLEAN
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: declared
+  from:
+  - ddl:ddl.sql
+  name: review_items
+  columns:
+  - name: review_item_id
+    type: INTEGER
+    nullable: false
+    primary_key: true
+    unique: false
+    index: false
+    autoincrement: true
+  - name: review_id
+    type: INTEGER
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    references:
+    - qc_reviews
+    - review_id
+    autoincrement: false
+  - name: checklist_item_id
+    type: INTEGER
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    references:
+    - checklist_items
+    - checklist_item_id
+    autoincrement: false
+  - name: result
+    type: VARCHAR(4)
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: comment
+    type: VARCHAR(500)
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: updated_by
+    type: INTEGER
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    references:
+    - users
+    - user_id
+    autoincrement: false
+  - name: updated_at
+    type: TIMESTAMP
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+- basis: declared
+  from:
+  - ddl:ddl.sql
+  name: review_audit
+  columns:
+  - name: audit_id
+    type: BIGINT
+    nullable: false
+    primary_key: true
+    unique: false
+    index: false
+    autoincrement: true
+  - name: review_id
+    type: INTEGER
+    nullable: false
+    primary_key: false
+    unique: false
+    index: true
+    references:
+    - qc_reviews
+    - review_id
+    autoincrement: false
+  - name: event
+    type: VARCHAR(30)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: from_status
+    type: VARCHAR(20)
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: to_status
+    type: VARCHAR(20)
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: actor
+    type: VARCHAR(50)
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: detail
+    type: VARCHAR(500)
+    nullable: true
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+  - name: created_at
+    type: TIMESTAMP
+    nullable: false
+    primary_key: false
+    unique: false
+    index: false
+    autoincrement: false
+rules:
+- basis: observed
+  from:
+  - har:error-cases
+  text: '422 ITEMS_INCOMPLETE: 12 checklist item(s) have no result: XXX-99, XXX-99, XXX-99, XXX-99, XXX-99,
+    XXX-99, XXX-99, XXX-99, XXX-99, XXX-99, XXX-99, XXX-99.'
+  where:
+  - POST /api/reviews/{id}/submit
+  status: 422
+  code: ITEMS_INCOMPLETE
+- basis: observed
+  from:
+  - har:error-cases
+  text: '422 COMMENT_REQUIRED: A comment is required when the result is Xxxx.'
+  where:
+  - PUT /api/reviews/{id}/items/{id2}
+  status: 422
+  code: COMMENT_REQUIRED
+- basis: observed
+  from:
+  - har:error-cases
+  text: '422 ITEMS_INCOMPLETE: 11 checklist item(s) have no result: XXX-99, XXX-99, XXX-99, XXX-99, XXX-99,
+    XXX-99, XXX-99, XXX-99, XXX-99, XXX-99, XXX-99.'
+  where:
+  - POST /api/reviews/{id}/submit
+  status: 422
+  code: ITEMS_INCOMPLETE
+- basis: observed
+  from:
+  - har:error-cases
+  text: '422 RETURN_REASON_REQUIRED: A reason of at least 15 characters is required to return a review.'
+  where:
+  - POST /api/reviews/{id}/return
+  status: 422
+  code: RETURN_REASON_REQUIRED
+- basis: described
+  from:
+  - flow:loandesk-loan-search
+  text: Search matches part of the loan number or the borrower name, ignoring case
+  where:
+  - Loan search
+- basis: described
+  from:
+  - flow:loandesk-loan-search
+  text: At most 50 loans are listed
+  where:
+  - Loan search
+- basis: described
+  from:
+  - flow:loandesk-loan-search
+  text: When nothing matches, the page says no loans match
+  where:
+  - Loan search
+- basis: described
+  from:
+  - flow:loandesk-loan-search
+  text: An unknown loan number shows a not-found page
+  where:
+  - Loan detail
+flows:
+- loandesk-loan-search
+codes:
+  queue.status:
+  - APPROVED
+  - IN_PROGRESS
+  - OPEN
+  - RETURNED
+  - SUBMITTED
+conflicts: []
+problems:
+- 'ddl: line 152: review_items: unique key on (review_id, checklist_item_id) is not checked (only single-column
+  unique keys are)'

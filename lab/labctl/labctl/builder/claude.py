@@ -240,9 +240,21 @@ def run_job(job_file: Path) -> Job:
             _publish(job)
     else:
         job.state = "failed"
-        job.last_error = job.last_error or f"claude exited with code {job.exit_code}; see the log"
+        job.last_error = job.last_error or (
+            f"claude exited with code {job.exit_code}{_last_log_line(job)}; see the log"
+        )
     job.finished_at = now()
     return save(job)
+
+
+def _last_log_line(job: Job) -> str:
+    """What the session last said (such as a sign-in or credit message), for the error line."""
+    try:
+        lines = Path(job.log_path or "").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    said = [x.strip() for x in lines if x.strip() and not x.startswith("# twinlab build")]
+    return f": {said[-1][:200]}" if said else ""
 
 
 def _publish(job: Job) -> None:
