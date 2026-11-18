@@ -1,0 +1,44 @@
+id: loandesk
+name: Loan Desk (demo copy)
+mode: reconstruction
+copies:
+  system: Loan Desk
+  source: null
+  ref: sha256:455b1e03d138e44c
+  analysed: '2026-11-17'
+stack:
+  db:
+    engine: postgres
+  frontend:
+    framework: server-rendered
+    marker: pages arrive with their content; no client framework marker
+run: {}
+db:
+  schema: db/schema.sql
+  derived_from:
+  - ddl:ddl.sql
+built_for:
+- loandesk-loan-search
+rules:
+- id: R1
+  where: Loan search
+  rule: Search matches part of the loan number or the borrower name, ignoring case
+  verification: hypothesis
+- id: R2
+  where: Loan search
+  rule: At most 50 loans are listed
+  verification: hypothesis
+- id: R3
+  where: Loan search
+  rule: When nothing matches, the page says no loans match
+  verification: hypothesis
+- id: R4
+  where: Loan detail
+  rule: An unknown loan number shows a not-found page
+  verification: hypothesis
+lab:
+  port: 8731
+  database: sqlite
+  credentials:
+    username: analyst1
+    password: Qtt-Sample-2026

@@ -1,0 +1,49 @@
+<!-- /loans: value-free snapshot from har:loan-search. Structure, ids, classes and the application's own labels are real; every other text and value is masked (letters x/X, digits 9). -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="application-name" content="">
+  <title>Xxxx search - Xxxxxxx Xxxxxxxx Xxxx</title>
+  <link rel="stylesheet" href="/static/qtt.css?v=">
+</head>
+<body class="page-loans">
+  <header id="appHeader" class="app-header">
+    <a id="appTitle" class="app-title" href="/queue">XXX <span class="app-sub">Xxxxxxx Xxxxxxxx Xxxx</span></a>
+    
+    <nav id="mainNav" class="main-nav">
+      <a id="navQueue" href="/queue">Xxxx xxxxx</a>
+      <a id="navLoans" href="/loans">Xxxx xxxxxx</a>
+      
+    </nav>
+    <div class="user-box">
+      <span id="currentUser" data-username="xxxxxxx9" data-role="XXXXXXX">Xxxxx Xxxx (Xxxxxxx)</span>
+      <a id="btnLogout" href="/logout">Xxxx xxx</a>
+    </div>
+    
+  </header>
+  <main id="content" class="content">
+    
+<h1>Xxxx search</h1>
+<form id="loanSearchForm" class="filters" method="get" action="/loans">
+  <label for="loanQuery">Xxxx number or borrower name</label>
+  <input id="loanQuery" name="q" type="text" value="xx xxxx xxxxxxxx" placeholder="L-999999 or Xxxx">
+  <button id="btnSearch" type="submit" class="btn btn-primary">Xxxxxx</button>
+</form>
+
+<p id="loanCount" class="count">9 xxxx(x)</p>
+<table id="loanResults" class="grid">
+  <thead><tr><th>Xxxx no</th><th>Xxxxxxxx</th><th>Product</th><th>Amount</th><th>Closing date</th><th>Branch</th></tr></thead>
+  <tbody>
+    
+  </tbody>
+</table>
+<p id="noResults" class="empty">Xx xxxxx xxxxx "xx xxxx xxxxxxxx".</p>
+
+
+  </main>
+  <footer class="app-footer">XXX 9.9.9 · xxxxxxxxx xxxxxx xxxx</footer>
+  
+</body>
+</html>

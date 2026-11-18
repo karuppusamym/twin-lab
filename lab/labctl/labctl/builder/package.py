@@ -489,7 +489,13 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         str(a) for a in conf.get("built_for") or []
         if (repo_root / "automations" / str(a) / "automation.yaml").is_file()
     ]  # fmt: skip
-    engine = ((conf.get("stack") or {}).get("db") or {}).get("engine") or "postgres"
+    # The database the demo app will run on is the lab's choice; the real system's engine
+    # (`stack.db`) only matters when the lab names none.
+    engine = (
+        (conf.get("lab") or {}).get("database")
+        or ((conf.get("stack") or {}).get("db") or {}).get("engine")
+        or "postgres"
+    )
     db_var, port, health = _run_env(conf)
     db_var = db_var or "DATABASE_URL"  # the lab's convention when the evidence names none
     port_text = str(port) if port else "<container port>"
@@ -626,7 +632,10 @@ brief lists.
 ## 3. Build
 
 1. Build only what the brief puts in scope. Nothing under "Out of scope" is built, linked or
-   stubbed.
+   stubbed. Where an in-scope screen has an element that leads out of scope (a menu link, or the
+   page the real app opens after sign-in), keep the element with its id and classes, because
+   automations look for it, but send it to the first in-scope screen instead, and list each one
+   in `BUILD-NOTES.md`.
 2. Files go under `{app}/`: the Dockerfile, the application code and `BUILD-NOTES.md`.
    Write only under `{app}/`. Do not change any file outside it.
 3. Never edit `{app}/BRIEF.md` or `{app}/db/schema.sql`, and never edit a check (a test, an
@@ -642,7 +651,10 @@ brief lists.
 6. Database objects: create tables from `{app}/db/schema.sql` when the database has none (the lab
    may have created them already: then leave them). A view in the schema is a **table** in the
    demo database, with sample rows; read it like a table. Stored procedures, functions and
-   triggers are not created; the brief says which the real app has.{enhance_rule}
+   triggers are not created; the brief says which the real app has. `schema.sql` is written in
+   the real system's SQL dialect, which can differ from the demo database's engine: when you
+   create the tables yourself, translate types and identity columns to that engine; do not run
+   the file unchanged.{enhance_rule}
 
 ## 4. Check
 
@@ -650,7 +662,7 @@ Run every command from the repository root, after `pip install -e ".[dev]"` (Pyt
 later). Keep the exact result of each one for steps 5 and 6.
 
 1. `python -m pytest -q`
-2. `python -m labctl validate`
+2. `python -m labctl validate` (if `labctl` is not installed, run it from `lab/labctl`)
 3. `docker build -t twinlab/{app_id}:dev {app}`
 4. Run the container against a real database of the brief's engine, as
    `docs/factory-playbook.md` describes. For example (throwaway local values, not secrets):

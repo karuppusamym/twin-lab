@@ -103,17 +103,38 @@ def latest(root: Path, app_id: str) -> tuple[str, FidelityReport] | None:
     return None
 
 
-def compare_dom(expected_html: str, actual_html: str, step: int = 0) -> list[Difference]:
-    """Differences between a recorded after-snapshot and a live one, each naming the element."""
+def _data_row(sig: str) -> bool:
+    """An element repeated once per record: its id holds a masked value (`loan-L-999999`). How
+    many there are depends on the data, which a demo app never shares with the real one."""
+    return "#" in sig and "9" in sig.split("#", 1)[1].split(".")[0]
+
+
+def compare_dom(
+    expected_html: str,
+    actual_html: str,
+    step: int = 0,
+    supplied: frozenset[str] | set[str] = frozenset(),
+) -> list[Difference]:
+    """Differences between a recorded after-snapshot and a live one, each naming the element.
+
+    A per-record element counts as the same when both pages have at least one. `supplied` names
+    the fields (element keys) whose value a person typed for the replay: their value format says
+    nothing about the app, so it is not compared.
+    """
     exp, act = domlib.snapshot(expected_html), domlib.snapshot(actual_html)
     diffs: list[Difference] = []
     ce, ca = Counter(exp.signatures), Counter(act.signatures)
     missing = ce - ca
-    for sig in missing:
+    for sig in list(missing):
+        if _data_row(sig) and ca[sig]:
+            del missing[sig]
+            continue
         diffs.append(
             Difference(step=step, element=sig, check="missing", expected=ce[sig], actual=ca[sig])
         )
     for sig in ca - ce:
+        if _data_row(sig) and ce[sig]:
+            continue
         diffs.append(
             Difference(step=step, element=sig, check="extra", expected=ce[sig], actual=ca[sig])
         )
@@ -142,7 +163,7 @@ def compare_dom(expected_html: str, actual_html: str, step: int = 0) -> list[Dif
                     step=step, element=key, check="options", expected=e.options, actual=a.options
                 )
             )
-        if e.tag in domlib.FORM_TAGS and e.value is not None:
+        if e.tag in domlib.FORM_TAGS and e.value is not None and key not in supplied:
             es, as_ = domlib.shape(e.value), domlib.shape(a.value)
             if es != as_:
                 diffs.append(
@@ -210,12 +231,14 @@ def replay(
 ) -> FidelityReport:
     """Replay the recording's steps with Playwright and compare each step's after-snapshot.
 
-    `values` supplies typed values by selector, for fields recorded without one (passwords).
+    `values` supplies typed values by selector, for fields recorded without one (a recording
+    keeps no typed value). `"6:#loanQuery"` gives the value for step 6 only.
     """
     from playwright.sync_api import sync_playwright
 
     rec = recording if isinstance(recording, Recording) else load_recording(Path(recording))
     values = values or {}
+    supplied = {k for k in (domlib.key_of(_selector_of(name)) for name in values) if k is not None}
     reports: list[StepReport] = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
@@ -255,7 +278,9 @@ def replay(
                     report.status = "skipped"
                     report.note = "no recorded snapshot for this step"
                     continue
-                report.differences = compare_dom(expected, domlib.page_html(page), step.seq)
+                report.differences = compare_dom(
+                    expected, domlib.page_html(page), step.seq, supplied
+                )
                 if report.differences:
                     report.status = "fail"
                     if stop_on_fail:
@@ -279,20 +304,57 @@ def _recorded_value(rec: Recording, step) -> str | None:
     return el.selected if el.tag == "select" else el.value
 
 
+def _selector_of(name: str) -> str:
+    """The selector of a `values` key: `"6:#loanQuery"` -> `"#loanQuery"`."""
+    head, sep, rest = name.partition(":")
+    return rest if sep and head.isdigit() else name
+
+
+def _value_for(rec: Recording, step, values: dict[str, str]) -> str | None:
+    for key in (f"{step.seq}:{step.selector}", step.selector):
+        if key in values:
+            return values[key]
+    return _recorded_value(rec, step)
+
+
+_UNMASK_JS = """masked => {
+  const el = [...document.querySelectorAll('[id]')].find(
+    e => e.id.replace(/[0-9]/g, '9') === masked);
+  return el ? el.id : null;
+}"""
+
+
+def _unmasked(page, selector: str | None) -> str | None:
+    """A recording masks record ids (`#loan-L-200040` is kept as `#loan-L-999999`). When no
+    element has the masked id, the first element whose id has that shape stands for it."""
+    if not selector or not selector.startswith("#") or "9" not in selector:
+        return None
+    if any(c in selector for c in " >+~[.:,"):
+        return None
+    try:
+        if page.locator(selector).count():
+            return None
+        real = page.evaluate(_UNMASK_JS, selector[1:])
+    except Exception:  # noqa: BLE001 - the plain selector is tried next and reports the failure
+        return None
+    return f'[id="{real}"]' if real else None
+
+
 def _act(page, rec: Recording, step, base_url: str | None, values: dict[str, str]) -> None:
     if step.action == "goto":
         page.goto(_rebase(step.url, base_url))
         return
     from labctl.locate import locate
 
-    loc = locate(page, step.selector).first  # into frames; open shadow roots need nothing
+    selector = _unmasked(page, step.selector) or step.selector
+    loc = locate(page, selector).first  # into frames; open shadow roots need nothing
     if step.action == "type":
-        value = values.get(step.selector) if step.selector in values else _recorded_value(rec, step)
+        value = _value_for(rec, step, values)
         if value is None:
             raise ValueError(f"no value for {step.selector}; pass it in `values`")
         loc.fill(value, timeout=10000)
     elif step.action == "select":
-        value = values.get(step.selector) if step.selector in values else _recorded_value(rec, step)
+        value = _value_for(rec, step, values)
         try:
             loc.select_option(label=value, timeout=10000)
         except Exception:  # noqa: BLE001 - recorded as text; fall back to the option value

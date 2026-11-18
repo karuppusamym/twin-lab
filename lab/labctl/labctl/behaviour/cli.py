@@ -51,7 +51,9 @@ def fidelity(
         None, "--base-url", help="the demo app (default: as recorded)"
     ),
     value: list[str] = typer.Option(
-        [], "--value", help="selector=value for unrecorded typed values"
+        [],
+        "--value",
+        help="selector=value for unrecorded typed values; 6:selector=value for step 6 only",
     ),
     headed: bool = typer.Option(False, "--headed"),
     json_out: Path | None = typer.Option(None, "--json", help="write the report as JSON"),

@@ -1,0 +1,29 @@
+id: loandesk-loan-search
+app: loandesk
+requested_by: demo team
+purpose: >-
+  Show an analyst looking up a loan in Loan Desk by loan number or borrower name and opening its
+  detail with the QC reviews it has. No registered automation uses this screen.
+steps:
+  - screen: Sign in
+    path: /login
+    do: enter user id and password, press Sign in
+    fields: [User ID, Password]
+  - screen: Loan search
+    path: /loans
+    do: >-
+      type a loan number (L-200001) or part of a borrower name, press Search, read the
+      results table (loan no, borrower, product, amount, closing date, branch)
+    fields: [Loan number or borrower name]
+    rules:
+      - Search matches part of the loan number or the borrower name, ignoring case
+      - At most 50 loans are listed
+      - When nothing matches, the page says no loans match
+  - screen: Loan detail
+    path: /loans/{loan_no}
+    do: open a loan from the results, read the loan details and the list of its QC reviews
+    fields: [Borrower, Co-borrower, Product, Amount, Interest rate, Closing date, Branch,
+             Loan officer, Property state]
+    rules:
+      - An unknown loan number shows a not-found page
+evidence: [har:loandesk-loan-search]
