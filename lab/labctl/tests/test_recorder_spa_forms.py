@@ -141,3 +141,33 @@ def test_a_type_step_says_when_its_field_was_left_and_the_replay_leaves_it_too(r
     diffs = [d.text() for s in report.steps for d in s.differences]
     assert report.status == "pass" and diffs == [], report.markdown()
     assert report.coverage.failed == 0 and report.coverage.compared >= 5, report.coverage
+
+
+def test_a_slow_browser_never_says_left_without_showing_it(tmp_path):
+    """On a busy machine the next action reaches the page before its own timers have run. A step
+    that says its field was left must show what leaving did, or a replay that leaves the field
+    differs from the recording (this failed one run in CI and five of six with the CPU slowed)."""
+
+    def slow(page):
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Emulation.setCPUThrottlingRate", {"rate": 20})
+        flow(page)
+
+    server, base = serve()
+    out = tmp_path / "rec"
+    try:
+        recorder.record(f"{base}/", out, headless=True, script=slow)
+    finally:
+        server.shutdown()
+    steps = [json.loads(x) for x in (out / "steps.jsonl").read_text("utf-8").splitlines() if x]
+    typed = [s for s in steps if s["action"] == "type"]
+    assert len(typed) == 3
+    for step in typed:
+        own = [x for x in signatures(out, step) if x.startswith(step["selector"])]
+        assert own, step
+        if step.get("left"):
+            assert any(".visited" in x for x in own), (step["seq"], own)
+    # the first field had never been left before: shown as visited only when the step says so
+    first = typed[0]
+    shown = any(".visited" in x for x in signatures(out, first) if x.startswith("input#first"))
+    assert shown == bool(first.get("left"))
