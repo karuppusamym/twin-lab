@@ -62,7 +62,7 @@ SENSITIVE_ID = re.compile(
 )
 CODE_NAME = re.compile(
     r"(status|state|type|kind|code|priority|severity|level|stage|role|mode|category|channel|"
-    r"currency|outcome|result|decision|flag|class|grade|product|sub_?type)$",
+    r"currency|outcome|result|decision|flag|class|grade|product|sub_?type)$|(^|_)(cat|categ)$",
     re.IGNORECASE,
 )
 EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")

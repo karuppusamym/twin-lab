@@ -51,6 +51,10 @@ KEEP_NUMBERS = seedplan.PAGE_PARAMS | set(stepfacts.COUNT_FIELDS) | {"pages", "p
 PASSWORD = re.compile(r"pass(word|wd)?|pwd|secret|pin$", re.I)
 SECRET_FIELD = re.compile(r"token|secret|jwt|api[-_]?key|bearer|credential|csrf|session_?id", re.I)
 MIN_LEAK = 4  # a value shorter than this is not searched for (it would match by chance)
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+URL = re.compile(r"https?://[A-Za-z0-9.-]+(:\d+)?(/[^\s?#]*)?")
+COOKIE_PAIR = re.compile(r"(?P<name>[A-Za-z0-9_.!#$%&*+^`|~-]{1,64})=(?P<value>[^;\s]*)")
+HOST_LABELS = {"api", "www", "app", "hls", "cdn", "static", "media", "img", "images", "auth"}
 
 
 # --- reading -------------------------------------------------------------------------------------
@@ -145,6 +149,22 @@ def _is_id(value) -> bool:
     return isinstance(value, str) and bool(stepfacts.ID_VALUE.match(value.strip()))
 
 
+def lookfeel_image(value, kept: "Kept") -> bool:
+    from labctl import lookfeel
+
+    return lookfeel.names_image(value, kept.images)
+
+
+def _plain_id(value) -> bool:
+    """A record's key as a plain number or UUID (`1`, `"7"`, a GUID)."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, str) and (value.isdigit() and len(value) <= 12
+                                       or bool(UUID.fullmatch(value)))  # fmt: skip
+
+
 def _leaves(data, path: str = ""):
     """(path, key, value) for every scalar of a JSON value; list items share the path `x[]`."""
     if isinstance(data, dict):
@@ -169,6 +189,7 @@ class Kept:
     # field name -> [(page file stem, selector of its control)], in the order of the snapshots
     by_page: dict[str, list] = field(default_factory=dict)
     labels: dict[tuple, str] = field(default_factory=dict)  # (field name, option value) -> label
+    images: set[str] = field(default_factory=set)  # paths of the images the look carries
 
     def control(self, name: str, screens=()) -> str | None:
         """The control named `name`, on one of `screens` (address patterns) when it is there."""
@@ -185,16 +206,23 @@ class Kept:
             word in self.options or any(word in v for v in self.codes.values()))  # fmt: skip
 
     def code(self, key: str, value) -> bool:
+        """A code of the interface, or the address of an image the look carries (its real file
+        name, so the rebuilt page shows the picture `look/assets/` holds)."""
+        from labctl import lookfeel
+
         return isinstance(value, str) and value != "" and (
             value in self.codes.get(_key(key), ()) or value in self.options
+            or lookfeel.names_image(value, self.images)
         )  # fmt: skip
 
 
 def kept_values(root: Path, app: str, ctxs: list[Ctx]) -> Kept:
+    from labctl import lookfeel
     from labctl.behaviour import dom as domlib
     from labctl.data import observed as obs
 
     kept = Kept()
+    kept.images = lookfeel.interface_image_paths([c.part.path for c in ctxs])
     pages = Path(root) / "apps" / app / "pages"
     for path in sorted(pages.glob("*.html")) if pages.is_dir() else []:
         tree = domlib.parse_html(path.read_text(encoding="utf-8", errors="replace"))
@@ -253,8 +281,21 @@ class World:
         self.id_keys = id_keys
         self.n = 0
         self.today: set[str] = set()
+        self.columns: dict[frozenset, str | None] = {}  # the fields of a record -> its entity
 
     # -- records --
+    def entity_of(self, entity: str | None, fields: dict) -> str | None:
+        """The table a record belongs to: the seed table, or the first entity seen, whose
+        columns are exactly these fields (so `POST /view` reads the `entries` row the list
+        showed), else `entity`."""
+        keys = frozenset(_key(k) for k in fields)
+        if len(keys) < 2:
+            return entity
+        for name, rows in self.seed.items():
+            if rows and isinstance(rows[0], dict) and frozenset(_key(k) for k in rows[0]) == keys:
+                return name
+        return self.columns.setdefault(keys, entity)
+
     def table_rows(self, entity: str | None) -> tuple[str | None, list[dict]]:
         from labctl.data import observed as obs
 
@@ -306,6 +347,14 @@ class World:
                 re.sub(r"\d", "0", value[10:]).replace("T00", "T09", 1))  # fmt: skip
         elif sanitize.EMAIL.fullmatch(value):
             made = f"{self.words.take()}.{self.words.take()}@example.test".lower()
+        elif UUID.fullmatch(value):  # a UUID stays one
+            made = f"00000000-0000-4000-8000-{len(self.alias) + 1:012d}"
+        elif URL.fullmatch(value):  # an address stays one, at a reserved example host
+            parts = urlsplit(value)
+            label = parts.netloc.split(".", 1)[0].lower()
+            label = label if label in HOST_LABELS else "app"
+            path = sanitize.route_pattern(parts.path) if parts.path not in ("", "/") else ""
+            made = f"{parts.scheme}://{label}.example.test{path}"
         else:
             # word by word, so a code of the interface inside a sentence stays where it is
             # ("... OPEN ... CLOSED"): codes are kept anyway, and they say what the text reports
@@ -373,6 +422,9 @@ class Synth:
                 return value
             if rec is not None and isinstance(rec.get(k), (int, float)):
                 return rec[k]
+            if rec is not None and isinstance(rec.get(k), str) and re.fullmatch(
+                    r"-?\d+(\.\d+)?", rec[k]):  # a seeded amount written as text  # fmt: skip
+                return float(rec[k]) if isinstance(value, float) else int(float(rec[k]))
             made = self.w.number(value)
             if rec is not None:
                 rec[k] = made
@@ -383,10 +435,19 @@ class Synth:
             if rec is not None:
                 rec.setdefault(k, "")
             return ""
+        if rec is not None and lookfeel_image(rec.get(k), self.w.kept):
+            return str(rec[k])  # the record's carried photo, as its seed row has it
         if self.is_identifier(value) or self.w.kept.code(key, value):
+            if rec is not None and lookfeel_image(value, self.w.kept):
+                rec[k] = value
             return value
         if k in {_key(x) for x in KEEP_NUMBERS} and value.isdigit() and len(value) <= 6:
             return value  # a page number or a count sent as text
+        if "cookie" in k and all(COOKIE_PAIR.fullmatch(p.strip()) for p in value.split(";")
+                                  if p.strip()):  # fmt: skip
+            pairs = [COOKIE_PAIR.fullmatch(p.strip()) for p in value.split(";") if p.strip()]
+            return "; ".join(f"{m['name']}={self.w.text(m['value']) if m['value'] else ''}"
+                             for m in pairs)  # fmt: skip
         if error:  # the application's own message; any value in it masked
             made = sanitize.mask_message(value, self.c.known)
             return self.messages.get(made, made)
@@ -420,15 +481,17 @@ class Synth:
             return [self.obj(x, e, entity, error) for x in data]
         if not isinstance(data, dict):
             return self.leaf("", data, e, None, error)
+        scalars = {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
+        entity = self.w.entity_of(entity, scalars)  # `/view` and `/bycat` show `entries` rows
         idk = self.w.id_keys.get(entity or "", "id")
-        rid = data.get(idk) if self.is_identifier(data.get(idk)) else None
+        rid = data.get(idk) if self.is_identifier(data.get(idk)) or _plain_id(
+            data.get(idk)) else None  # fmt: skip
         wrapper = any(isinstance(v, (list, dict)) for v in data.values()) and rid is None
         rec = None
         if not error and not wrapper:
             if rid is None and top and har._entity(e.route) == entity:
                 last = e.route.rstrip("/").split("/")[-1]
                 rid = self.path_id(e) if last.startswith("{") else None
-            scalars = {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
             rec = self.w.record(entity, rid, json.dumps(scalars, sort_keys=True, default=str))
         out = {}
         for k, v in data.items():
@@ -938,8 +1001,21 @@ def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: Worl
             r["schema"] = schema_of(datas, kept, id_patterns, shapes, error=status >= 400)
             r["example"] = next(c["response"] for c, _ in group if "response" in c)
         else:
+            empty = all(e.resp_empty for _, e in group)
             r["body"] = (
-                "not recorded: the page did not read it. Answer a JSON object; where "
+                "empty body: the answer had no content (status only); answer the same"
+                if empty
+                else "not recorded: the page did not read it"
+                + "".join(
+                    sorted(
+                        {
+                            f" (the answer had {e.resp_length} bytes)"
+                            for _, e in group
+                            if e.resp_length
+                        }
+                    )[:1]
+                )
+                + ". Answer a JSON object; where "
                 "another status or method of this address shows a body, use its keys "
                 "(a hypothesis: say so in BUILD-NOTES.md)"
                 if any("json" in e.resp_type for _, e in group)

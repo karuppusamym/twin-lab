@@ -186,8 +186,9 @@ def _file_name(path: str, taken: set[str]) -> str:
 
 
 def _shown_path(path: str) -> str:
-    """An address as the manifest names it: the path only, record numbers masked."""
-    return sanitize.mask_identifiers(sanitize.route_pattern(path))[-160:]
+    """An address as the manifest names it: the path only, record numbers masked (a static file
+    named by a word keeps its name, as in the page snapshots)."""
+    return sanitize.mask_asset_url(sanitize.route_pattern(path))[-160:]
 
 
 # --- style sheets -----------------------------------------------------------------------------------
@@ -526,6 +527,33 @@ def _inject(html: str, block: str) -> str:
     return block + html
 
 
+def interface_image_paths(recordings: list[Path]) -> set[str]:
+    """The address paths (`/imgs/Lumia_1520.jpg`) of the images `write()` carries as interface
+    images: static files of the application's own origin (`interface_image`) named by a word
+    (`sanitize.static_file_name`). An answer field holding such a path names a carried file."""
+    from labctl import har
+
+    out: set[str] = set()
+    for path in recordings:
+        try:
+            rec = har.load(path)
+        except (OSError, ValueError):
+            continue
+        own = {urlsplit(s.url).netloc.lower() for s in rec.steps if s.url.startswith("http")}
+        for res in resources(rec.har):
+            if (res.kind == "image" and interface_image(res, own) is None
+                    and sanitize.static_file_name(res.path)):  # fmt: skip
+                out.add(res.path)
+    return out
+
+
+def names_image(value, images: set[str]) -> bool:
+    """Whether an answer's value is the address of one of `images` (relative or absolute path)."""
+    if not isinstance(value, str) or not value or len(value) > 300 or "://" in value:
+        return False
+    return "/" + value.split("?", 1)[0].lstrip("./") in images
+
+
 def _missing_reason(src: str, found) -> str:
     """Why an image a page snapshot shows has no file: its address was masked in the snapshot
     (a record number, so the file it names is a record's), or the browser never asked for it."""
@@ -861,7 +889,7 @@ LOOK_JS = r"""
     table: "table", th: "th", td: "td",
     header: "header, [role=banner], #header, #topbar, .navbar, .topbar, .app-header",
     nav: "nav, [role=navigation], .nav, .menu, .sidebar", main: "main, [role=main]",
-    footer: "footer, [role=contentinfo]", form: "form", fieldset: "fieldset",
+    footer: "footer, [role=contentinfo], [id^=foot], .footer", form: "form", fieldset: "fieldset",
     dialog: "dialog, [role=dialog], .dialog, .modal",
     error: "[role=alert], .error, .alert-danger, .invalid-feedback, [class*=error], [class*=danger]",
     success: "[role=status], .success, .notice, .alert-success, [class*=success]",
@@ -1343,6 +1371,10 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
         nonlocal total
         ikey = res.host + res.path  # one file, whatever version its address names
         item = images.get(ikey)
+        if item is not None and not in_data and item["reason"].startswith("shown inside a data"):
+            # first met in a data cell (the cart's row), also shown as the interface shows it
+            del images[ikey]
+            item = None
         if item is None:
             why = interface_image(res, own_hosts, in_data)
             if why is None and res.ext == ".svg" and data.findings(
@@ -1680,6 +1712,8 @@ def package_check(root: Path, app_id: str, recordings: list[Path] | None = None)
     listed = {
         s["picture"]: s.get("sha256") for s in manifest.get("screens") or [] if s.get("picture")
     }
+    for s in manifest.get("screens") or []:  # a dialog drawn open over its screen
+        listed.update({d["picture"]: d.get("sha256") for d in s.get("dialogs") or []})
     for path in sorted(out.rglob("*")):
         rel = path.relative_to(out).as_posix()
         if not path.is_file() or path.suffix.lower() not in (
@@ -1894,8 +1928,10 @@ def brief_section(root: Path, app_id: str, refused: list[str] | None = None) -> 
                 seen_h.add(t["where"])
                 holders.append(t["where"] + ("" if t["kind"] == "text" else f" ({t['kind']})"))
         picture = f"`look/{s['picture']}`" if s.get("picture") else "no picture"
-        w += [f"**{s['screen']}** (`{s['address']}`): picture {picture}, snapshot "
-              f"`{s['page']}`.", ""]  # fmt: skip
+        drawn = "".join(f"; dialog `{d['dialog']}` open: `look/{d['picture']}`"
+                        for d in s.get("dialogs") or [])  # fmt: skip
+        w += [f"**{s['screen']}** (`{s['address']}`): picture {picture} (no dialog open){drawn}, "
+              f"snapshot `{s['page']}`.", ""]  # fmt: skip
         w.append("- Literal texts, copy exactly: " + (_ticks(literal, 60) if literal else "none")
                  + ".")  # fmt: skip
         if mixed:

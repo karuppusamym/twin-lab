@@ -98,6 +98,8 @@ class Ex:
     cookies_sent: tuple = ()
     cookies_set: tuple = ()
     auth_scheme: str = ""
+    resp_empty: bool = False  # the answer had no body at all (0 bytes)
+    resp_length: int | None = None  # its Content-Length, when it said one
 
 
 @dataclass
@@ -201,6 +203,7 @@ def _extras(entry: dict, post: dict, content: dict) -> dict:
     scheme = next((v.split(" ", 1)[0] for v in heads(req, "authorization") if " " in v), "")
     referer = next(iter(heads(req, "referer")), "")
     location = next(iter(heads(resp, "location")), "") or str(resp.get("redirectURL") or "")
+    length = next(iter(heads(resp, "content-length")), "").strip()
     return {
         "body": body,
         "req_type": req_type or ("application/json" if body is not None else ""),
@@ -211,6 +214,9 @@ def _extras(entry: dict, post: dict, content: dict) -> dict:
         "cookies_sent": tuple(sorted(n for n in sent if sanitize.COOKIE_NAME.match(n))),
         "cookies_set": tuple(sorted(n for n in made if sanitize.COOKIE_NAME.match(n))),
         "auth_scheme": scheme if re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{1,20}", scheme) else "",
+        "resp_empty": not (content.get("text") or "")
+        and (length == "0" or (not length and content.get("size") == 0)),
+        "resp_length": int(length) if length.isdigit() else None,
     }
 
 
@@ -664,6 +670,15 @@ def seed_rows(
     return rows, notes
 
 
+def lookfeel_names_image(value, c: Core) -> bool:
+    """Whether a value is the path of an image the look carries (`lookfeel.names_image`)."""
+    from labctl import lookfeel
+
+    if not hasattr(c, "_images"):
+        c._images = lookfeel.interface_image_paths([p.path for p in c.parts])  # type: ignore[attr-defined]
+    return lookfeel.names_image(value, c._images)  # type: ignore[attr-defined]
+
+
 def col_of(table, key: str | None) -> str:
     return next((c.name for c in table.columns if _key(c.name) == _key(key or "")), key or "?")
 
@@ -684,6 +699,9 @@ def _cell(c: Core, d: ListDesign, col, i: int, n: int, first: list[str], others:
             if n in chosen:
                 words.append(s.term)
     values = _column_values(col.name, d)
+    images = [v for v in values if lookfeel_names_image(v, c)]
+    if values and len(images) == len(values):  # a carried interface image: its real file name
+        return sorted(set(images))[i % len(set(images))]
     info = obs.classify_column(col.name, values) if values else {"kind": "unknown"}
     kind = info.get("kind")
     fn, ln = (
