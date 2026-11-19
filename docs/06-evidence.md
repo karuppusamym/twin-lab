@@ -284,6 +284,64 @@ validator: no attribute and no script states it), the logic of a custom validato
 (its message is listed when it reads as one), limits read from data at run time, and the
 label words a sanitiser masks in a message (then the message stays the form's, not a field's).
 
+### Where the links nobody clicked lead: `labctl evidence check-links`
+
+Pages hold links the person never clicked. After a recording, a person may ask the real
+application where they lead:
+
+```bash
+labctl evidence check-links evidence/shop/run            # lists what it would ask; asks nothing
+labctl evidence check-links evidence/shop/run --yes      # asks, writes evidence/shop/run/link-check.json
+```
+
+Options: `--max N` (links asked for, default 50), `--delay-ms M` (between two requests, default
+1000), `--timeout S` (per request, default 10), `--storage-state FILE` (the browser state the
+recording started from, as given to `labctl evidence record --storage-state`).
+
+What is checked: every `<a href>`, `<area href>`, GET `<form action>`, `<iframe src>` and
+obvious `window.open('...')` or `location.href = '...'` of an inline handler in the snapshots,
+resolved against its page (or frame), one per origin and address pattern (`/orders/1007` and
+`/orders/1008` once). A pattern the recording visited is not checked.
+
+Safety rules, enforced in `labctl/linkcheck.py` and tested in `test_linkcheck.py`:
+
+- **Opt-in.** Without `--yes` nothing is requested. The portal and `build-all` never run it.
+- **Read only.** HEAD, then GET only when HEAD is refused (405, 501) or to read the title of an
+  HTML page. Never another method, never a request body, never a click or a script. Redirects are
+  followed by hand, each hop checked like a link.
+- **Nothing that changes state.** Skipped, with the reason: an address with `logout`, `signout`,
+  `sign-out`, `delete`, `remove`, `cancel`, `approve`, `reject`, `submit`, `confirm`,
+  `unsubscribe`, `reset`, `close`, `archive`, `pay`, `transfer` (and similar), a query carrying an
+  action (`action=`, `op=`, `do=`, ... or an action verb), a token or session id in the query or
+  the address, `mailto:`, `tel:`, `javascript:`, `data:`, downloads (pdf, xls*, doc*, csv, zip,
+  exe, msi, ... or a `download` attribute), POST forms.
+- **Own origins only.** The origins the recording used, and the applications its split proposal
+  includes; never a third-party origin, not even as a redirect hop.
+- **Anonymous by default.** With `--storage-state` its cookies for those origins are sent. No
+  cookie value, token or response body is written; query values are not even printed.
+- **Gentle.** One request a second by default, `--max` links, a timeout per request; the first
+  429 or 503 stops the run and the rest is listed as not checked.
+
+`link-check.json` gives per link: where it was seen (screen, selector, link text masked by the
+sanitiser), the final status after redirects with the pattern of each hop, whether it ended on
+the recorded sign-in screen, the content type, and for an HTML page of the recording's origins
+its title and main heading (masked) and whether it has the structure of a recorded screen (same
+address pattern, or the same form field names). An HTML page the recording never visited is kept
+as a sanitised snapshot in `link-check/pages/`, sanitised exactly as the recorder's snapshots
+(`TWINLAB_PAGE_TEXT=strict` masks all), after the look's data checks (the recording's data
+values and data-shaped tokens); when a check fails only the title and heading are kept and the
+file says why.
+
+The next `labctl brief` (or `build-all`) uses it: in `navigation.json` and the brief's
+*Navigation map*, a link seen and not visited says what the check found ("leads to a page
+*Order history* not recorded: out of scope, answer with a redirect...", "leads to the sign-in
+page", "missing (404) in the real application: keep the link, answer 404"); a skipped link keeps
+its answer with the reason it was not asked. Pages that exist but were not recorded are listed
+as candidates for a further recording (`unrecorded_pages`), and their snapshots travel as
+`apps/<app>/unrecorded/*.html`, never as recorded screens. Without `link-check.json` nothing
+changes. `labctl.linkcheck.SafeFetcher` is the HTTP part on its own (GET or HEAD only, given
+origins only, rate limited, stops on 429 or 503) for other opt-in fetches.
+
 What a package still cannot say, found by the blind rebuild of the help-desk fixture:
 
 - The body of an answer the page never read (a 401 the page only tested the status of).

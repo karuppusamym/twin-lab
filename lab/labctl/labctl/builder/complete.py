@@ -149,6 +149,9 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
     if rel.startswith(app + "pages/"):
         return ("Snapshot of one screen: its real structure, ids, classes and interface text; "
                 "data masked.")  # fmt: skip
+    if rel.startswith(app + "unrecorded/"):
+        return ("Reference snapshot of a page the link check found and the recording never "
+                "visited: not a recorded screen, not in scope; data masked.")  # fmt: skip
     if rel.startswith(app + "look/"):
         return "How the screens look: style sheets, theme, one picture per screen."
     if rel.startswith(app + "steps/"):
