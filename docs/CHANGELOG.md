@@ -114,6 +114,35 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   every remaining step passes; the damage is under "Why not pass" and in `compared`, but
   whether it should lower the status is a decision for a person. The replay loop itself was
   not run in a browser for these cases.
+## 2026-11-18 — Field rules and page behaviour: what each page checks, from its HTML and its JavaScript
+Until now a package knew a rule only when the recording triggered it. `labctl.pagerules`
+writes `apps/<app>/rules.json` and the brief's *Field rules and page behaviour*, per screen and
+field, from three sources:
+- **The HTML** of every snapshot (`declared`): `required`, `minlength`, `maxlength`, `min`,
+  `max`, `step`, `pattern`, the input type, `readonly`, `disabled`, `autocomplete`,
+  `inputmode`, placeholder, tooltip, label, help text, counter, options, ASP.NET `data-val-*`,
+  jQuery Validate `data-rule-*` / `data-msg-*`, PrimeFaces `data-p-*`, messages the page holds
+  hidden, and JSF / PrimeFaces partial updates in event attributes.
+- **The application's own scripts** in the HAR (`in code, not triggered` or `in code, not tied
+  to a field`): tokenised (strings, regex literals against division, template literals,
+  comments), never run. Angular `Validators.*` on form controls, jQuery Validate `rules` and
+  `messages`, `setCustomValidity`, plain checks with their messages, cross-field rules (equal,
+  not before, one of two), masks, fields shown, enabled or made required by another, dependent
+  drop-downs, a submit button enabled when the form is valid, session timers with their delay.
+  Third-party scripts and library files (by name or banner) are named, not analysed.
+- **The recording** (`seen`): messages that appeared, and what changed after a step that typed,
+  chose or ticked (a field shown, a drop-down filled by an API call, linked to the catalogue).
+- Messages go through `sanitize.mask_message` and the look's data check. Scripts are not
+  carried; `TWINLAB_PAGE_SCRIPTS=carry` carries the application's own script files under
+  `apps/<app>/scripts/` (source maps stripped, never a library), refused, by the brief and by
+  `labctl build package`, when one holds something shaped like a secret, a host other than the
+  application's own, or a value the recording shows as data.
+- Proven on a new fixture (`tests/fixtures/formdesk`), on the Angular reference (both
+  `Validators.required` of its source found from the minified build, the owner's never
+  triggered; no wrong rule) and on the JSF reference (its three triggered messages and the
+  partial update; its validators that were never triggered cannot be recovered: JSF checks on
+  the server). The task text, the reading order, the index, the completeness check, the guard
+  and `factory.GENERATED` name the new files.
 ## 2026-11-18 — The build package carries the API, the navigation, every action and the sign-in
 What a coding agent gets was measured on two recordings (the two-application fixture, and a new
 help-desk fixture whose pages are filled by a JSON API), then the gaps were closed.
