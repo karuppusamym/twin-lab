@@ -157,10 +157,11 @@ def generate(
     from labctl import publicdata
 
     with publicdata.active_for(Path(root), app_id):
-        return _generate(root, app_id, system, source, db_engine, force, data)
+        return _with_templates(root, app_id, system, source, db_engine, force, data)
 
 
-def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
+def _with_templates(root, app_id, system, source, db_engine, force, data) -> Result:
+    """Refuse an app nothing needs; then generate with the learned screen templates applied."""
     from labctl import contract, templates
 
     if (not automations(root, app_id) and not flows(root, app_id)

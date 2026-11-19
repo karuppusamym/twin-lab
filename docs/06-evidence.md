@@ -286,9 +286,11 @@ and shared layout* and *Network behaviour*.
 
 Privacy, as for the rest of `api/`: no value is read into these files. Header values, cursors
 and tokens are classified or followed by field name only; a GraphQL document is carried with
-its literals replaced; a seed row of a template is synthetic (a field the owner declares public
-data could carry the recorded value through `templates.build(reveal=...)`; nothing declares it
-today). Both files pass `apicatalog.leaks` and `codemap.check_text` before they are written.
+its literals replaced; a seed row of a template is synthetic, except where an approved
+`public-data.yaml` (`labctl.publicdata`) declares the data public: a field in a declared region,
+a text that is as a whole a declared value, or a picture under a declared image prefix keeps its
+recorded value, the secret checks applied, and `templates.json` marks the column `public`. Both
+files pass `apicatalog.leaks` and `codemap.check_text` before they are written.
 Recording the fixture shop found and closed four leaks of record names elsewhere: a list's
 link named like a record in the replay locators (`stepfacts._target`) and in the draft flow,
 the values of a cart column listed as "one of" (`seedplan._format`), and a page's address in

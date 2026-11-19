@@ -252,7 +252,8 @@ caching, gzip and a third-party analytics origin):
   structure or many links of one repeated element, are one screen (`/p/{slug}`), applied
   through `sanitize.template_rules` while the brief and the package are made. New
   `apps/<app>/templates.json`: instances, varying parameters, data fields with one synthetic
-  seed row per instance (a public-data declaration can be plugged in through `reveal`), and
+  seed row per instance (synthetic; a field an approved `public-data.yaml` declares public
+  keeps its recorded value), and
   each page's breadcrumbs, gallery, variant picker, recommendation blocks, facets as code
   lists, sort, pages, lists loaded in pages, category tree; the navigation hierarchy and the
   cart and wish-list state.

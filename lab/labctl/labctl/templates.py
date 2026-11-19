@@ -27,10 +27,12 @@ may grow with the number of instances where it should grow with the number of te
 - **Per application**: the navigation hierarchy (category tree from the menus, levels from the
   breadcrumbs) and the cart and wish-list state (endpoints, the badge, where the state lives).
 
-Privacy: instance data is never carried. Each seed row holds synthetic values of the same shape
-(`labctl.apicatalog.World`); a field the owner declares public data could be carried as
-recorded, through `reveal` (none is declared today: the declaration is a separate piece of
-work), and the row says which. Labels come from the sanitised pages (`sanitize.page`), as in
+Privacy: instance data is carried only where the owner declared it public (an approved
+`public-data.yaml`, `labctl.publicdata`, in force while the brief is made): a field whose
+element sits in a declared region, whose text is as a whole a declared value, or a picture
+under a declared image prefix keeps its recorded value, the secret checks applied
+(`publicdata.refused`). Every other seed value is synthetic, of the same shape
+(`labctl.apicatalog.World`), and the seed says which. Labels come from the sanitised pages (`sanitize.page`), as in
 `navigation.json`; the file is checked against the recording (`labctl.apicatalog.leaks`) and for
 secrets and hosts (`labctl.codemap.check_text`) before it is written.
 """
@@ -435,12 +437,14 @@ def _field_rows(trees: list, layout_sel: set[str], vocab: set[str] = frozenset()
     """(data fields, lists) of one template from the raw trees of its instances (each as it
     loaded). A text that differs between instances is data, unless every word of it is the
     interface's own (a message the page shows after an action)."""
-    from labctl import har, navmap
+    from labctl import har, navmap, publicdata
     from labctl.behaviour import dom as domlib
     from labctl.navmap import _ancestors
 
+    pub = publicdata.current()
     per: dict[str, list] = defaultdict(list)
     counts: dict[str, list[int]] = defaultdict(list)
+    declared: set[str] = set()  # fields inside a region the owner declared public
     for tree in trees:
         local: dict[str, list] = defaultdict(list)
         for node in domlib._walk(tree):
@@ -456,6 +460,9 @@ def _field_rows(trees: list, layout_sel: set[str], vocab: set[str] = frozenset()
                 continue
             value = (node.attrs.get("src") or "") if node.tag == "img" else _own_text(node)
             local[sel].append(value)
+            if pub is not None and any(pub.region(a.tag, a.attrs) for a in [node, *_ancestors(
+                    node)] if a.tag != "#document"):  # fmt: skip
+                declared.add(sel)
         for sel, vals in local.items():
             counts[sel].append(len(vals))
             per[sel].append(vals[0] if len(vals) == 1 else None)
@@ -477,8 +484,24 @@ def _field_rows(trees: list, layout_sel: set[str], vocab: set[str] = frozenset()
         ident = re.split(r"[#.\[]", sel, maxsplit=1)[-1].strip('"]').split("=")[-1].strip('"')
         fields.append({"selector": sel, "column": har.snake(ident)[:40] or "value", "kind": kind,
                        "varies": f"{len(set(real))} different in {len(real)} instance(s)",
-                       "_values": vals})  # fmt: skip
+                       "_values": vals, "_region": sel in declared})  # fmt: skip
     return fields[:MAX_FIELDS], lists[:MAX_FIELDS]
+
+
+def public_reveal(pub):
+    """`reveal` for a declaration in force (`publicdata.Public`): a picture under a declared
+    image prefix, a field in a declared region, or a text that is as a whole a declared value;
+    never a value the secret checks refuse."""
+    from labctl import publicdata
+
+    def reveal(screen: str, f: dict, value: str) -> bool:
+        if not value or publicdata.refused(f.get("column") or "", value):
+            return False
+        if f.get("kind") == "picture":
+            return pub.image(urlsplit(value).path or value)
+        return bool(f.get("_region")) or pub.text(value)
+
+    return reveal
 
 
 def _sel(node) -> str:
@@ -717,10 +740,15 @@ def _codes_of(tree) -> set[str]:
 
 def build(root: Path, app: str, ctxs: list, nav: dict | None, done: dict | None,
           reveal=None) -> dict | None:  # fmt: skip
-    """The templates document. `reveal(screen, column) -> bool`: a field declared public data
-    whose recorded values may be carried; None (today): every value is synthetic."""
+    """The templates document. `reveal(screen, field, value) -> bool`: whether a recorded
+    value of a data field is carried as it is; by default the declaration in force
+    (`labctl.publicdata`, `public_reveal`), and none: every value is synthetic."""
     from labctl import apicatalog as ac
+    from labctl import publicdata
     from labctl.behaviour import dom as domlib
+
+    if reveal is None and publicdata.current() is not None:
+        reveal = public_reveal(publicdata.current())
 
     if not ctxs:
         return None
@@ -787,15 +815,16 @@ def build(root: Path, app: str, ctxs: list, nav: dict | None, done: dict | None,
         else:
             fields, lists = [], []
         if fields:
-            rows = []
+            rows, carried = [], set()
             for k in range(len(paths) if len(raw_trees) >= 2 else 0):
                 rec: dict = {"instance": k + 1}
                 for f in fields:
                     vals = f["_values"]
                     if k >= len(vals) or not vals[k]:
                         continue
-                    if reveal is not None and reveal(screen, f["column"]):
+                    if reveal is not None and reveal(screen, f, vals[k]):
                         rec[f["column"]] = vals[k]
+                        carried.add(f["column"])
                     elif f["kind"] == "picture":
                         rec[f["column"]] = f"/img/synthetic/{k + 1}.svg"
                     elif f["kind"] in ("number", "amount"):
@@ -807,12 +836,17 @@ def build(root: Path, app: str, ctxs: list, nav: dict | None, done: dict | None,
                     else:
                         rec[f["column"]] = world.text(vals[k])
                 rows.append(rec)
-            row["data_fields"] = [{k: v for k, v in f.items() if k != "_values"} for f in fields]
+            row["data_fields"] = [{k: v for k, v in f.items() if not k.startswith("_")}
+                                  for f in fields]  # fmt: skip
+            for f in row["data_fields"]:
+                if f["column"] in carried:
+                    f["public"] = "declared public data: the seed rows carry the recorded value"
             row["seed"] = {
                 "rows": rows,
                 "basis": "synthetic values of the recorded shapes, one row per instance seen"
-                + ("; columns declared public data carry the recorded value" if reveal else
-                   " (no public-data declaration: every value is masked)"),
+                + (f"; the columns {', '.join(sorted(carried))} are declared public data and "
+                   "carry the recorded value" if carried else
+                   " (no public-data declaration covers them: every value is masked)"),
                 "use": "Create these as records the template shows (one per address); the "
                        "address parameter of each is free to choose.",
             }  # fmt: skip

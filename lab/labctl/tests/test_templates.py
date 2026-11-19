@@ -136,7 +136,8 @@ def _ctx(pages: dict[str, str]):
     for n, (path, html) in enumerate(pages.items(), 1):
         raw.append({"seq": n, "url": f"https://shop.example.test{path}", "action": "goto"})
         doms[n] = html
-    part = SimpleNamespace(raw=raw, doms=doms, words=set(), exchanges=[])
+    part = SimpleNamespace(raw=raw, doms=doms, words=set(), exchanges=[],
+                           path=Path("no-recording"))  # fmt: skip
     return SimpleNamespace(part=part, known={"amber", "birch", "cedar"}, vocab={"free", "returns"},
                            name="r")  # fmt: skip
 
@@ -226,15 +227,42 @@ def test_a_template_has_instances_parameters_data_fields_seed_rows_and_parts(tmp
 
 
 def test_a_declared_public_field_is_the_only_way_a_recorded_value_is_carried(tmp_path):
+    from labctl import publicdata
+
     ctxs = [_ctx(PAGES)]
+    # nothing declared: every value is synthetic
+    with sanitize.template_rules([("", "p", "*")]):
+        doc = tp.build(tmp_path, "shop", ctxs, _nav(ctxs), None)
+    p = next(t for t in doc["templates"] if t["screen"] == "/p/{slug}")
+    assert (
+        "Amber Linen Dress" not in json.dumps(p) and "every value is masked" in p["seed"]["basis"]
+    )
+    # an approved declaration in force: the title (a declared value as a whole) and the pictures
+    # under a declared prefix are carried; the price, in no region and not declared, is not
+    decl = publicdata.Declaration(approved_by="A. Owner", regions=["h1#productTitle"],
+                                  images=["/img/"])  # fmt: skip
+    token = publicdata._CURRENT.set(publicdata.Public([decl]))
+    try:
+        with sanitize.template_rules([("", "p", "*")]):
+            doc = tp.build(tmp_path, "shop", ctxs, _nav(ctxs), None)
+    finally:
+        publicdata._CURRENT.reset(token)
+    p = next(t for t in doc["templates"] if t["screen"] == "/p/{slug}")
+    rows = p["seed"]["rows"]
+    assert [r["product_title"] for r in rows] == [
+        "Amber Linen Dress", "Birch Wool Flats", "Cedar Cotton Coat"]  # fmt: skip
+    assert [r["main_image"] for r in rows] == ["/img/1/a.jpg", "/img/2/a.jpg", "/img/3/a.jpg"]
+    assert "19.00" not in json.dumps(rows)
+    assert "main_image, product_title are declared public data" in p["seed"]["basis"]
+    fields = {f["column"]: f for f in p["data_fields"]}
+    assert "public" in fields["product_title"] and "public" not in fields["price"]
+    # a caller's own rule, with the same signature
     with sanitize.template_rules([("", "p", "*")]):
         doc = tp.build(tmp_path, "shop", ctxs, _nav(ctxs), None,
-                       reveal=lambda screen, column: column == "product_title")  # fmt: skip
+                       reveal=lambda screen, field, value: field["column"] == "price")  # fmt: skip
     p = next(t for t in doc["templates"] if t["screen"] == "/p/{slug}")
-    assert [r["product_title"] for r in p["seed"]["rows"]] == [
-        "Amber Linen Dress", "Birch Wool Flats", "Cedar Cotton Coat"]  # fmt: skip
-    assert "19.00" not in json.dumps(p["seed"]["rows"])
-    assert "declared public data" in p["seed"]["basis"]
+    assert [r["price"] for r in p["seed"]["rows"]] == ["19.00", "26.00", "33.00"]
+    assert "Amber Linen Dress" not in json.dumps(p["seed"]["rows"])
 
 
 # =================================================================================================
@@ -423,7 +451,8 @@ def test_a_jsf_view_is_one_screen_never_a_template_instance(tmp_path):
     raw = [{"seq": 1, "url": "https://jsf.example.test/login.xhtml", "action": "goto"},
            {"seq": 2, "url": "https://jsf.example.test/login.xhtml", "action": "click"}]  # fmt: skip
     doms = {1: view("login", "<input id='main:user'>"), 2: view("workspace", same)}
-    part = SimpleNamespace(raw=raw, doms=doms, words=set(), exchanges=[])
+    part = SimpleNamespace(raw=raw, doms=doms, words=set(), exchanges=[],
+                           path=Path("no-recording"))  # fmt: skip
     ctx = SimpleNamespace(part=part, known=set(), vocab=set(), name="r")
     doc = tp.build(tmp_path, "jsf", [ctx], {"screens": []}, None)
     by = {t["screen"]: t for t in doc["templates"]}
