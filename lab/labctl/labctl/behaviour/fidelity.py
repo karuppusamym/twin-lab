@@ -451,12 +451,53 @@ def _settle(page, settle_ms: int, page_work: bool = True) -> None:
     if not hasattr(page, "_tl_inflight"):
         page.wait_for_timeout(settle_ms)
         return
-    quiet = waited = 0
+    quiet = waited = moving = 0
     while quiet < settle_ms and waited < SETTLE_MAX_MS:
         page.wait_for_timeout(50)
         waited += 50
         idle = page._tl_inflight == 0 and not (page_work and _page_busy(page))
+        if idle and page_work and moving < ANIMATION_MAX_MS and _animating(page):
+            # a dialog fading out, a panel sliding in: the recorder's snapshot shows the end
+            moving += 50
+            idle = False
         quiet = quiet + 50 if idle else 0
+
+
+# How long a replay waits for CSS transitions and animations to end, at most, per step: a page
+# whose transitions never stop (a carousel sliding every few seconds) is compared after it.
+ANIMATION_MAX_MS = 3000
+# Read-only: a CSS transition or animation (or a Web Animation) running now that ends by itself.
+# One that repeats forever (a spinner) is never waited for.
+ANIMATING_JS = """() => {
+  try {
+    return document.getAnimations().some(a => {
+      if (a.playState !== "running" || !a.effect) return false;
+      const end = a.effect.getComputedTiming().endTime;
+      return Number.isFinite(end) && end > 0;
+    });
+  } catch (e) { return false; }
+}"""
+
+
+def _animating(page) -> bool:
+    try:
+        return bool(page.evaluate(ANIMATING_JS))
+    except Exception:  # noqa: BLE001 - a page that is navigating is not animating in this sense
+        return False
+
+
+def recorder_quiet_ms(rec: Recording) -> int | None:
+    """How long the recorder waited for a quiet page before each snapshot (`recording.json`,
+    settle.quiet_ms), or None when the recording does not say."""
+    import json
+
+    path = Path(rec.path) / "recording.json"
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        quiet = int((meta.get("settle") or {}).get("quiet_ms"))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    return quiet if quiet > 0 else None
 
 
 def _page_busy(page) -> bool:
@@ -1132,6 +1173,10 @@ def replay(
     else:
         bnd_path = None
     size, run_viewport = _viewport(viewport, vspec)
+    # After a step the replay waits as the recorder did before its snapshot: for a quiet page at
+    # least as long, and until the page's CSS transitions and animations have ended (_settle). A
+    # typed value's snapshot was taken when the person moved on: `settle_ms` alone.
+    step_settle = max(settle_ms, recorder_quiet_ms(rec) or 0)
     reports: list[StepReport] = []
     problems: list[str] = recording_damage(rec)
     stopped = False
@@ -1215,7 +1260,7 @@ def replay(
                 vis_mod.prepare(p, vspec)
             base_mod.apply(ctx, p, base, replica_origin)
             p.goto(url)
-            _settle(p, settle_ms)
+            _settle(p, step_settle)
             return ctx, p
 
         try:
@@ -1232,7 +1277,7 @@ def replay(
                 judging = judge_mod.Judging(
                     rec, spec, vspec, binding=binding, record=record_title, artifacts=artifacts,
                     outcome_judge=outcome_judge, fresh=fresh, run_viewport=run_viewport,
-                    settle=lambda p: _settle(p, settle_ms))  # fmt: skip
+                    settle=lambda p: _settle(p, step_settle))  # fmt: skip
             if not stopped and base is not None:
                 try:
                     notes.update(base_mod.apply(context, page, base, replica_origin))
@@ -1300,7 +1345,8 @@ def replay(
                 if step.action == "tab-close" or page is None or page.is_closed():
                     reached.add(step.seq)
                     continue
-                _settle(page, settle_ms, page_work=step.action != "type")
+                typed = step.action == "type"
+                _settle(page, settle_ms if typed else step_settle, page_work=not typed)
                 reached.add(step.seq)
                 report.replica_origin = _origin(page.url) or None
                 if step.seq in deferred:
