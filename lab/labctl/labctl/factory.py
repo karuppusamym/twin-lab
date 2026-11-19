@@ -152,6 +152,15 @@ def generate(
     force: bool = False,
     data: str | None = None,
 ) -> Result:
+    """The brief and everything it carries, from the app's evidence. An approved
+    `public-data.yaml` beside a recording (labctl.publicdata) is in force throughout."""
+    from labctl import publicdata
+
+    with publicdata.active_for(Path(root), app_id):
+        return _generate(root, app_id, system, source, db_engine, force, data)
+
+
+def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
     from labctl import contract
 
     if (not automations(root, app_id) and not flows(root, app_id)
@@ -249,6 +258,13 @@ def generate(
     from labctl import pagerules
 
     text = pagerules.extend(root, app_id, model, text)
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    if pub is not None:  # which data is real public catalogue content, and who approved it
+        marker = "## Running in the lab"
+        note = "## Public catalogue data\n\n" + pub.note() + "\n"
+        text = text.replace(marker, note + marker, 1) if marker in text else f"{text}\n{note}"
     _write(brief_file, text)
     if not model.stack.desktop:  # the app pipeline builds a container; a desktop app has none
         write_workflow(root, app_id)

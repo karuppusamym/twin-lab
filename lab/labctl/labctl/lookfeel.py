@@ -432,10 +432,12 @@ def interface_image(res: Resource, own_hosts: set[str], in_data: bool = False) -
     that only names a version: `?v=3`), with no
     record number in its path, not under a folder that holds what users put there, up to the
     size the analysis reads (`har.MAX_BODY`), and not shown inside a data cell."""
-    from labctl import har
+    from labctl import har, publicdata
 
     if res.host not in own_hosts:
         return "served by another host"
+    pub = publicdata.current()
+    declared = pub is not None and pub.image(res.path)  # product photos the owner declared
     if res.query and not all(
         q.split("=", 1)[0].lower() in VERSION_KEYS for q in res.query.split("&") if q
     ):
@@ -831,6 +833,13 @@ def known_data(recordings: list[Path]) -> Data:
                 _strings(e.resp_json, texts)
         data.tokens |= _data_tokens(texts)
     data.tokens.discard("")
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    if pub is not None:  # declared public catalogue values may show in the look
+        data.names -= pub.words()
+        public = pub.tokens()
+        data.tokens = {t for t in data.tokens if not pub.text(t) and t.lower() not in public}
     return data
 
 

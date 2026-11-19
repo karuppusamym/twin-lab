@@ -673,6 +673,10 @@ class _Page(HTMLParser):
         self.widget_now = False  # the element being opened is a media player's control
         self.vary = vary or {}  # place on the screen -> tokens that differ between snapshots
         self.strict = (mode or page_text_mode()) == "strict"
+        from labctl import publicdata
+
+        # public catalogue data the owner declared (off unless approved; never in strict mode)
+        self.public = publicdata.current() if not self.strict else None
         self.out: list[str] = []
         self.stack: list[str] = []
         self.with_id: list[bool] = []  # per open element: has an id (then its text is a value)
@@ -897,9 +901,11 @@ class _Page(HTMLParser):
         sel = f"{tag}#{a['id']}" if a.get("id") else tag + (f".{classes}" if classes else "") + (
             f'[role="{role}"]' if role and not classes else "")  # fmt: skip
         widget = parent.get("widget", False) or _player(a.get("class", ""))
+        # a region the owner declared public (labctl.publicdata): its text is carried as recorded
+        public = parent.get("public", False) or bool(self.public and self.public.region(tag, a))
         holder = holder and not widget
         return {"data": data, "message": message or parent["message"], "nav": nav,
-                "widget": widget,
+                "widget": widget, "public": public,
                 "holder": holder, "own_message": message, "key": f"{parent['key']}/{place}",
                 "sel": sel, "hidden": "hidden" in a or parent.get("hidden", False), "buf": []}  # fmt: skip
 
@@ -1154,7 +1160,9 @@ class _Page(HTMLParser):
             self.out.append(escape(mask(css) if self.strict else css, quote=False))
             return
         ctx = self._context()
-        if ctx == "data" or self.strict:
+        if self._public_text(data, ctx):
+            text = data
+        elif ctx == "data" or self.strict:
             if ctx == "data" or self._data_cell():
                 self.values |= words(data)  # only text where records are shown counts as data
                 self.names |= names_in(data)
@@ -1204,6 +1212,18 @@ class _Page(HTMLParser):
             if f["own_message"]:
                 f["buf"].append(text)
         self.out.append(escape(text, quote=False))
+
+    def _public_text(self, data: str, ctx: str) -> bool:
+        """A text the owner declared public: in a declared region, or, outside data cells (a
+        cart's rows), a declared value as a whole (`publicdata.Public.text`). The secret checks
+        apply to both."""
+        from labctl import publicdata
+
+        if self.public is None or not data.strip() or publicdata.refused("", data.strip()):
+            return False
+        if self.flags and self.flags[-1].get("public"):
+            return True
+        return ctx != "data" and not self._data_cell() and self.public.text(data)
 
     def _phrase(self, data: str, vocab: set[str]) -> bool:
         """Whether a text is, as a whole, a short value the recording's answers hold

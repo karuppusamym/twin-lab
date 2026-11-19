@@ -414,9 +414,14 @@ class Synth:
         return bool(m) and (m.group(1), m.group(2), len(m.group(3))) in self.id_patterns
 
     def leaf(self, key: str, value, e: seedplan.Ex, rec: dict | None, error: bool = False):
+        from labctl import publicdata
+
         k = _key(key)
         if value is None or isinstance(value, bool):
             return value
+        pub = publicdata.current()
+        if pub is not None and not error and pub.field_public(e.method, e.route, key, value):
+            return value  # declared public catalogue data, carried as recorded
         if isinstance(value, (int, float)):
             if k in {_key(x) for x in KEEP_NUMBERS} or stepfacts.ID_FIELD.search(str(key)):
                 return value
@@ -1266,11 +1271,18 @@ def observed_values(ctxs: list[Ctx], kept: Kept) -> set[str]:
     strings too short to tell from chance."""
     id_patterns = {(i["prefix"], i["sep"], i["width"]) for c in ctxs
                    for i in [*c.part.facts.ids, *c.part.facts.generated] if i.get("width")}  # fmt: skip
+    from labctl import publicdata
+
     out: set[str] = set()
+    pub = publicdata.current()
+    here: list = [None]  # the exchange being read
 
     def take(key: str, v, c: Ctx) -> None:
         if isinstance(v, bool) or v is None:
             return
+        e = here[0]
+        if pub is not None and e is not None and pub.field_public(e.method, e.route, key, v):
+            return  # declared public: carried on purpose
         if isinstance(v, (int, float)):
             if _key(key) in {_key(x) for x in KEEP_NUMBERS} or stepfacts.ID_FIELD.search(key):
                 return
@@ -1292,6 +1304,7 @@ def observed_values(ctxs: list[Ctx], kept: Kept) -> set[str]:
         for e in c.part.exchanges:
             if not is_api(e):
                 continue
+            here[0] = e
             for k, v in e.query.items():
                 take(k, v, c)
             for k, v in e.form.items() if e.body is None else []:

@@ -358,6 +358,7 @@ class ListDesign:
     # Per identifier number, what the answers first showed of that record (a list row or the
     # record's own GET): read only for code values, booleans and empty fields, never copied as data.
     seen: dict[int, dict] = field(default_factory=dict)
+    first_items: list[dict] = field(default_factory=list)  # the first full answer (in memory)
 
 
 @dataclass
@@ -482,6 +483,8 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
             if items is None:
                 continue
             d = lists.setdefault(e.route, ListDesign(e.route, har._entity(e.route)))
+            if len(items) > len(d.first_items) and not wrote:
+                d.first_items = items
             if not wrote:
                 d.before_writes = max(d.before_writes, len(items))
                 d.total_before = max(d.total_before, _count(e.data, items)[0])
@@ -656,6 +659,7 @@ def seed_rows(
             row: dict = {}
             for col in table.columns:
                 row[col.name] = _cell(c, d, col, i, n, first_pool, others, scales)
+            _public_cells(row, d, i)
             out.append(row)
         rows[table.name] = out
         what = f"{d.rows} row(s)"
@@ -677,6 +681,21 @@ def lookfeel_names_image(value, c: Core) -> bool:
     if not hasattr(c, "_images"):
         c._images = lookfeel.interface_image_paths([p.path for p in c.parts])  # type: ignore[attr-defined]
     return lookfeel.names_image(value, c._images)  # type: ignore[attr-defined]
+
+
+def _public_cells(row: dict, d: ListDesign, i: int) -> None:
+    """Row `i` of a list the owner declared public (labctl.publicdata): its declared fields hold
+    the recorded record's values (the secret checks apply); the rest stays synthetic."""
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    if pub is None or i >= len(d.first_items) or pub.endpoint("GET", d.route) is None:
+        return
+    item = d.first_items[i]
+    for name in row:
+        key = next((k for k in item if _key(k) == _key(name)), None)
+        if key is not None and pub.field_public("GET", d.route, key, item[key]):
+            row[name] = item[key]
 
 
 def col_of(table, key: str | None) -> str:
@@ -772,6 +791,13 @@ def seed_sql(app: str, rows: dict, tables: list, engine: str, notes: list[str]) 
              "the recordings showed. Load exactly these rows,",
              "-- once, into the empty tables of db/schema.sql: the acceptance replay depends on "
              f"them. Dialect: {engine}.", *[f"-- {n}" for n in notes]]  # fmt: skip
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    if pub is not None:  # the owner declared some of it public: say which, and who approved
+        lines.insert(1, "-- Except: the declared columns of lists the owner declared public hold "
+                     "real public catalogue data, as recorded (approved by "
+                     + "; ".join(str(d.approved_by) for d in pub.decls) + ").")  # fmt: skip
     for table in ordered(tables):
         data = rows.get(table.name) or []
         if not data:

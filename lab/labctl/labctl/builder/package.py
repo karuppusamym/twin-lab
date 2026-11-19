@@ -1033,6 +1033,11 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
     from labctl import lookfeel
 
     look_section = lookfeel.task_text(repo_root, app_id)
+    from labctl import publicdata
+
+    with publicdata.active_for(repo_root, app_id) as pub:  # real public catalogue data, declared
+        public_note = pub.note() + "\n" if pub is not None else ""
+    look_section = public_note + look_section
     look_files = f", `{app}/look/**`" if look_section else ""
     look_check = lookfeel.check_step(repo_root, app_id)
     if look_check:
@@ -1221,6 +1226,14 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None,
     `INDEX.md` and into `MANIFEST.json` (`completeness`), and printed as a warning. With
     `strict=True` (or `TWINLAB_PACKAGE_STRICT=1`) a gap refuses the package instead.
     """
+    from labctl import publicdata
+
+    with publicdata.active_for(Path(repo_root), app_id):  # an owner's declaration, if approved
+        return _build(repo_root, app_id, out_dir, repo, strict)
+
+
+def _build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None,
+           strict: bool | None) -> Path:  # fmt: skip
     repo_root = Path(repo_root)
     _check_inputs(repo_root, app_id)
     desktop = bool((_app_yaml(repo_root, app_id).get("stack") or {}).get("desktop"))
