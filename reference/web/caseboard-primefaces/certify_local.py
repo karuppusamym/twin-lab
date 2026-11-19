@@ -132,12 +132,17 @@ def package(root: Path, rec: Path) -> dict:
         "screens": sorted(screens),
         "states": len(states),
         "kinds": kinds,
-        "without_opener": [f"{v['kind']} {v.get('title')}" for v in states if not v["opened_by"]
-                           and v.get("first_seen") != "when the page loads"],  # fmt: skip
-        "without_snapshot": [f"{v['kind']} {v.get('title')}" for v in states
-                             if v.get("snapshot") not in texts],  # fmt: skip
-        "without_section": [f"{v['kind']} {v.get('title')}" for v in states
-                            if f"### {v['kind']}" not in work_doc],  # fmt: skip
+        "without_opener": [
+            f"{v['kind']} {v.get('title')}"
+            for v in states
+            if not v["opened_by"] and v.get("first_seen") != "when the page loads"
+        ],  # fmt: skip
+        "without_snapshot": [
+            f"{v['kind']} {v.get('title')}" for v in states if v.get("snapshot") not in texts
+        ],  # fmt: skip
+        "without_section": [
+            f"{v['kind']} {v.get('title')}" for v in states if f"### {v['kind']}" not in work_doc
+        ],  # fmt: skip
         "transitions": [(t["from"], t["to"], t.get("address_after")) for t in nav["transitions"]],
         "address_lag": (nav.get("jsf") or {}).get("address_lag") or [],
         "partial_actions": len((nav.get("jsf") or {}).get("partial_actions") or []),
