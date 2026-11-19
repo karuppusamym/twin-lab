@@ -1019,7 +1019,7 @@ def _split_declarations(rec: Path, out: Path, refs: _Refs, has_end: bool) -> Non
             + yaml.safe_dump(body, sort_keys=False, allow_unicode=True),
             encoding="utf-8",
         )
-    for name in ("scope.yaml", "baseline.yaml"):
+    for name in ("scope.yaml", "baseline.yaml", "public-data.yaml"):
         if (rec / name).is_file():
             shutil.copyfile(rec / name, out / name)
 

@@ -2226,7 +2226,7 @@ LIBRARY_NAMES = [
     (r"jquery[.-]validate[.-]unobtrusive", "jQuery Validation Unobtrusive"),
     (r"jquery[.-]validat", "jQuery Validation"),
     (r"jquery[.-]?mask|jquery[.-]inputmask|inputmask", "Inputmask"),
-    (r"jquery[.-]ui", "jQuery UI"),
+    (r"jquery[.-]ui", "jQuery UI"), (r"sweet-?alert", "SweetAlert"),
     (r"jquery", "jQuery"),
     (r"(^|/)angular(js)?([.-][\d.]+)?(\.min)?\.js$|/angularjs/", "AngularJS"),
     (r"react(-dom)?([.-]production|[.-]development)?(\.min)?\.js$", "React"),
@@ -2248,8 +2248,20 @@ _BANNER = re.compile(r"^\s*/\*[!*]?\s*(?:@license\s+)?([A-Z][\w.]*(?: [A-Z][\w.]
 
 
 def library_name(path: str, text: str | None) -> str | None:
-    """The library a script file is, by its name or its banner (None: the application's own)."""
+    """The library a script file is, by its name or its banner (None: the application's own).
+    The file's own name is read first, then the package folder it is served from, then the rest
+    of its address: `/node_modules/bootstrap-sweetalert/dist/sweetalert.min.js` is SweetAlert,
+    not Bootstrap."""
     low = (path or "").lower()
+    file = low.rsplit("/", 1)[-1]
+    for rx, name in LIBRARY_NAMES:
+        if file and re.search(rx, file):
+            return name
+    # A file served from a package folder is a package, not the application's own code
+    # (`/node_modules/videojs-contrib-hls/dist/...`): named by its package.
+    pkg = re.search(r"(?:^|/)(?:node_modules|bower_components)/((?:@[\w.-]+/)?[\w.-]+)/", low)
+    if pkg:
+        return pkg.group(1)
     for rx, name in LIBRARY_NAMES:
         if re.search(rx, low):
             return name
@@ -2362,6 +2374,56 @@ def scripts_of(ctxs: list) -> tuple[list[Script], set[str]]:
                     out.append(Script("inline in a recorded page", body, True, library_name("", body),
                                       False))  # fmt: skip
     return out, own
+
+
+DIALOG_CALL = re.compile(
+    r"(?<![\w$.])(?:window\.)?(alert|confirm|prompt)\s*\(\s*(?P<q>[\"'`])"
+    r"(?P<text>(?:\\.|(?!(?P=q)).){1,300})(?P=q)\s*[,)]"
+)
+
+
+def dialog_texts(src: str) -> list[tuple[str, str]]:
+    """The browser dialogs a script shows with a text of its own: `alert("Product added.")` ->
+    (alert, Product added.). A message built from values (`alert(data.msg)`) is not listed."""
+    out: list[tuple[str, str]] = []
+    for m in DIALOG_CALL.finditer(src or ""):
+        text = m.group("text")
+        if m.group("q") == "`" and "${" in text:
+            continue
+        text = re.sub(r"\\(.)", lambda x: {"n": " ", "t": " "}.get(x.group(1), x.group(1)), text)
+        item = (m.group(1), " ".join(text.split()))
+        if item[1] and item not in out:
+            out.append(item)
+    return out
+
+
+def dialogs(scripts: list[Script], ctxs: list, data) -> list[dict]:
+    """The browser dialogs (alert, confirm, prompt) of the application: those the recording
+    showed (`seen`, with the message the recorder kept) and those its own scripts show with a
+    text of their own (`in code, not triggered`). Messages masked as any message is."""
+    out: dict[tuple[str, str], dict] = {}
+    for c in ctxs:
+        for row in c.part.facts.steps:
+            d = row.get("dialog") or {}
+            if d.get("message"):
+                item = out.setdefault(
+                    (d["kind"], _norm(d["message"])),
+                    {"kind": d["kind"], "message": d["message"], "level": SEEN, "evidence": []},
+                )
+                where = f"recording step {row.get('global') or row['n']} on `{row.get('screen')}`"
+                if where not in item["evidence"]:
+                    item["evidence"].append(where)
+    for s in scripts:
+        if not s.own or s.library:
+            continue
+        for kind, text in dialog_texts(s.text):
+            text = sanitize.mask_message(text, data.names if data is not None else set())
+            item = out.setdefault((kind, _norm(text)), {"kind": kind, "message": text,
+                                                         "level": CODE, "evidence": []})  # fmt: skip
+            ev = f"script {s.path}"
+            if ev not in item["evidence"]:
+                item["evidence"].append(ev)
+    return sorted(out.values(), key=lambda d: (_RANK[d["level"]], d["kind"], d["message"]))[:60]
 
 
 def _tie_code(doc: Doc, findings: list[dict], handlers: list[tuple[str, str, str]]) -> None:
@@ -2609,6 +2671,7 @@ def build(root: Path, app_id: str, ctxs: list | None = None) -> dict | None:
             "not be told",
         },  # fmt: skip
         "screens": screens,
+        "dialogs": dialogs(scripts, ctxs, data),
         "session": timers,
         "not_tied": doc.loose,
         "scripts": {
@@ -2936,7 +2999,9 @@ def _field_name(fld: dict) -> str:
 def brief_section(app_id: str, doc: dict | None) -> str:
     """The brief's section *Field rules and page behaviour*: per screen a table of the rules
     (field, rule, message, level), then rules between fields, behaviour, the state on load."""
-    if not doc or not (doc.get("screens") or doc.get("session") or doc.get("not_tied")):
+    if not doc or not (
+        doc.get("screens") or doc.get("session") or doc.get("not_tied") or doc.get("dialogs")
+    ):
         return ""
     app = f"apps/{app_id}"
     out = [f"## {HEADING}\n",
@@ -2989,6 +3054,13 @@ def brief_section(app_id: str, doc: dict | None) -> str:
             out.append("**On load:** " + "; ".join(state[:30]) + ".\n")
         if hints:
             out.append("**Hints shown with the fields:** " + "; ".join(hints[:30]) + ".\n")
+    if doc.get("dialogs"):
+        out.append("**Browser dialogs** (`alert`, `confirm`, `prompt`; show each with this text, "
+                   "letter for letter):\n")  # fmt: skip
+        for d in doc["dialogs"]:
+            out.append(f"- `{d['kind']}`: \"{_cell(d['message'])}\" ({d['level']}; "
+                       f"{', '.join(d['evidence'][:3])})")  # fmt: skip
+        out.append("")
     for t in doc.get("session") or []:
         out.append("**Session timer** (" + t["level"] + "): " + behaviour_text(t) + "\n")
     if doc.get("not_tied"):

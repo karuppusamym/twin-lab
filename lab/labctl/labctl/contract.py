@@ -181,7 +181,10 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
         (out / templates.FILE).unlink(missing_ok=True)
         return text
     found = signin.observe(ctxs)
-    signin.write_facts(root, app_id, found)
+    from labctl import cookies
+
+    cookie_rows = cookies.facts(ctxs, found)  # Set-Cookie attributes + scripts + use, no value
+    signin.write_facts(root, app_id, found, cookie_rows)
     wrote = None
     if found and state.get("tables"):
         wrote = signin.write(root, app_id, found, state.get("taken") or {},
@@ -203,7 +206,7 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     end = ("## Behaviour seen in the recordings", "## Part of a flow across applications",
            "## Running in the lab")  # fmt: skip
     text = _insert(text, apicatalog.brief_section(app_id, done), end)
-    text = _insert(text, signin.brief_section(app_id, found, wrote), end)
+    text = _insert(text, signin.brief_section(app_id, found, wrote, cookie_rows), end)
     text = _insert(text, navmap.brief_sections(app_id, nav), end)
     text = _insert(text, codemap.brief_section(app_id, code, refused), end)
     text = _insert(text, templates.brief_section(app_id, shaped, done.get("network")), end)

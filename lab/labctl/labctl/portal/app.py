@@ -1198,7 +1198,7 @@ def create_app(root: Path) -> FastAPI:
                 print(f"  OPEN  {gap}")
             print("wrote " + ", ".join(str(p.relative_to(root)) for p in result.files))
             if result.kept_app_yaml:
-                print("kept the existing app.yaml")
+                print("updated app.yaml: generated parts new, run: and approved levels kept")
             return {
                 "screens": len(b.screens),
                 "routes": len(b.routes),

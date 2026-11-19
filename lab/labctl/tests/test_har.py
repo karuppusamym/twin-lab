@@ -488,3 +488,70 @@ def test_names_an_api_returned_are_masked_on_every_page(tmp_path):
     dumped = model.model_dump_json()
     for name in ("Okonkwo", "Vandermeer"):
         assert name not in written and name not in dumped, name
+
+
+@pytest.mark.parametrize(
+    ("host", "site"),
+    [("www.shop.example", "shop.example"), ("api.shop.example", "shop.example"),
+     ("shop.example", "shop.example"), ("a.b.shop.co.uk", "shop.co.uk"),
+     ("localhost:8101", None), ("127.0.0.1", None), ("localhost", None), ("co.uk", None)],
+)  # fmt: skip
+def test_the_site_of_a_host(host, site):
+    assert har.site_of(host) == site
+
+
+def test_referer_of_another_origin_names_no_page():
+    # the browsers' default policy sends only the origin to another origin: `/` is not the page
+    assert har.referer_path("https://www.shop.example/", "api.shop.example") == ""
+    assert har.referer_path("https://www.shop.example/prod.html?id=1", "api.shop.example") == (
+        "/prod.html")  # fmt: skip
+    assert har.referer_path("https://www.shop.example/", "www.shop.example") == "/"
+    assert har.referer_path("", "www.shop.example") == ""
+
+
+def _api_rec(tmp_path: Path, api_url: str) -> Path:
+    """A page on www.shop.example whose script calls a JSON API at `api_url` (another origin),
+    with the origin-only Referer a browser sends there."""
+    rec = tmp_path / "rec"
+    (rec / "dom").mkdir(parents=True)
+    page = "<html><body><h1>Shop</h1><div id='tbodyid'></div></body></html>"
+    answer = {"Items": [{"id": 1, "title": "Okonkwo lamp", "price": 360}]}
+    ref = [{"name": "Referer", "value": "https://www.shop.example/"}]
+    entries = [
+        {"startedDateTime": "2026-01-01T00:00:00Z", "time": 5, "_resourceType": "document",
+         "request": {"method": "GET", "url": "https://www.shop.example/prod.html", "headers": []},
+         "response": {"status": 200, "content": {"mimeType": "text/html", "text": page}}},
+        {"startedDateTime": "2026-01-01T00:00:01Z", "time": 5, "_resourceType": "fetch",
+         "request": {"method": "POST", "url": api_url, "headers": ref,
+                     "postData": {"mimeType": "application/json", "text": '{"id": "1"}'}},
+         "response": {"status": 200, "content": {"mimeType": "application/json",
+                                                 "text": json.dumps(answer)}}},
+    ]  # fmt: skip
+    (rec / "recording.har").write_text(json.dumps({"log": {"entries": entries}}), encoding="utf-8")
+    (rec / "dom" / "0001.html").write_text(page, encoding="utf-8")
+    step = {"seq": 1, "ts": "2026-01-01T00:00:00.500Z", "url": "https://www.shop.example/prod.html",
+            "action": "goto", "dom": "dom/0001.html"}  # fmt: skip
+    (rec / "steps.jsonl").write_text(json.dumps(step) + "\n", encoding="utf-8")
+    return rec
+
+
+def test_an_api_on_another_origin_of_the_same_site_is_the_applications_own(tmp_path):
+    """Demoblaze trial: pages on www. call their JSON API on api. of the same site. The calls were
+    left out as another host's, so the package had no endpoint, no table and said the data lived
+    in the browser; and every call was put on screen `/` by the origin-only Referer."""
+    model = har.analyse("shop", _api_rec(tmp_path, "https://api.shop.example/view"), tmp_path)
+    assert model.route("POST /view").body == ["id: string"]
+    assert model.stack.data["kind"] == "server"
+    assert not [p for p in model.problems if "were left out" in p]
+    assert [p for p in model.problems if "of the pages' own site" in p]
+    calls = {s.path: [(c.method, c.path) for c in s.calls] for s in model.screens}
+    assert calls == {"/prod.html": [("POST", "/view")]}  # the page that made it, not `/`
+
+
+def test_an_api_of_another_site_or_port_stays_out(tmp_path):
+    other = har.analyse("shop", _api_rec(tmp_path, "https://api.other.example/view"), tmp_path)
+    assert "POST /view" not in {r.key for r in other.routes}
+    assert [p for p in other.problems if "were left out" in p]
+    entries = [har.Exchange(None, "POST", "localhost:8102", "/x", [], {}, "", [], 200, "", None,
+                            None, 1.0, "api")]  # fmt: skip
+    assert har.api_hosts({"localhost:8101"}, entries) == set()

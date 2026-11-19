@@ -329,6 +329,28 @@ def build_all(
         raise typer.Exit(1)
 
 
+@app.command("public-data")
+def public_data(
+    recording: Path = typer.Argument(..., help="A recording folder."),
+    force: bool = typer.Option(False, "--force", help="Replace an existing declaration."),
+) -> None:
+    """Draft <recording>/public-data.yaml, unapproved: every endpoint and its answer fields and
+    the image folders the recording holds, nothing marked public. The owner moves what is public
+    catalogue data into `public:` and a person fills `approved_by`; until then nothing changes
+    (labctl.publicdata)."""
+    from labctl import publicdata
+
+    if not recording.is_dir():
+        typer.echo(f"{recording} is not a recording folder", err=True)
+        raise typer.Exit(2)
+    out = recording / publicdata.FILE
+    if out.exists() and not force:
+        typer.echo(f"{out} exists (--force replaces it)", err=True)
+        raise typer.Exit(1)
+    out.write_text(publicdata.draft(recording), encoding="utf-8", newline="\n")
+    typer.echo(f"wrote {out}: a draft, nothing is public until it is filled in and approved")
+
+
 @app.command("check-links")
 def check_links(
     recording: Path = typer.Argument(..., help="A recording folder."),

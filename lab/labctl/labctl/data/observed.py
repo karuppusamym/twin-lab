@@ -62,7 +62,7 @@ SENSITIVE_ID = re.compile(
 )
 CODE_NAME = re.compile(
     r"(status|state|type|kind|code|priority|severity|level|stage|role|mode|category|channel|"
-    r"currency|outcome|result|decision|flag|class|grade|product|sub_?type)$",
+    r"currency|outcome|result|decision|flag|class|grade|product|sub_?type)$|(^|_)(cat|categ)$",
     re.IGNORECASE,
 )
 EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
@@ -419,14 +419,9 @@ def _html(text: str) -> _Html:
 
 
 def _items(data: Any) -> list[dict]:
-    if isinstance(data, list):
-        return [x for x in data if isinstance(x, dict)]
-    if isinstance(data, dict):
-        lists = [k for k in ITEM_KEYS if isinstance(data.get(k), list)]
-        if lists:
-            return [x for x in data[lists[0]] if isinstance(x, dict)]
-        return [data]
-    return []
+    from labctl import har
+
+    return har._items(data)  # an envelope's key in any case (`Items`): har.list_key
 
 
 def _entity(path: str) -> str | None:
@@ -500,8 +495,7 @@ def _read_recording(obs: _Obs, rec_path: Path) -> None:
         pairs: list[tuple[str, str]] = []
         if e.resp_json is not None and entity:
             rows = _items(e.resp_json)
-            obs.add_rows(entity, rows, is_list=isinstance(e.resp_json, list) or any(
-                isinstance(e.resp_json.get(k), list) for k in ITEM_KEYS if isinstance(e.resp_json, dict)))  # fmt: skip
+            obs.add_rows(entity, rows, is_list=har.is_list_answer(e.resp_json))
             for row in rows[:1]:
                 pairs = [(k, v) for k, v in row.items() if not isinstance(v, (dict, list))]
                 for k, v in row.items():  # a nested object is a related entity

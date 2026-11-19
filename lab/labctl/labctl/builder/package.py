@@ -87,6 +87,39 @@ def brief_digest(repo_root: Path, app_id: str) -> str:
     return "sha256:" + hashlib.sha256(_content(brief)).hexdigest()[:16]
 
 
+def data_leaks(repo_root: Path, app_id: str, entries: list[tuple[str, bytes]]) -> list[str]:
+    """Observed data values found in `codemap.json` and the build documents (`spec/**`) that no
+    other file of the package holds (those passed their own privacy rules: a page's option
+    text, a code). Observed: every value the recorded calls held (`apicatalog.observed_values`)
+    but codes, generated identifiers, typed shapes, the application's static JSON and what the
+    owner declared public (labctl.publicdata). A finding names the file and the value's shape,
+    never the value."""
+    from labctl import apicatalog, codemap
+    from labctl.behaviour import dom as domlib
+
+    app = f"apps/{app_id}/"
+    mine = {rel: data.decode("utf-8", "replace") for rel, data in entries
+            if rel == f"{app}codemap.json" or rel.startswith(f"{app}{docs.DIR}/")}  # fmt: skip
+    if not mine:
+        return []
+    other = "\n".join(data.decode("utf-8", "replace") for rel, data in entries if rel not in mine)
+    try:
+        # the application's own static JSON (translations, configuration) is its code, not data:
+        # the code map keeps it on the same terms (codemap._without_code)
+        ctxs = codemap._without_code(apicatalog.load(Path(repo_root), app_id))
+        values = apicatalog.observed_values(ctxs, apicatalog.kept_values(Path(repo_root), app_id,
+                                                                          ctxs))  # fmt: skip
+    except (OSError, ValueError):
+        return []
+    values -= apicatalog._seed_dates(Path(repo_root), app_id)
+    found = []
+    for rel, text in sorted(mine.items()):
+        for v in sorted(values):
+            if (v == text.strip() or (len(v) >= 8 and v in text)) and v not in other:
+                found.append(f"{rel}: an observed value of shape `{domlib.shape(v)}`")
+    return found
+
+
 def _check_inputs(repo_root: Path, app_id: str) -> None:
     if not _APP_RE.match(app_id):
         raise PackageError(f"app id must be lower-case letters, digits, - or _, got {app_id!r}")
@@ -981,6 +1014,11 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
     from labctl import lookfeel
 
     look_section = lookfeel.task_text(repo_root, app_id)
+    from labctl import publicdata
+
+    with publicdata.active_for(repo_root, app_id) as pub:  # real public catalogue data, declared
+        public_note = pub.note() + "\n" if pub is not None else ""
+    look_section = public_note + look_section
     look_files = f", `{app}/look/**`" if look_section else ""
     look_check = lookfeel.check_step(repo_root, app_id)
     if look_check:
@@ -1169,6 +1207,14 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None,
     `INDEX.md` and into `MANIFEST.json` (`completeness`), and printed as a warning. With
     `strict=True` (or `TWINLAB_PACKAGE_STRICT=1`) a gap refuses the package instead.
     """
+    from labctl import publicdata
+
+    with publicdata.active_for(Path(repo_root), app_id):  # an owner's declaration, if approved
+        return _build(repo_root, app_id, out_dir, repo, strict)
+
+
+def _build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None,
+           strict: bool | None) -> Path:  # fmt: skip
     repo_root = Path(repo_root)
     _check_inputs(repo_root, app_id)
     desktop = bool((_app_yaml(repo_root, app_id).get("stack") or {}).get("desktop"))
@@ -1208,6 +1254,10 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None,
     entries += [(rel, _content(path)) for rel, path in files]
     # The build documents (labctl.builder.docs), written from these entries only.
     entries += sorted(docs.generate(app_id, dict(entries)).items())
+    leaked = data_leaks(repo_root, app_id, entries)
+    if leaked:
+        raise PackageError(f"cannot package {app_id}: a value the recording holds as data is in "
+                           "the code map or the build documents: " + "; ".join(leaked[:10]))  # fmt: skip
     purposes = [(rel, complete.purpose(rel, app_id, data)) for rel, data in entries]
     purposes += [(complete.INDEX_FILE, complete.purpose(complete.INDEX_FILE, app_id)),
                  (MANIFEST_FILE, complete.purpose(MANIFEST_FILE, app_id))]  # fmt: skip

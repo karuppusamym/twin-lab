@@ -323,6 +323,14 @@ def own_hosts(recordings: list[Path]) -> set[str]:
                 continue
             if url.startswith(("http://", "https://")):
                 out.add(urlsplit(url).netloc.lower())
+    # the pages' own API on another origin of their site (`api.` beside `www.`: har.api_hosts)
+    from labctl import har
+
+    for rec in recordings:
+        try:
+            out |= har.api_hosts(set(out), har.exchanges(har.load(Path(rec)).har))
+        except (OSError, ValueError):
+            continue
     return out
 
 
@@ -647,6 +655,11 @@ class Checker:
         s = " ".join(text.split())
         if not s:
             return False
+        from labctl import publicdata
+
+        pub = publicdata.current()  # a value the owner declared public may be kept as it is
+        if pub is not None and pub.text(s) and not check_text(s, self.hosts):
+            return True
         bad = (
             sanitize._mask_data_tokens(s) != s
             or bool(self.data.findings(s, label=label))

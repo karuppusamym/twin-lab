@@ -147,3 +147,46 @@ def test_display_formats_from_what_the_pages_showed():
     assert seedplan._format(["NEW", "PAID"])[0].startswith("one of `NEW`, `PAID`")
     assert seedplan._format(["ORD-1001", "ORD-1023"])[0] == "an identifier `ORD-` + 4 digits"
     assert seedplan._format(["3"])[1] == "0"
+
+
+def test_the_pages_api_on_another_origin_of_their_site_is_read_with_no_page_from_its_referer(
+    tmp_path,
+):
+    """Demoblaze trial: the pages on www. call api. of the same site. Its calls were dropped as
+    another host's, and their origin-only Referer (`/`) named the wrong page."""
+    import json
+
+    part = tmp_path / "evidence" / "shop" / "rec"
+    part.mkdir(parents=True)
+    steps = [{"seq": 1, "ts": "2026-11-18T10:50:04.000Z", "url": "https://www.shop.example/",
+              "action": "goto"},
+             {"seq": 2, "ts": "2026-11-18T10:50:05.000Z",
+              "url": "https://www.shop.example/prod.html?idp_=1", "action": "goto"}]  # fmt: skip
+    (part / "steps.jsonl").write_text("\n".join(json.dumps(s) for s in steps), "utf-8")
+
+    def call(host: str, t: str) -> dict:
+        return {"startedDateTime": f"2026-11-18T10:50:{t}Z", "time": 3, "_resourceType": "fetch",
+                "request": {"method": "POST", "url": f"https://{host}/view",
+                            "headers": [{"name": "Referer", "value": "https://www.shop.example/"}],
+                            "postData": {"mimeType": "application/json", "text": '{"id": "1"}'}},
+                "response": {"status": 200, "headers": [], "content": {
+                    "mimeType": "application/json", "text": '{"id": 1, "title": "Lamp"}'}}}  # fmt: skip
+
+    har = {"log": {"entries": [call("api.shop.example", "05.300"),
+                               call("api.other.example", "05.400")]}}  # fmt: skip
+    (part / "recording.har").write_text(json.dumps(har), "utf-8")
+    p = seedplan.load_part("shop", part)
+    (e,) = p.exchanges  # the API of another site stays out
+    assert (e.method, e.route, e.referer) == ("POST", "/view", "")
+    assert [x.route for x in p.owner.get(2, [])] == ["/view"]
+
+
+def test_an_id_the_page_gives_several_elements_is_found_by_the_next_locator():
+    from labctl import stepfacts
+
+    step = {"selector": "a#itemc", "locators": [
+        {"kind": "id", "value": "itemc", "count": 3},
+        {"kind": "role", "role": "link", "name": "Laptops", "count": 1}]}  # fmt: skip
+    assert stepfacts._target(step) == 'role link "Laptops"'
+    step["locators"][0]["count"] = 1
+    assert stepfacts._target(step) is None  # an id of one element names it
