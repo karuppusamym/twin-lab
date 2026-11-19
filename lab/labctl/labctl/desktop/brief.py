@@ -227,7 +227,9 @@ Rebuild in **{tk}**, the toolkit the brief's "Stack to pin" names. Build with: {
 
 ## Database
 
-Data lives in **SQLite** (unless `app.yaml` names another engine): create the tables from
+Data lives in **SQLite** (unless `app.yaml` names another engine; when the SQLite driver is not
+available to you offline, keep the same tables and rows in a local file the app reads and
+writes, and say so in BUILD-NOTES.md): create the tables from
 `{app}/db/schema.sql` when the file has none, and load **exactly** the rows of `{app}/db/seed.sql`
 (when the package has it) once, into the empty tables, and no other rows: the replay types the
 values in `{app}/steps/*.values.yaml` and expects the recorded outcomes on these rows. Without a

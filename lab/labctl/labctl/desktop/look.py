@@ -192,6 +192,7 @@ def _best(win: _Window, recs: dict) -> tuple[str, int, dict, str | None] | None:
 def _controls(tree: dict, img) -> list[dict]:
     cx, cy, cw, ch = _client(tree)
     out = []
+    named = _named_after(tree)
     for node, ancestors, idx in dmodel._elements_of(tree):  # noqa: SLF001 - the model's walk
         loc = locator.build(tree, node, ancestors, idx)
         rect = node.get("rect")
@@ -200,6 +201,15 @@ def _controls(tree: dict, img) -> list[dict]:
             item["automation_id"] = node["aid"]
         if node.get("name") and node.get("name_is") != "data":
             item["name"] = node["name"]
+        if loc["selector"] in named:
+            item["name_from_label"] = named[loc["selector"]]
+            own = re.sub(r"^(txt|cbo|cmb)", "lbl", node.get("aid") or "")
+            if own and own != named[loc["selector"]]:
+                item["name_note"] = (
+                    f"named after `{named[loc['selector']]}`, not `{own}`: UI Automation names an "
+                    "input after the label just before it in tab order (WinForms: the label with "
+                    "the next lower TabIndex; a control that is no tab stop is still ordered by "
+                    "its TabIndex)")  # fmt: skip
         if rect and rect[2] > 0 and rect[0] > -50:
             item["bounds"] = [rect[0] - cx, rect[1] - cy, rect[2], rect[3]]
             dock = _dock(item["bounds"], cw, ch)
@@ -238,6 +248,14 @@ def _grid_geometry(node: dict, rect) -> dict:
         elif child.get("type") == "Custom" and child.get("rect") and "row_height" not in out and (
                 child.get("children")):  # fmt: skip
             out["row_height"] = child["rect"][3]
+            out["first_row_y"] = child["rect"][1] - rect[1]
+    if "first_row_y" in out:
+        out["note"] = (
+            "UI Automation bounds: `first_row_y` is where the first row starts below the grid's "
+            "top edge (the grid's border included). Make the toolkit's property give that: in "
+            "WinForms a DataGridView's ColumnHeadersHeight is first_row_y minus the border "
+            "(1 px with BorderStyle FixedSingle), not the header item's height."
+        )
     return out
 
 
@@ -283,8 +301,34 @@ def _anchors(win: _Window) -> dict[str, str]:
     return out
 
 
+def _label_keys(tree: dict) -> dict[str, str]:
+    """A label's access key, read from the input named after it (UI Automation gives the
+    input, not the label, the access key: WinForms `&User name` labels `txtUser`)."""
+    keys: dict[str, str] = {}
+    for node, _anc, _i in locator.walk(tree):
+        if node.get("type") in ("Edit", "ComboBox", "List", "Spinner") and node.get(
+                "access_key") and node.get("name") and node.get("name_is") != "data":  # fmt: skip
+            keys.setdefault(node["name"], node["access_key"])
+    return keys
+
+
+def _named_after(tree: dict) -> dict[str, str]:
+    """selector -> the label an input takes its Name from, when that is not its own label
+    (UI Automation names an input after the label before it in tab order)."""
+    labels = {}
+    for node, _anc, _idx in locator.walk(tree):
+        if node.get("type") == "Text" and node.get("aid") and node.get("name_is") == "structure":
+            labels.setdefault(node["name"], node["aid"])
+    out = {}
+    for node, anc, idx in locator.walk(tree):
+        if node.get("type") in ("Edit", "ComboBox") and anc and node.get("name") in labels:
+            out[locator.build(tree, node, anc, idx)["selector"]] = labels[node["name"]]
+    return out
+
+
 def _texts(tree: dict, kind: str) -> list[dict]:
     out, seen = [], set()
+    label_keys = _label_keys(tree)
     for node, ancestors, idx in locator.walk(tree):
         if any(a.get("type") == "TitleBar" for a in ancestors) or node.get("type") == "TitleBar":
             continue
@@ -305,7 +349,8 @@ def _texts(tree: dict, kind: str) -> list[dict]:
             continue
         seen.add(key)
         item = {"type": t, "text": name, "selector": sel}
-        mn = _mnemonic(name, node.get("access_key"))
+        key_ = node.get("access_key") or (label_keys.get(name) if t == "Text" else None)
+        mn = _mnemonic(name, key_)
         if mn:
             item["written"] = mn
         if node.get("accel"):

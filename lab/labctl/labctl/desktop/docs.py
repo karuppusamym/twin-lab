@@ -93,6 +93,8 @@ def _window_doc(app: str, wid: str, look: dict, nav: dict, rules: dict, steps: l
             flags = (flags + "; " if flags else "") + f"docked {c['dock_seen']} (as seen)"
         if c.get("anchor_seen"):
             flags = (flags + "; " if flags else "") + f"anchored {c['anchor_seen']}"
+        if c.get("name_note"):
+            flags = (flags + "; " if flags else "") + c["name_note"]
         out.append(f"| `{_esc(c['selector'])}` | {c.get('type')} | {_esc(c.get('automation_id'))} | "
                    f"{_esc(c.get('name'))} | `{_esc(classes.get(c['selector']) or '')}` | "
                    f"{c.get('bounds')} | {ftxt} | {ctxt} | {_esc(flags)} |")  # fmt: skip
@@ -102,8 +104,9 @@ def _window_doc(app: str, wid: str, look: dict, nav: dict, rules: dict, steps: l
                 f"{x['header']} (x {x['x']}, width {x['width']})" for x in c["columns"]
             )
             out.append(f"\nGrid `{c['selector']}`: columns {cols}; header height "
-                       f"{c.get('header_height')}, row height {c.get('row_height')}, row header "
-                       f"width {c.get('row_header_width')} (0: no row headers).")  # fmt: skip
+                       f"{c.get('header_height')}, first row at y {c.get('first_row_y')}, row "
+                       f"height {c.get('row_height')}, row header width "
+                       f"{c.get('row_header_width')} (0: no row headers). {c.get('note') or ''}")  # fmt: skip
     texts = (look.get("texts") or {}).get(wid, {}).get("texts") or []
     if texts:
         out.append("\n## Texts (use verbatim)\n")

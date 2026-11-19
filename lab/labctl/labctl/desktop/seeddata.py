@@ -111,7 +111,10 @@ def steps_doc(rec, root: Path, app_id: str) -> dict:
                      "in a password field (not even its shape is kept); `item` is the code chosen "
                      "in a drop-down list; `rows_after` the rows each grid showed after the step; "
                      "`message` a message box's text; `picture` the window after the step, data "
-                     "painted over. The values the replay types are in <recording>.values.yaml.",
+                     "painted over. A step's tree and picture are read after a batch of actions: they "
+                     "can show a later state (a value typed at a later step); `typed_shape` and "
+                     "the step order are exact. The values the replay types are in "
+                     "<recording>.values.yaml.",
             "steps": steps}  # fmt: skip
 
 
