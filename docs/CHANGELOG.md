@@ -2,6 +2,38 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Demoblaze blind rebuild, round 3: lists in any order, masked footer, late picture
+Round 3 passed VERIFIED COMPLETE on a repeat run but its official run failed one case by
+chance: the cart's rows are keyed by random ids (UUIDs the page makes) and fetched in
+parallel, in the original too, and the case pinned Nokia before Samsung. Fixed, each with a
+test:
+- **Order-free list checks** (`behaviour/acceptance.py`): `unordered: true` on a `texts` case
+  with `equals:` compares the items as a multiset (`test_acceptance_cases.py`).
+- **Drafts do not pin an order that is not stable** (`behaviour/drafts.py`, new
+  `labctl/listorder.py`): a list that holds only records the flow acted on gets a `texts` case
+  (`{record: <step>}` per item) with `unordered: true` unless two or more page views agree on
+  an order that follows a sortable key that is not random (a UUID, a token or a hash is
+  random), or a sort control the recording used; the acceptance template's list candidates
+  are unordered too (`test_list_order.py`).
+- **API catalogue** (`apicatalog.py`): a list's order resting on one answer or random keys is
+  `not stable (one answer)` / `not stable (random keys)`, and the endpoint's notes say its
+  examples show one possible order (`POST /viewcart` was stated as ordered by `id` from one
+  answer of two UUIDs; `test_catalogue_list_order.py`).
+- **Masked page data in pictures** (`behaviour/drafts.py`): in every drafted visual state, text
+  included or not, an element showing data the package masks that the page itself carries
+  (in the served HTML, not from the API: the footer's contact lines) is excluded with the
+  reason. Leaving the text regions out is an explicit option, `TWINLAB_DRAFT_TEXT=exclude` or
+  `compare` (default: excluded when no font is carried, compared when the fonts are)
+  (`test_visual_masked_regions.py`).
+- **Recorder picture before the next action** (`recorder.py`): before each action of a
+  recording script, the page writes and snapshots what it has not yet (`__tlBeforeAction`)
+  and the step's picture is taken, so a `fill` followed a few ms later by a `click` no longer
+  gets an unsettled picture; a picture still late (a person's or an attached robot's action
+  inside the settle window) keeps `picture_settled: false`
+  (`test_recorder_picture_before_next.py`).
+Open: the video still has no stream stand-in; a person's (not a script's) action inside the
+settle window still gets a late, marked picture.
+
 ## 2026-11-19 — Build packages carry the open-source libraries and web fonts
 The owner's decision ("Carry them"): a blind rebuild of Demoblaze passed every check but set
 its text in a serif fallback, lost the video player's icon font and wrote its own stand-ins for

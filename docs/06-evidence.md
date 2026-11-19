@@ -179,8 +179,12 @@ What a judge checks against, and how the replay compares:
 - **Pictures.** A click gets no picture of its own: it is observed where its page settled. To
   see the record a click acted on, open its `dom/<seq>.before.html` and the next step's picture
   (`bindings.yaml` names both under `check_against:`); `screens/<seq>.png` of the click does not
-  exist. A picture taken after the next action had begun says `picture_settled: false`, and the
-  visual draft makes that state optional with the reason.
+  exist. In a scripted recording, before each action (a `click` a few ms after a `fill`), the
+  page writes and snapshots what it has not yet and the recorder takes that step's picture,
+  so the picture shows the page before the action's events. A picture still taken after the
+  next action had begun (a person's or an attached robot's action inside the settle window)
+  says `picture_settled: false`, and the visual draft makes that state optional with the
+  reason.
 - **Regions that change by themselves** (a carousel that rides, a video, a CSS animation, an
   element that changed between two snapshots with no action between) are excluded in every
   drafted visual state, each with its reason.
