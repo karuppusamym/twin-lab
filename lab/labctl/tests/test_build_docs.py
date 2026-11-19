@@ -283,7 +283,9 @@ def built(request, tmp_path_factory):
 def test_one_page_file_per_screen_naming_its_selectors_rules_and_api_calls(built):
     pages = {n: t for n, t in built.new.items() if "/PAGES/" in n}
     screens = built.nav["screens"]
-    assert len(pages) == len(screens) + len(built.nav.get("unrecorded_pages") or [])
+    unrecorded = built.nav.get("unrecorded_pages") or []
+    reconstructed = [t for t in pages.values() if "RECONSTRUCTED" in t]
+    assert len(pages) == len(screens) + len(unrecorded) + len(reconstructed)
     by_path = {}
     for text in pages.values():
         path = re.match(r"# \d\d\. `([^`]+)`", text).group(1)

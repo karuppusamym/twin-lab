@@ -374,6 +374,10 @@ class Pkg:
                 out.append(Screen(u["path"], _slug(u["path"]), "unrecorded", u, u.get("page"),
                                   False))  # fmt: skip
         for r in _code_routes(self.codemap):
+            # a recorded screen or a redirect is not a screen of its own; the code map writes a
+            # parameter as `:id`, the navigation map as `{id}`
+            if r.get("status") in ("recorded", "redirect"):
+                continue
             if r["path"] not in seen:
                 seen.add(r["path"])
                 out.append(Screen(r["path"], _slug(r["path"]), "code", r, None, False))
@@ -429,6 +433,7 @@ def _code_routes(codemap) -> list[dict]:
                 path = str(r.get("path") or r.get("route"))
                 if not path.startswith("/"):
                     path = "/" + path
+                path = re.sub(r":([A-Za-z_][A-Za-z0-9_]*)", r"{\1}", path)
                 out.append({**r, "path": path})
     return out
 
