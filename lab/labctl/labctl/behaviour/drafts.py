@@ -14,8 +14,11 @@ person reviews it and approves it (or deletes what should not count). Nothing he
 - acceptance cases the recording visibly established (`acceptance_cases`, used by
   `labctl.seedplan.acceptance`): the count of a list's rows where a step acted on one of them,
   that count after the step when the step changed it (a cart row deleted), and the record's title
-  on the page a click on it opened (`{record: <step>}`: a seed value, never a recorded one).
-  They are `required: false` until a person sets `required: true`: an unapproved case never
+  on the page a click on it opened (`{record: <step>}`: a seed value, never a recorded one),
+  and the titles of a list that holds only records the flow acted on (a cart after two adds),
+  `unordered: true` unless its order is shown to be stable (`labctl.listorder`: two or more
+  page views agree on an order that follows a sortable key that is not random, or a sort
+  control the recording used; a UUID, a token or a hash is random). They are `required: false` until a person sets `required: true`: an unapproved case never
   decides a replay's result.
 """
 
@@ -200,7 +203,146 @@ def acceptance_cases(part, records: list[dict], number=None) -> list[dict]:
             add({"id": f"record-shown-{num(r['n'])}", "after": target["seq"], "check": "text",
                  "locator": loc, "equals": {"record": r["n"]}, "basis": "evidence", "required": False,
                  "note": f"the page step {num(r['n'])} opened showed the record it acted on"})  # fmt: skip
+    for case in list_cases(part, records, num):
+        add(case)
     return out
+
+
+# --- lists of records, and whether their order is stable ---------------------------------------
+
+_SORT = re.compile(r"\bsort|order[-_ ]?by|\bsorting\b", re.I)
+_ARG = re.compile(r"""\(\s*["']([^"']{1,80})["']""")
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.split()).lower()
+
+
+def _text_of(node) -> str:
+    return " ".join(" ".join(node.text).split())
+
+
+def _list_selector(node) -> tuple[str, object] | None:
+    """`#container > row > cell:nth-child(n)...` for a title in a list: the nearest ancestor
+    with an id is the container, the level under it the row (by tag and classes), each level
+    below by its position. With the row element."""
+    path = []
+    cur = node
+    while cur.parent is not None and cur.parent.tag != "#document":
+        path.append(cur)
+        if cur.parent.id:
+            break
+        cur = cur.parent
+    else:
+        return None
+    container, row = path[-1].parent, path[-1]
+    parts = [f"#{container.id}", row.tag + "".join(f".{c}" for c in row.classes[:3])]
+    for n in reversed(path[:-1]):
+        sibs = [x for x in n.parent.children if x.tag]
+        parts.append(f"{n.tag}:nth-child({sibs.index(n) + 1})")
+    return " > ".join(parts), row
+
+
+def row_keys(row, title: str) -> dict:
+    """What a row could be ordered by, in memory only: its title, and its key values (ids,
+    `data-*`, a quoted argument of an `onclick`, an address's query)."""
+    keys: dict = {"title": title}
+    for n in [row, *domlib._walk(row)]:
+        for name, value in n.attrs.items():
+            if not value:
+                continue
+            if name == "id" or name.startswith("data-"):
+                keys.setdefault(f"{n.tag}[{name}]", value)
+            elif name.startswith("on"):
+                m = _ARG.search(value)
+                if m:
+                    keys.setdefault(f"{n.tag}[{name}]", m.group(1))
+            elif name == "href" and ("?" in value or "#" in value.strip("#")):
+                keys.setdefault(f"{n.tag}[href]", value)
+    return keys
+
+
+def _sort_used(part, before_seq: int) -> bool:
+    """A recorded step before `before_seq` used a sort control (its selector, text or the
+    element's `aria-sort` / class says sort)."""
+    for s in part.raw:
+        if s["seq"] >= before_seq or s.get("action") not in USER_ACTIONS:
+            continue
+        said = " ".join(str(x) for x in (s.get("selector"), s.get("text"), s.get("label")) if x)
+        if _SORT.search(said):
+            return True
+        before = part.befores.get(s["seq"])
+        for n in select(before, s.get("selector") or "") if before and s.get("selector") else []:
+            if "aria-sort" in n.attrs or _SORT.search(" ".join(n.classes)):
+                return True
+    return False
+
+
+def list_cases(part, records: list[dict], num=lambda seq: seq) -> list[dict]:
+    """A `texts` case for each list a page view showed whose items are all records the flow
+    acted on (a cart holding the products added): `{record: <step>}` per item, in the order
+    shown, and `unordered: true` unless the order is stable (`labctl.listorder`: two or more
+    page views agree on an order that follows a sortable key that is not random, or a sort
+    control the recording used). Only lists shown with two items or more somewhere."""
+    from labctl import listorder
+
+    found: dict[str, list[tuple[dict, list, list[dict]]]] = {}
+    for st in part.raw:
+        html = part.doms.get(st["seq"]) if st.get("dom") else None
+        acted = {}
+        for r in records:
+            if r.get("record") and r["n"] < st["seq"]:
+                acted[_norm(r["record"])] = r["n"]  # the latest step that acted on it
+        if not html or not acted:
+            continue
+        root = domlib.parse_html(html)
+        hits = [x for x in domlib._walk(root) if _norm(_text_of(x)) in acted]
+        inner = [x for x in hits if not any(c in hits for c in domlib._walk(x))]
+        sels = {}
+        for x in inner:
+            got = _list_selector(x)
+            if got:
+                sels.setdefault(got[0], []).append(x)
+        for sel in sels:
+            shown = select(html, sel)
+            texts = [_text_of(n) for n in shown]
+            if not shown or any(_norm(t) not in acted for t in texts):
+                continue  # the list holds rows the flow did not act on
+            keys = [row_keys(_list_selector(n)[1], t) for n, t in zip(shown, texts, strict=True)]
+            views = found.setdefault(sel, [])
+            # the same page shown again with nothing loaded is not another view of the list
+            if views and views[-1][2] == keys and st.get("action") != "goto":
+                continue
+            views.append((st, [acted[_norm(t)] for t in texts], keys))
+    out = []
+    for sel, views in found.items():
+        if max(len(v[1]) for v in views) < 2:
+            continue  # one item everywhere: not a list (a title on a detail page)
+        last = max(st["seq"] for st, _r, _k in views)
+        order = listorder.judge([kv for _s, _r, kv in views], what="page view",
+                                sort_used=_sort_used(part, last))  # fmt: skip
+        drafted = None
+        for st, refs, _keys in views:
+            if refs == drafted:
+                continue  # the same records again (a reload): one case says it
+            drafted = refs
+            case = {"id": f"list-{_slug(sel)}-after-{num(st['seq'])}", "after": st["seq"],
+                    "check": "texts", "locator": sel, "equals": [{"record": n} for n in refs],
+                    "basis": "evidence", "required": False}  # fmt: skip
+            steps = ", ".join(str(num(n)) for n in dict.fromkeys(refs))
+            note = f"the list showed the record(s) of step(s) {steps}"
+            if order.unordered and len(refs) > 1:
+                case["unordered"] = True
+                note += f"; order {order.label}: {order.reason}; compared in any order"
+            elif len(refs) > 1:
+                note += f"; order stable: {order.reason}"
+            case["note"] = note
+            out.append(case)
+    return out
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:48]
 
 
 def dialog_lines(part, from_code: dict[int, dict] | None = None) -> list[str]:

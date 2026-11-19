@@ -552,8 +552,11 @@ def candidates_from_dom(html: str, after) -> list[dict]:
             out.append({"id": f"order-{css.strip('#.').replace('.', '-')}", "after": after,
                         "category": "behaviour", "check": "texts", "locator": f"{css} > {item}",
                         "equals": TODO,
-                        "hint": "each item's text, in order, from the bindings: "
-                                "[{binding: <step>}, ...]"})  # fmt: skip
+                        "unordered": True,
+                        "hint": "each item's text, from the bindings: [{binding: <step>}, ...]; "
+                                "one recorded view does not show the order to be stable, so it "
+                                "is compared in any order: delete unordered only when the order "
+                                "follows a key that is not random or a sort control"})  # fmt: skip
         elif node.tag not in ("script", "style", "input", "select", "textarea", "button", "a"):
             css = _css_of(node)
             role = node.attrs.get("role")

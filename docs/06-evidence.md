@@ -192,6 +192,11 @@ What a judge checks against, and how the replay compares:
 - **Lists in any order.** A `texts` acceptance case with `unordered: true` compares the texts as
   a multiset: the same items, each as often, in any order. Use it for a list whose order the
   original does not guarantee (rows keyed by random ids, rows fetched by parallel requests).
+  The drafts write a list's case (the titles of a list that holds only records the flow acted
+  on, as `{record: <step>}`) with `unordered: true` unless the order is shown to be stable: two
+  or more page views agree on an order that follows a sortable key that is not random (a UUID,
+  a random token or a hash is random), or the page offers a sort control and the recording used
+  it (`labctl/listorder.py`). The note says which.
 
 ## The look of the application
 

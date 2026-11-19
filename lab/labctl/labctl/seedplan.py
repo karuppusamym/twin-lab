@@ -1897,6 +1897,23 @@ def acceptance(root: Path, app: str, rec_name: str, number=None) -> dict | None:
             "excluded": excluded, "cases": cases}  # fmt: skip
 
 
+def global_refs(value, glob: dict):
+    """An expected value with each `{binding: n}` / `{record: n}` (alone, or in a list: a list
+    case) in the whole recording's step numbers; None when a step has none there."""
+    refs = value if isinstance(value, list) else [value]
+    mapped = []
+    for one in refs:
+        key = next((k for k in ("binding", "record") if isinstance(one, dict)
+                    and isinstance(one.get(k), int)), None)  # fmt: skip
+        if key is None:
+            mapped.append(one)
+        elif glob.get(one[key]) is None:
+            return None
+        else:
+            mapped.append({key: glob[one[key]]})
+    return mapped if isinstance(value, list) else mapped[0]
+
+
 def acceptance_whole(root: Path, recording: Path) -> dict | None:
     """The applications' draft cases in the whole recording's step numbers."""
     root, recording = Path(root), Path(recording)
@@ -1915,13 +1932,11 @@ def acceptance_whole(root: Path, recording: Path) -> dict | None:
                 if glob.get(c["after"]) is None:
                     continue
                 c["after"] = glob[c["after"]]
-            ref = c.get("equals")
-            key = next((k for k in ("binding", "record") if isinstance(ref, dict)
-                        and isinstance(ref.get(k), int)), None)  # fmt: skip
-            if key is not None:
-                if glob.get(ref[key]) is None:
+            if "equals" in c:
+                mapped = global_refs(c["equals"], glob)
+                if mapped is None:
                     continue
-                c["equals"] = {key: glob[ref[key]]}
+                c["equals"] = mapped
             c["id"] = f"{app}-{c['id']}"
             cases.append(c)
         excluded += [f"{app}: {x}" for x in draft.get("excluded") or []]
