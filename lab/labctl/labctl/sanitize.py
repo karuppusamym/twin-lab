@@ -281,16 +281,27 @@ def mask_identifiers(value: str) -> str:
     )
 
 
+# A class of a CSS utility library (`h-100`, `col-lg-4`, `mb-5`): a number up to 100 after a
+# name is a size or a step of the style sheet, never a record's number.
+UTILITY_CLASS = re.compile(r"[a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*-(?:\d{1,2}|100)")
+
+
+def _mask_classes(value: str) -> str:
+    return " ".join(
+        c if UTILITY_CLASS.fullmatch(c) else mask_identifiers(c) for c in value.split(" ")
+    )
+
+
 def mask_attributes(attrs):
-    return [
-        (
-            k,
-            (mask_asset_url(v) if k.lower() in ASSET_ATTRS else mask_identifiers(v))
-            if v and (k.lower() in IDENTIFIER_ATTRS or k.lower().startswith("data-"))
-            else v,
-        )
-        for k, v in attrs
-    ]
+    out = []
+    for k, v in attrs:
+        name = k.lower()
+        if v and name == "class":
+            v = _mask_classes(v)
+        elif v and (name in IDENTIFIER_ATTRS or name.startswith("data-")):
+            v = mask_asset_url(v) if name in ASSET_ATTRS else mask_identifiers(v)
+        out.append((k, v))
+    return out
 
 
 # --- static files of the application's own origin ---------------------------------------------------
@@ -380,7 +391,31 @@ def route_pattern(path: str) -> str:
             out.append("{id}" if n == 1 else f"{{id{n}}}")
         else:
             out.append(seg)
-    return "/".join(out) or "/"
+    pattern = "/".join(out) or "/"
+    return _ALIASES.get(pattern, pattern)
+
+
+# Addresses that serve the same document as another (`/index.html` beside `/`), found by
+# `labctl.har.screen_aliases` and applied while a brief is generated (`with screen_aliases(m):`):
+# one screen, whose other addresses the brief names.
+_ALIASES: dict[str, str] = {}
+
+
+@contextlib.contextmanager
+def screen_aliases(mapping: dict[str, str] | None):
+    """Within the block, `route_pattern` writes each alias as its screen's address."""
+    global _ALIASES
+    before = _ALIASES
+    _ALIASES = dict(mapping or {})
+    try:
+        yield
+    finally:
+        _ALIASES = before
+
+
+def aliases() -> dict[str, str]:
+    """The aliases in force: alias pattern -> the screen's address."""
+    return dict(_ALIASES)
 
 
 # Screen templates learned from a recording (labctl.templates.rules_for), applied while a brief
@@ -714,6 +749,15 @@ def _player(classes: str) -> bool:
 
 
 TEXT_ATTRS = ("title", "aria-label", "placeholder", "alt")
+# Attributes a UI library (Bootstrap, jQuery plugins) acts on: their values point at other
+# elements of the page (`#videoModal`, `.collapse`) or are its own settings (`modal`, a slide's
+# index `0`). Ids and classes are kept as written, so a reference to them is no more than they are.
+BEHAVIOUR_ATTR = re.compile(
+    r"data-(?:bs-)?(?:target|parent|toggle|dismiss|slide|slide-to|ride|interval|backdrop|keyboard"
+    r"|spy|offset|placement|trigger|container|focus|pause|wrap|touch|display|reference|boundary)"
+)
+ELEMENT_REF = re.compile(r"[#.][A-Za-z][\w-]{0,79}(?:\s*,\s*[#.][A-Za-z][\w-]{0,79})*")
+SETTING = re.compile(r"[A-Za-z][\w-]{0,39}|\d{1,5}")
 # A data-* attribute value that is a name in the page's code: lower-case, no spaces, no number.
 DATA_NAME = re.compile(r"[a-z][a-z_.:-]{0,39}")
 
@@ -764,6 +808,7 @@ KEEP_ATTRS = {
     "frameborder", "loading", "sandbox", "allow", "wrap", "draggable", "contenteditable",
     "aria-haspopup", "aria-pressed", "aria-checked", "aria-disabled", "aria-level", "aria-sort",
     "aria-orientation", "aria-multiselectable", "aria-readonly", "aria-busy", "aria-atomic",
+    "sizes",  # an icon's or a picture's sizes (`32x32`): the interface's, not a record's
 }  # fmt: skip
 URL_ATTRS = {"href", "src", "action", "formaction", "poster", "data"}
 
@@ -852,6 +897,7 @@ class _Page(HTMLParser):
         self.out: list[str] = []
         self.stack: list[str] = []
         self.with_id: list[bool] = []  # per open element: has an id (then its text is a value)
+        self.id_open: list[bool] = []  # per open element: has an id at all (`h3#totalp`)
         # per open element: {"data", "message", "nav", "holder", "key"}; see _context
         self.flags: list[dict] = []
         self.counts: list[dict[str, int]] = [{}]  # per open element: children seen, by tag
@@ -907,7 +953,7 @@ class _Page(HTMLParser):
                 elif code:  # the code the app posts for a choice: its own, unless it is data
                     value = interface_text(value, self.known, self.vocab, names=False)
             elif name in URL_ATTRS:
-                value = _safe_url(value)
+                value = _safe_url(value, self.public)
             elif name == "content" and tag == "meta":
                 meta = dict(attrs)
                 kind_ = (meta.get("name") or meta.get("http-equiv") or "").lower()
@@ -917,6 +963,11 @@ class _Page(HTMLParser):
                 value = self._attr_text(value, tag)
             elif name == "style":
                 value = re.sub(r"url\([^)]*\)", "url(#)", value)  # no recorded addresses or tokens
+            elif (BEHAVIOUR_ATTR.fullmatch(name) and not self.strict
+                  and (ELEMENT_REF.fullmatch(value) or SETTING.fullmatch(value))
+                  and value.lower().lstrip("#.") not in self.known
+                  and not _has_name_word(value.lower().lstrip("#."), self.known)):  # fmt: skip
+                pass  # a reference to an element of the page, or the library's own setting
             elif (name.startswith("data-") and not self.strict and DATA_NAME.fullmatch(value)
                   and value not in self.known and not _has_name_word(value, self.known)):  # fmt: skip
                 pass  # a name the page's code uses (`data-field="amount"`), not a value
@@ -1044,6 +1095,7 @@ class _Page(HTMLParser):
             self.stack.append(tag)
             # A row header (or any element with an id) holds a value, not the app's words.
             self.with_id.append(row_header or (bool(a.get("id")) and tag not in KEEP_TEXT))
+            self.id_open.append(bool(a.get("id")))
             self.counts.append({})
 
     def _flags(self, tag: str, a: dict[str, str], row_header: bool) -> dict:
@@ -1175,6 +1227,8 @@ class _Page(HTMLParser):
         while self.stack:
             top = self.stack.pop()
             self.with_id.pop()
+            if self.id_open:
+                self.id_open.pop()
             self.out.append(f"</{top}>")
             self._end(top)
             self._end_message()
@@ -1329,11 +1383,16 @@ class _Page(HTMLParser):
             self.tables[-1]["cell"]["text"].append(data)  # read for its shape only, then dropped
         if self.stack and self.stack[-1] == "style":
             css = _style(data)
-            self.out.append(escape(mask(css) if self.strict else css, quote=False))
+            # raw text, as HTML keeps a style element's content (`&gt;` there is not `>` to a
+            # browser, so an escaped `a>b` rule is dropped); only a closing tag is broken
+            css = mask(css) if self.strict else css
+            self.out.append(re.sub(r"(?i)</(style)", r"<\\/\1", css))
             return
         ctx = self._context()
         if self._public_text(data, ctx):
             text = data
+        elif ctx == "data" and not self.strict and self._row_control(data):
+            text = data  # a row's own control (`Delete` in each cart row): the interface's word
         elif ctx == "data" or self.strict:
             if ctx == "data" or self._data_cell():
                 self.values |= words(data)  # only text where records are shown counts as data
@@ -1395,7 +1454,21 @@ class _Page(HTMLParser):
             return False
         if self.flags and self.flags[-1].get("public"):
             return True
-        return ctx != "data" and not self._data_cell() and self.public.text(data)
+        # a table or description cell is a record's row (a cart's lines stay masked); an element
+        # with an id (`p#article` of a product card) shows a declared value as the API answered it
+        in_cell = any(t in ("td", "dd") for t in self.stack)
+        if self.id_open and self.id_open[-1] and re.fullmatch(r"[\s$€£¥\d.,]+", data):
+            return False  # a number in an element of its own (`h3#totalp`): a sum, not a price
+
+        return ctx != "data" and not in_cell and self.public.text(data)
+
+    def _row_control(self, data: str) -> bool:
+        """The text of a link or button inside a data cell that is one plain word (`Delete`,
+        `Edit`, `Open`) no recorded answer or page shows as data: the control's own label."""
+        text = data.strip()
+        return (bool(self.stack) and self.stack[-1] in ("a", "button")
+                and bool(re.fullmatch(r"[A-Za-z][a-z]{1,19}", text))
+                and text.lower() not in self.known)  # fmt: skip
 
     def _phrase(self, data: str, vocab: set[str]) -> bool:
         """Whether a text is, as a whole, a short value the recording's answers hold
@@ -1415,6 +1488,8 @@ class _Page(HTMLParser):
         while self.stack:
             top = self.stack.pop()
             self.with_id.pop()
+            if self.id_open:
+                self.id_open.pop()
             self.out.append(f"</{top}>")
             self._end(top)
             self._end_message()
@@ -1454,14 +1529,22 @@ def css_symbol(string: str) -> bool:
     )
 
 
-def _safe_url(value: str) -> str:
+def _safe_url(value: str, public=None) -> str:
+    """An address without values: the path as a pattern, each query parameter by name. A value
+    the owner declared public (a product's id of a declared answer: `prod.html?idp_=1`) stays."""
     parts = urlsplit(value)
     if parts.scheme in ("javascript", "data"):
         return "#"
     if parts.scheme in ("mailto", "tel", "sms"):
         return f"{parts.scheme}:{mask(value.split(':', 1)[1])}"
     path = route_pattern(parts.path) if parts.path else ""
-    query = "&".join(f"{q.split('=', 1)[0]}=" for q in parts.query.split("&") if q)
+
+    def param(q: str) -> str:
+        key, _, val = q.partition("=")
+        keep = public is not None and bool(val) and public.text(val)
+        return f"{key}={val if keep else ''}"
+
+    query = "&".join(param(q) for q in parts.query.split("&") if q)
     fragment = (
         f"#{parts.fragment}" if parts.fragment and not re.search(r"\d", parts.fragment) else ""
     )

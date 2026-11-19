@@ -652,6 +652,10 @@ class _PageRead(HTMLParser):
             src = a.get("src") or a.get("href") or a.get("xlink:href") or ""
             if src and not src.startswith("#"):
                 self.images.append((src, self._in_data(), sel))
+        if a.get("poster") and tag in ("video", "div"):
+            # a video's still: video.js copies `poster` into a background image of `.vjs-poster`
+            # by script, so no <img> names it; it is the interface's picture all the same
+            self.images.append((a["poster"], self._in_data(), f"{sel} (video poster)"))
         for name in TEXT_ATTRS:
             if a.get(name):
                 self._add(sel, name, a[name], tag in ("input", "select", "textarea", "button"))
@@ -1037,7 +1041,9 @@ def _render_all(pages: dict[str, tuple[str, str]], files: dict[str, tuple[bytes,
                     page.goto(doc, wait_until="load", timeout=20000)
                     page.wait_for_timeout(150)
                     look = page.evaluate(LOOK_JS)
-                    png = page.screenshot(full_page=True, timeout=20000)
+                    # exactly the recorded window: a page wider than it (a scrollbar, an
+                    # overflowing element) must not widen the picture
+                    png = page.screenshot(full_page=False, timeout=20000)
                     out[name] = Rendered(png, look, str(look.pop("text", "")), sorted(set(asked)))
                 except Exception:  # noqa: BLE001 - one page that cannot be drawn: no picture of it
                     continue
@@ -1449,7 +1455,9 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
         })  # fmt: skip
     inline_list = []
     for name, read in sorted(reads.items()):
-        blocks = [b for b in read.inline if b.strip()]
+        # a snapshot written before style text was kept raw holds `&gt;`: CSS never means that
+        blocks = [re.sub(r"&(gt|lt|amp);", lambda m: {"gt": ">", "lt": "<", "amp": "&"}[m[1]], b)
+                  for b in read.inline if b.strip()]  # fmt: skip
         if blocks:
             text = "\n\n".join(b.strip() for b in blocks) + "\n"
             _write(out / "css" / "inline" / f"{name}.css", text)
@@ -1473,6 +1481,14 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
                     "reason": _missing_reason(src, found.values())})  # fmt: skip
                 if f"{where} on {name}" not in item["where"]:
                     item["where"].append(f"{where} on {name}")
+    # Images under a prefix the owner declared public (product photos) that the recording loaded
+    # on any page, not only on the snapshot kept for a screen: every record of the seed shows its.
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    for res in sorted(found.values(), key=lambda r: r.url) if pub is not None else []:
+        if res.kind == "image" and pub.image(res.path) and res.host + res.path not in images:
+            image(res, "a record's picture (declared public), shown by a list or a detail")
     for item in images.values():
         if item["bundled"]:
             _write(out / item["file"], item["_res"].body)
