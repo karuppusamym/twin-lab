@@ -442,6 +442,8 @@ def interface_image(res: Resource, own_hosts: set[str], in_data: bool = False) -
         return "asked for with a query (not a static file)"
     if len(res.body) > har.MAX_BODY:
         return f"larger than {har.MAX_BODY} bytes"
+    if declared:
+        return None
     if res.key != res.path:
         return "a record number in its path (content of a record, not the interface)"
     folders = {w for part in res.path.lower().split("/")[:-1] for w in re.split(r"[^a-z]+", part)}
@@ -1928,10 +1930,10 @@ def brief_section(root: Path, app_id: str, refused: list[str] | None = None) -> 
                 seen_h.add(t["where"])
                 holders.append(t["where"] + ("" if t["kind"] == "text" else f" ({t['kind']})"))
         picture = f"`look/{s['picture']}`" if s.get("picture") else "no picture"
-        drawn = "".join(f"; dialog `{d['dialog']}` open: `look/{d['picture']}`"
+        drawn = "".join(f"; dialog `{d['dialog']}` drawn open: `look/{d['picture']}`"
                         for d in s.get("dialogs") or [])  # fmt: skip
-        w += [f"**{s['screen']}** (`{s['address']}`): picture {picture} (no dialog open){drawn}, "
-              f"snapshot `{s['page']}`.", ""]  # fmt: skip
+        w += [f"**{s['screen']}** (`{s['address']}`): picture {picture}, snapshot "
+              f"`{s['page']}`{drawn}.", ""]  # fmt: skip
         w.append("- Literal texts, copy exactly: " + (_ticks(literal, 60) if literal else "none")
                  + ".")  # fmt: skip
         if mixed:
