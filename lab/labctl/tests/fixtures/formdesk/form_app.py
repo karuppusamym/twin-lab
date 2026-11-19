@@ -255,7 +255,7 @@ SCRIPT = r"""/* Parking permit: the page's own checks (a Twin Lab test fixture, 
   });
 
   notes.addEventListener("input", function () {
-    notesCount.textContent = notes.value.length + " / 200";
+    notesCount.textContent = notes.value.length + " / " + notes.maxLength;
   });
 
   // Send stays off until the browser finds the form valid.

@@ -949,11 +949,12 @@ def _ng_key(code: Code, i: int) -> str | None:
                 if code.p(p - 3, ",") and code.t(p - 4).kind == "str" and code.p(p - 5, "("):
                     return code.t(p - 4).text  # addControl("key", new FormControl(...))
                 return None
-            if code.w(p - 1, "control") and code.p(p - 2, "."):
-                if code.p(p - 4, ":") or code.p(p - 3, ":"):
-                    k = p - 5 if code.p(p - 4, ":") else p - 4
-                    if code.t(k).kind in ("name", "str"):
-                        return code.t(k).text
+            if code.w(p - 1, "control") and code.p(p - 2, "."):  # key: this.fb.control(...)
+                j = p - 1
+                while code.p(j - 1, ".") and code.w(j - 2):
+                    j -= 2
+                if code.p(j - 1, ":") and code.t(j - 2).kind in ("name", "str"):
+                    return code.t(j - 2).text
                 return None
             if not code.w(p - 1, "compose", "composeAsync"):
                 return None
@@ -1777,8 +1778,9 @@ def _is_error_node(node) -> bool:
     if (node.attrs.get("role") or "").lower() == "alert":
         return True
     # a list of messages whose items are errors (JSF `h:messages`: `<ul><li class="error">`)
-    return node.tag in ("ul", "ol", "div") and any(
-        re.search(r"error", c.attrs.get("class") or "", re.IGNORECASE) for c in node.children
+    return node.tag in ("ul", "ol") and any(
+        c.tag == "li" and re.search(r"error", c.attrs.get("class") or "", re.IGNORECASE)
+        for c in node.children
     )
 
 
@@ -2732,7 +2734,7 @@ def _clear_scripts(folder: Path) -> None:
 # --- the opt-in: the application's own script files ---------------------------------------------
 
 SOURCE_MAP = re.compile(r"^[ \t]*(//[#@]\s*sourceMappingURL=[^\n]*|/\*[#@]\s*sourceMappingURL=[^*]*"
-                        r"\*/)[ \t]*$", re.MULTILINE)  # fmt: skip
+                        r"\*/)[ \t]*(?:\r?\n|$)", re.MULTILINE)  # fmt: skip
 SECRET_SHAPES = [
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "a private key block"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "a JWT"),
