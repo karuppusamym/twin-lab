@@ -48,6 +48,7 @@ TYPE_IDS = {v: k for k, v in CONTROL_TYPES.items()}
 
 P_RUNTIME, P_RECT, P_PID, P_TYPE, P_NAME = 30000, 30001, 30002, 30003, 30005
 P_ACCEL, P_ACCESS, P_FOCUSABLE, P_ENABLED, P_AID, P_CLASS = 30006, 30007, 30009, 30010, 30011, 30012
+P_FOCUSED = 30008  # UIA_HasKeyboardFocusPropertyId
 P_HELP, P_PASSWORD, P_HWND, P_OFFSCREEN, P_FW = 30013, 30019, 30020, 30022, 30024
 P_VALUE, P_READONLY, P_HAS_VALUE = 30045, 30046, 30043
 P_HAS_INVOKE, P_HAS_TOGGLE, P_HAS_SELITEM, P_HAS_EXPAND = 30031, 30041, 30036, 30028
@@ -55,7 +56,7 @@ P_TOGGLE, P_EXPAND, P_SELECTED, P_ROWS, P_COLS = 30086, 30070, 30079, 30062, 300
 PROPS = [P_RUNTIME, P_RECT, P_PID, P_TYPE, P_NAME, P_ACCEL, P_ACCESS, P_FOCUSABLE, P_ENABLED,
          P_AID, P_CLASS, P_HELP, P_PASSWORD, P_HWND, P_OFFSCREEN, P_FW, P_VALUE, P_READONLY,
          P_HAS_VALUE, P_HAS_INVOKE, P_HAS_TOGGLE, P_HAS_SELITEM, P_HAS_EXPAND, P_TOGGLE,
-         P_EXPAND, P_SELECTED, P_ROWS, P_COLS]  # fmt: skip
+         P_EXPAND, P_SELECTED, P_ROWS, P_COLS, P_FOCUSED]  # fmt: skip
 PAT_INVOKE, PAT_VALUE, PAT_EXPAND, PAT_SELITEM, PAT_TOGGLE, PAT_LEGACY = (
     10000, 10002, 10005, 10010, 10015, 10018)  # fmt: skip
 E_MENU_OPENED, E_FOCUS, E_INVOKED, E_SELECTED, E_WINDOW_OPENED = 20003, 20005, 20009, 20012, 20016
@@ -413,6 +414,8 @@ def _node(el, cached: bool, origin: tuple[float, float]) -> dict:
                   "access_key": g(P_ACCESS) or None, "accel": g(P_ACCEL) or None,
                   "help": g(P_HELP) or None, "rid": tuple(g(P_RUNTIME) or ()),
                   "hwnd": int(g(P_HWND) or 0)}  # fmt: skip
+    if g(P_FOCUSED):
+        node["focused"] = True  # the keyboard focus when the tree was read
     if rect and len(rect) == 4:
         node["rect"] = [
             int(rect[0] - origin[0]),

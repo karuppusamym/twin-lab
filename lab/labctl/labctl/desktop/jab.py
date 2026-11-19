@@ -258,6 +258,8 @@ def _node(b: Bridge, vm: int, ac: int, info: AccessibleContextInfo, rid: tuple, 
                   "focusable": "focusable" in states, "rid": rid,
                   "rect": [round((info.x - origin[0]) * scale), round((info.y - origin[1]) * scale),
                            round(info.width * scale), round(info.height * scale)]}  # fmt: skip
+    if "focused" in states:
+        node["focused"] = True
     if info.description and info.description != info.name:
         node["help"] = info.description
     pats = []

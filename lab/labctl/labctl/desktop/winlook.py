@@ -534,3 +534,109 @@ def caption_font() -> int:
     if not user32.SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, m.cbSize, ctypes.byref(m), 0):
         return 0
     return int(gdi32.CreateFontIndirectW(ctypes.byref(m.lfCaptionFont)) or 0)
+
+
+# --- the icon of a message box ----------------------------------------------------------------
+
+ICONS = {"error": 32513, "question": 32514, "warning": 32515, "information": 32516}  # OIC_*
+user32.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT, ctypes.c_int,
+                              ctypes.c_int, wintypes.UINT]  # fmt: skip
+user32.LoadImageW.restype = ctypes.c_void_p
+user32.DrawIconEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p,
+                              ctypes.c_int, ctypes.c_int, wintypes.UINT, ctypes.c_void_p,
+                              wintypes.UINT]  # fmt: skip
+user32.DestroyIcon.argtypes = [ctypes.c_void_p]
+_icon_cache: dict[tuple[str, int, int], bytes] = {}
+
+
+def _icon_pixels(name: str, size: int, bg: int) -> bytes | None:
+    """One system icon drawn at `size` on the colour `bg` (COLORREF), BGRA."""
+    key = (name, size, bg)
+    if key in _icon_cache:
+        return _icon_cache[key]
+    icon = None
+    try:
+        comctl = ctypes.WinDLL("comctl32")
+        h = ctypes.c_void_p()
+        fn = comctl.LoadIconWithScaleDown  # comctl32 6: the size message boxes use
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                       ctypes.POINTER(ctypes.c_void_p)]  # fmt: skip
+        if fn(None, ctypes.c_void_p(ICONS[name]), size, size, ctypes.byref(h)) == 0:
+            icon = h.value
+    except (OSError, AttributeError):
+        icon = None
+    if not icon:
+        icon = user32.LoadImageW(None, ctypes.c_void_p(ICONS[name]), 1, size, size, 0)
+    if not icon:
+        return None
+    screen = user32.GetDC(None)
+    mem = gdi32.CreateCompatibleDC(screen)
+    bmp = gdi32.CreateCompatibleBitmap(screen, size, size)
+    old = gdi32.SelectObject(mem, bmp)
+    brush = gdi32.CreateSolidBrush(bg)
+    try:
+        r = wintypes.RECT(0, 0, size, size)
+        user32.FillRect(mem, ctypes.byref(r), brush)
+        user32.DrawIconEx(mem, 0, 0, icon, size, size, 0, None, 3)  # DI_NORMAL
+        out = _pixels(mem, bmp, size, size)
+    finally:
+        gdi32.SelectObject(mem, old)
+        gdi32.DeleteObject(brush)
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(mem)
+        user32.ReleaseDC(None, screen)
+        user32.DestroyIcon(icon)
+    _icon_cache[key] = out
+    return out
+
+
+def icon_difference(px: bytes, w: int, rect, icon: bytes, size: int) -> float:
+    """Mean difference per channel (0-255) between a square of a picture and an icon."""
+    x0, y0 = rect[0], rect[1]
+    total, n = 0, 0
+    for y in range(0, size, 2):
+        row = ((y0 + y) * w + x0) * 4
+        for x in range(0, size, 2):
+            i, j = row + x * 4, (y * size + x) * 4
+            total += (
+                abs(px[i] - icon[j]) + abs(px[i + 1] - icon[j + 1]) + abs(px[i + 2] - icon[j + 2])
+            )
+            n += 3
+    return total / n if n else 255.0
+
+
+def message_icon(pixels: tuple[int, int, bytes] | None, rect) -> str | None:
+    """Which of the four standard icons (error, question, warning, information) a message box
+    shows at `rect` (window coordinates, as the tree's), by drawing each one there; None when
+    none matches clearly. Only pixels in memory are read."""
+    if not pixels or not rect:
+        return None
+    w, h, px = pixels
+    x, y, cw, ch = rect
+    if cw < 16 or abs(cw - ch) > 2 or x < 1 or y < 1 or x + cw > w or y + ch > h:
+        return None
+    size = min(cw, ch)
+    i = ((y - 1) * w + x - 1) * 4  # the background just outside the icon's corner
+    bg = px[i + 2] | px[i + 1] << 8 | px[i] << 16
+    scores = []
+    for name in ICONS:
+        icon = _icon_pixels(name, size, bg)
+        if icon is not None:
+            scores.append((icon_difference(px, w, (x, y), icon, size), name))
+    if not scores:
+        return None
+    scores.sort()
+    best = scores[0]
+    second = scores[1][0] if len(scores) > 1 else 255.0
+    return best[1] if best[0] < 24 and best[0] < 0.5 * second else None
+
+
+def mark_message_icon(raw: dict) -> None:
+    """Set `win32.icon` on the Image of a message box (`#32770`) tree from its pixels."""
+    if (raw.get("cls") or "") != "#32770" or not raw.get("_pixels"):
+        return
+    for c in raw.get("children") or []:
+        if c.get("type") == "Image" and c.get("rect"):
+            kind = message_icon(raw["_pixels"], c["rect"])
+            if kind:
+                c["win32"] = {**(c.get("win32") or {}), "icon": kind}

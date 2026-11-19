@@ -2,6 +2,17 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Desktop package: the gaps the blind rebuild's builder reported
+The recorder reads the keyboard focus (`focused`) and recognises a message box's icon from its
+pixels (the four system icons drawn in place and compared; `winlook.message_icon`). `rules.json`
+gains each window's focus on open, grids' behaviour (cells read-only, headers clickable,
+sorting and selection when seen), the icon of each message box in its validation outcome, and
+an `unknown` list the brief prints (default buttons WinForms draws itself, how a search
+matches, sorting). `navigation.json` gives each message box its icon, buttons and owner. A
+combo box's drop-down button is structure, no longer masked as data. The package's `INDEX.md`
+describes desktop files in desktop words. Checked on a fresh recording of CaseDesk (focus on
+`txtUser`, `txtSearch`, `txtCustomer`; both message boxes: warning).
+
 ## 2026-11-19 — Desktop build packages to the web's depth, and a blind WinForms rebuild
 An audit of fresh recordings of the three reference apps found a desktop package held only the
 brief, model, schema and app.yaml. Now (`labctl/desktop/`, docs/09-desktop.md):

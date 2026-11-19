@@ -60,6 +60,8 @@ def _window_doc(app: str, wid: str, look: dict, nav: dict, rules: dict, steps: l
         out.append(f"- Opened by: {'the application starts with it' if navw.get('first') and not navw['opened_by'] else refs(navw['opened_by'])}")  # fmt: skip
         out.append(f"- Closed by: {refs(navw['closed_by'])}")
         out.append(f"- Modal: {navw.get('modal')}")
+        if navw.get("icon"):
+            out.append(f"- Icon: {navw['icon']}; buttons: {', '.join(navw.get('buttons') or [])}")
         if navw.get("tabs"):
             out.append(f"- Tabs: {', '.join(navw['tabs'])}")
     menus = [m for m in (nav or {}).get("menus") or [] if m["window"] == key]
@@ -126,11 +128,15 @@ def _window_doc(app: str, wid: str, look: dict, nav: dict, rules: dict, steps: l
             out.append(
                 f'- {t["type"]}: "{t["text"]}"' + (f" ({'; '.join(extra)})" if extra else "")
             )
+    if rw.get("focus_on_open"):
+        out.append(f"\nKeyboard focus when the window opens: `{rw['focus_on_open']}`.")
     if rw.get("validation"):
         out.append("\n## Validation seen\n")
         for v in rw["validation"]:
             o = v["outcome"]
-            what = f'message box "{o["message_box"]}": {o["text"]}' if isinstance(o, dict) else o
+            what = (f'message box "{o["message_box"]}"'
+                    + (f" ({o['icon']} icon)" if o.get("icon") else "")
+                    + f": {o['text']}" if isinstance(o, dict) else o)  # fmt: skip
             fields = ", ".join(
                 f"{locator.parse(k).get('AutomationId') or k}="
                 + (x["item"] if "item" in x else f"{x.get('shape')} ({x.get('length')} chars)"
