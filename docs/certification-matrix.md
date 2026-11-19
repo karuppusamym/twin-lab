@@ -14,7 +14,7 @@ CAPTURE VERIFIED means detect, capture and self-replay passed and no rebuild was
 | Vue | - | web | NOT RUN | NOT RUN | NOT RUN | NOT RUN | **NOT RUN** | 2026-11-18 | everything; nothing has run |
 | JSF (Mojarra) | 2.3 | web | PASS | PASS | PASS | NOT RUN | **CAPTURE VERIFIED** | 2026-11-18 | PrimeFaces, RichFaces and other component libraries (plain h: components only); MyFaces; Jakarta Faces 3 and later; client-side state saving; the implementation's release (2.3.9) is in no page or header, so it is not compared; the acceptance cases flow.acceptance_for declares are run by the application's own test, not here; a rebuild by a coding agent |
 | ASP.NET Web Forms | - | web | NOT RUN | NOT RUN | NOT RUN | NOT RUN | **NOT RUN** | 2026-11-18 | everything; nothing has run |
-| WinForms | .NET 6 | desktop | PASS | PASS | PASS | NOT RUN | **CAPTURE VERIFIED** | 2026-11-18 | .NET Framework 4.x builds; third-party grids and custom-drawn controls; a rebuild by a coding agent |
+| WinForms | .NET 6 | desktop | PASS | PASS | PASS | PASS | **CERTIFIED** | 2026-11-19 | .NET Framework 4.x builds; third-party grids and custom-drawn controls; a rebuild judged on another machine or DPI than the recording's |
 | WPF | .NET 6 | desktop | PASS | PASS | PASS | NOT RUN | **CAPTURE VERIFIED** | 2026-11-18 | .NET Framework 4.x builds; data templates, virtualised lists, third-party controls; a rebuild by a coding agent |
 | Java Swing | Java 11 | desktop | PASS | PASS | PASS | NOT RUN | **CAPTURE VERIFIED** | 2026-11-18 | the Java version is not detected, so it is not compared; JavaFX and SWT; a rebuild by a coding agent |
 
@@ -66,12 +66,12 @@ Result: **NOT RUN**. no reference application has been built for it yet
 
 ### WinForms .NET 6 (`winforms`)
 
-Result: **CAPTURE VERIFIED**. rebuild not run: no rebuild replay report is named in the entry
+Result: **CERTIFIED**. all four gates passed
 
 - detect: PASS. detected toolkit WinForms, runtime.name .NET, runtime.version 6.0.3
 - capture: PASS. 20 expected action(s), all in the recording (36 action(s) recorded)
 - self-replay: PASS. 29 of 36 step(s) verified against a fresh start, 7 covered by the steps around them, 0 failed
-- rebuild: NOT RUN. no rebuild replay report is named in the entry
+- rebuild: PASS. certification/rebuilds/winforms-casedesk-blind2.json: VERIFIED COMPLETE
 
 ### WPF .NET 6 (`wpf`)
 

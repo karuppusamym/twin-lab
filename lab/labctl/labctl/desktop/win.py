@@ -21,7 +21,7 @@ if "comtypes" not in sys.modules:
 import comtypes  # noqa: E402
 import comtypes.client  # noqa: E402
 
-from labctl.desktop import locator  # noqa: E402
+from labctl.desktop import locator, winlook  # noqa: E402
 
 UIA = comtypes.client.GetModule("UIAutomationCore.dll")
 _auto = None
@@ -411,7 +411,8 @@ def _node(el, cached: bool, origin: tuple[float, float]) -> dict:
                   "fw": g(P_FW) or None, "enabled": bool(g(P_ENABLED)),
                   "visible": not bool(g(P_OFFSCREEN)), "focusable": bool(g(P_FOCUSABLE)),
                   "access_key": g(P_ACCESS) or None, "accel": g(P_ACCEL) or None,
-                  "help": g(P_HELP) or None, "rid": tuple(g(P_RUNTIME) or ())}  # fmt: skip
+                  "help": g(P_HELP) or None, "rid": tuple(g(P_RUNTIME) or ()),
+                  "hwnd": int(g(P_HWND) or 0)}  # fmt: skip
     if rect and len(rect) == 4:
         node["rect"] = [
             int(rect[0] - origin[0]),
@@ -462,9 +463,18 @@ def capture(hwnd_or_element) -> dict | None:
     origin = (rect[0], rect[1])
     count = [0]
 
-    def walk(e, depth: int) -> dict:
+    def walk(e, depth: int, parent_hwnd: int = 0) -> dict:
         node = _node(e, True, origin)
         count[0] += 1
+        own = node.get("hwnd") or 0
+        if own and own != parent_hwnd:  # a control with a window of its own: what Win32 says
+            try:
+                if depth == 0:
+                    node["frame"] = winlook.window_facts(own)
+                else:
+                    node["win32"] = winlook.control_facts(own, node["type"], node.get("cls") or "")
+            except (OSError, ValueError):
+                pass
         if depth >= MAX_DEPTH or count[0] >= MAX_NODES:
             node["truncated"] = "depth or size limit"
             return node
@@ -490,7 +500,7 @@ def capture(hwnd_or_element) -> dict | None:
             if count[0] >= MAX_NODES:
                 skipped += 1
                 continue
-            children.append(walk(k, depth + 1))
+            children.append(walk(k, depth + 1, own or parent_hwnd))
         if children:
             node["children"] = children
         if skipped:

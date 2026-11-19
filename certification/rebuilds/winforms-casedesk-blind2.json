@@ -1,0 +1,400 @@
+{
+ "recording": "flow-1",
+ "base_url": "exe:CaseDesk.exe (blind rebuild, round 2, .NET 6 WinForms)",
+ "status": "pass",
+ "steps": [
+  {
+   "seq": 1,
+   "action": "window_open",
+   "status": "pass",
+   "differences": [],
+   "note": "picture differs 0.00 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 2,
+   "action": "type",
+   "selector": "uia:AutomationId=txtUser;ControlType=Edit",
+   "status": "pass",
+   "differences": [],
+   "note": "typed (value supplied); picture differs 0.00 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 3,
+   "action": "type",
+   "selector": "uia:AutomationId=txtPassword;ControlType=Edit",
+   "status": "pass",
+   "differences": [],
+   "note": "typed (value supplied); picture differs 0.00 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 4,
+   "action": "click",
+   "selector": "uia:AutomationId=btnSignIn;ControlType=Button",
+   "status": "pass",
+   "differences": [],
+   "note": "BM_CLICK; the recording read this window only after later steps: rows and picture not compared",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 5,
+   "action": "window_open",
+   "status": "pass",
+   "differences": [],
+   "note": "picture differs 0.00 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 6,
+   "action": "click",
+   "selector": "uia:Name=OK;ControlType=Button",
+   "status": "pass",
+   "differences": [],
+   "note": "BM_CLICK; the window was gone when it was compared",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 7,
+   "action": "window_close",
+   "selector": "uia:Name=Sign in;ControlType=Window;ClassName=#32770",
+   "status": "pass",
+   "differences": [],
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 8,
+   "action": "focus",
+   "status": "skipped",
+   "differences": [],
+   "note": "covered by the steps around it",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 9,
+   "action": "type",
+   "selector": "uia:AutomationId=txtPassword;ControlType=Edit",
+   "status": "pass",
+   "differences": [],
+   "note": "typed (value supplied); picture differs 0.00 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 10,
+   "action": "click",
+   "selector": "uia:AutomationId=btnSignIn;ControlType=Button",
+   "status": "pass",
+   "differences": [],
+   "note": "BM_CLICK",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 11,
+   "action": "window_close",
+   "selector": "uia:AutomationId=LoginForm;ControlType=Window",
+   "status": "pass",
+   "differences": [],
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 12,
+   "action": "window_open",
+   "status": "pass",
+   "differences": [],
+   "note": "picture differs 0.00 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 13,
+   "action": "type",
+   "selector": "uia:AutomationId=txtSearch;ControlType=Edit",
+   "status": "pass",
+   "differences": [],
+   "note": "typed (value supplied); picture differs 0.00 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 14,
+   "action": "key",
+   "status": "pass",
+   "differences": [],
+   "note": "posted Enter; picture differs 0.84 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 15,
+   "action": "menu",
+   "selector": "uia:Name=Case;ControlType=MenuItem",
+   "status": "pass",
+   "differences": [],
+   "note": "opened the menu; picture differs 0.08 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 16,
+   "action": "menu_open",
+   "status": "skipped",
+   "differences": [],
+   "note": "covered by the steps around it",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 17,
+   "action": "menu",
+   "selector": "uia:Name=Refresh;ControlType=MenuItem",
+   "status": "pass",
+   "differences": [],
+   "note": "Invoke; picture differs 0.08 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 18,
+   "action": "click",
+   "selector": "uia:AutomationId=btnOpen;ControlType=Button",
+   "status": "pass",
+   "differences": [],
+   "note": "BM_CLICK; picture differs 0.41 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 19,
+   "action": "window_open",
+   "status": "pass",
+   "differences": [],
+   "note": "picture differs 0.60 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 20,
+   "action": "type",
+   "selector": "uia:AutomationId=txtSummary;ControlType=Edit",
+   "status": "pass",
+   "differences": [],
+   "note": "typed (value supplied); picture differs 0.19 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 21,
+   "action": "expand",
+   "selector": "uia:AutomationId=cboStatus;ControlType=ComboBox",
+   "status": "skipped",
+   "differences": [],
+   "note": "covered by the steps around it",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 22,
+   "action": "select",
+   "selector": "uia:AutomationId=cboStatus;ControlType=ComboBox",
+   "status": "pass",
+   "differences": [],
+   "note": "selected Resolved; the recording read this window only after later steps: rows and picture not compared",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 23,
+   "action": "collapse",
+   "selector": "uia:AutomationId=cboStatus;ControlType=ComboBox",
+   "status": "skipped",
+   "differences": [],
+   "note": "covered by the steps around it",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 24,
+   "action": "toggle",
+   "selector": "uia:AutomationId=chkUrgent;ControlType=CheckBox",
+   "status": "pass",
+   "differences": [],
+   "note": "BM_CLICK; the recording read this window only after later steps: rows and picture not compared",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 25,
+   "action": "click",
+   "selector": "uia:AutomationId=btnSave;ControlType=Button",
+   "status": "pass",
+   "differences": [],
+   "note": "BM_CLICK; the recording read this window only after later steps: rows and picture not compared",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 26,
+   "action": "window_open",
+   "status": "pass",
+   "differences": [],
+   "note": "picture differs 0.00 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 27,
+   "action": "click",
+   "selector": "uia:Name=OK;ControlType=Button",
+   "status": "pass",
+   "differences": [],
+   "note": "BM_CLICK; the window was gone when it was compared",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 28,
+   "action": "window_close",
+   "selector": "uia:Name=Case;ControlType=Window;ClassName=#32770",
+   "status": "pass",
+   "differences": [],
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 29,
+   "action": "focus",
+   "status": "skipped",
+   "differences": [],
+   "note": "covered by the steps around it",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 30,
+   "action": "type",
+   "selector": "uia:AutomationId=txtSummary;ControlType=Edit",
+   "status": "pass",
+   "differences": [],
+   "note": "typed (value supplied); picture differs 0.19 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 31,
+   "action": "click",
+   "selector": "uia:AutomationId=btnSave;ControlType=Button",
+   "status": "pass",
+   "differences": [],
+   "note": "BM_CLICK",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 32,
+   "action": "window_close",
+   "selector": "uia:AutomationId=CaseDetailForm;ControlType=Window",
+   "status": "pass",
+   "differences": [],
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 33,
+   "action": "focus",
+   "status": "skipped",
+   "differences": [],
+   "note": "covered by the steps around it",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 34,
+   "action": "menu",
+   "selector": "uia:Name=File;ControlType=MenuItem",
+   "status": "pass",
+   "differences": [],
+   "note": "opened the menu; picture differs 0.41 %",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 35,
+   "action": "menu_open",
+   "status": "skipped",
+   "differences": [],
+   "note": "covered by the steps around it",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  },
+  {
+   "seq": 36,
+   "action": "menu",
+   "selector": "uia:Name=Exit;ControlType=MenuItem",
+   "status": "pass",
+   "differences": [],
+   "note": "Invoke",
+   "compared": false,
+   "excluded": [],
+   "excluded_by": []
+  }
+ ],
+ "problems": [],
+ "verdict": "PASS WITHIN DECLARED SCOPE",
+ "verdict_reasons": [],
+ "assurance": "VERIFIED COMPLETE",
+ "assurance_reasons": [
+  "every step replayed; structure, geometry, fonts, grid rows and pictures compared"
+ ],
+ "categories": {},
+ "cases": [],
+ "visual": [],
+ "origins": {},
+ "blocked_requests": []
+}

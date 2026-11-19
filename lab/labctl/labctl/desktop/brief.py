@@ -158,8 +158,9 @@ def section(brief) -> list[str]:
         out.append("")
     out.append("**Not observed** (do not invent as if recorded): windows, menus and items the "
                "recording never opened (menus listed without items above); what buttons never "
-               "pressed do; the real data; colours and fonts beyond what the toolkit's defaults "
-               "give. List what you assumed in BUILD-NOTES.md.\n")  # fmt: skip
+               "pressed do; the real data and how the application stores and queries it; fonts "
+               "and colours beyond what *Same look* lists (else the toolkit's defaults). List "
+               "what you assumed in BUILD-NOTES.md.\n")  # fmt: skip
     return out
 
 
@@ -167,10 +168,12 @@ def running_lines(brief) -> list[str]:
     return [
         "- A desktop demo app runs on a Windows machine or VM, installed from the folder or zip "
         "this build produces. **No Dockerfile, no container, no OpenShift.**",
-        f"- Its data lives in a {brief.db_engine} database created from `db/schema.sql` with "
-        "synthetic rows; read the location from `DATABASE_URL` (`sqlite:///C:/path/app.db`), "
-        "defaulting to a file next to the executable.",
-        "- Ship no customer data. A synthetic seed is created on first start.\n",
+        f"- Its data lives in a {brief.db_engine} database created from `db/schema.sql`; read the "
+        "location from `DATABASE_URL` (`sqlite:///C:/path/app.db`), defaulting to a file next to "
+        "the executable.",
+        "- Ship no customer data. When `db/seed.sql` exists, load exactly its rows once, into the "
+        "empty tables (the replay depends on them); otherwise create synthetic rows on first "
+        "start.\n",
     ]
 
 
@@ -224,10 +227,15 @@ Rebuild in **{tk}**, the toolkit the brief's "Stack to pin" names. Build with: {
 
 ## Database
 
-Data lives in **SQLite** (unless `app.yaml` names another engine): create the tables from
-`{app}/db/schema.sql` when the file has none, and fill them with synthetic rows on first start.
-Read the location from `DATABASE_URL` (`sqlite:///C:/path/{app_id}.db`), defaulting to a file next
-to the executable. Do not rebuild stored procedures or jobs.
+Data lives in **SQLite** (unless `app.yaml` names another engine; when the SQLite driver is not
+available to you offline, keep the same tables and rows in a local file the app reads and
+writes, and say so in BUILD-NOTES.md): create the tables from
+`{app}/db/schema.sql` when the file has none, and load **exactly** the rows of `{app}/db/seed.sql`
+(when the package has it) once, into the empty tables, and no other rows: the replay types the
+values in `{app}/steps/*.values.yaml` and expects the recorded outcomes on these rows. Without a
+seed file, fill the tables with synthetic rows on first start. Read the location from
+`DATABASE_URL` (`sqlite:///C:/path/{app_id}.db`), defaulting to a file next to the executable. Do
+not rebuild stored procedures or jobs.
 
 ## 1. Repository and branch
 
@@ -242,6 +250,19 @@ to the executable. Do not rebuild stored procedures or jobs.
 2. Read `{app}/BRIEF.md` and `{app}/model.yaml` (the `uia` of each element holds its locator,
    path, fallback locators and its UiPath, pywinauto and WinAppDriver forms).
 {brief_rule}
+3. When the package has them (generated from the recording, never data), read:
+   - `{app}/spec/CONSTITUTION.md`, `{app}/spec/ARCHITECTURE.md`, `{app}/spec/BUILD-PLAN.md` and
+     one document per window, `{app}/spec/WINDOWS/<window>.md`: build in the plan's order;
+   - `{app}/look/`: `windows.json` (each window's frame and each control's bounds, font and
+     colours, physical pixels at the recorded DPI), `screens/*.png` (each window and opened
+     menu without data: yours must look the same), `texts.json` (every word, with `&` access
+     keys), `theme.json` (DPI, system fonts, colours);
+   - `{app}/navigation.json` (which action opens and closes each window, menus and items),
+     `{app}/rules.json` (field limits, read-only, default buttons, validation seen with the
+     field shapes at that moment);
+   - `{app}/steps/<recording>.json` (every recorded step in order, rows each grid showed after
+     it, a picture after it) and `{app}/steps/<recording>.values.yaml` (the values the replay
+     types: your app must give the recorded outcomes with them on `{app}/db/seed.sql`).
 
 ## 3. Build
 
@@ -262,10 +283,12 @@ to the executable. Do not rebuild stored procedures or jobs.
 1. `python -m pytest -q`
 2. `python -m labctl validate` (from `lab/labctl` if `labctl` is not installed)
 3. `powershell -File {app}/build.ps1`
-4. `python -m labctl desktop verify {app_id} --exe {app}/publish/{app_id}/<name>.exe` against
-   each recording under `evidence/{app_id}/`, when the package or the repository has one. Every
-   step must pass; a missing, extra, changed or ambiguous control is a finding about your app.
-   If no recording is available to you, say so in BUILD-NOTES.md.
+4. `python -m labctl desktop verify {app_id} --exe {app}/publish/{app_id}/<name>.exe` with the
+   `verify_options` of `{app}/steps/*.values.yaml`, against each recording under
+   `evidence/{app_id}/`, when the repository has one. Every step must pass; a missing, extra,
+   changed or ambiguous control is a finding about your app. Without a recording, check by hand:
+   walk the steps of `{app}/steps/*.json` with those values and compare each window with its
+   picture; say in BUILD-NOTES.md what you could and could not check.
 
 ## 5. Build notes and pull request
 

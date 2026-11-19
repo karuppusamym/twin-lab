@@ -244,11 +244,14 @@ entries:
         values:
           txtPassword: [wrong, demo]
           txtSearch: C-100
-      rebuild: {}
+      # A blind rebuild by a coding agent from the package alone (round 2, 2026-11-19), judged
+      # with `labctl desktop verify --geometry --rows --pictures` against a fresh recording of
+      # the reference flow and the package's replay values (docs/09-desktop.md).
+      rebuild: {report: certification/rebuilds/winforms-casedesk-blind2.json}
     not_covered:
       - .NET Framework 4.x builds
       - third-party grids and custom-drawn controls
-      - a rebuild by a coding agent
+      - a rebuild judged on another machine or DPI than the recording's
 
   - id: wpf
     technology: WPF

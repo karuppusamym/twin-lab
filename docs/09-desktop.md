@@ -21,8 +21,14 @@ A recording is a folder (under `evidence/<app>/`, Git-ignored):
 |---|---|
 | `desktop.json` | format, times, each process recorded (executable name, the toolkit detected and the signals behind it), what was listened to, polled or hooked, notes |
 | `steps.jsonl` | one line per user action (below) |
-| `trees/<seq>.json` | the value-free control tree of the step's window after the action |
-| `screens/<seq>.png` | a picture of that window only, when asked for (`--screenshots`; off by default: pictures show data) |
+| `trees/<seq>.json` | the value-free control tree of the step's window after the action; the window's `frame` (outer size, client area in the window, DPI, border, minimise/maximise boxes, where it opened) and, for each control with a window of its own, `win32` (font, maximum length, multi-line, digits only, combo box style, default button) |
+| `pictures/<seq>.png` | a picture of that window **without data** (on by default; `--no-pictures`): every place the tree shows data painted over in its own background and its shape drawn there, in the control's font |
+| `pictures.json` | how the pictures were checked: each one read with OCR when the recording ends, while the data values seen are still in memory; a picture that shows one, or that could not be checked, is deleted and listed (by step, never by value) |
+| `screens/<seq>.png` | a picture of that window only, **with data**, when asked for (`--screenshots`; off by default): stays on this machine, never packaged |
+
+`desktop.json` also holds `system`: the machine's DPI, system fonts (message, caption, menu,
+status), light or dark app theme, high contrast and text scale: the settings that change how
+every window looks.
 
 A step:
 
@@ -154,6 +160,86 @@ write `build.ps1` producing a self-contained `dotnet publish` folder and a zip u
 `apps/<app>/publish/` (MSI/MSIX optional), and set `run.desktop.exe` in `app.yaml`. No
 Dockerfile, no app pipeline workflow.
 
+## What a desktop package carries
+
+`labctl brief` (labctl.desktop.kit) writes, beside the brief and the model, everything a coding
+agent needs to rebuild the application exactly, and `labctl build package` carries it:
+
+| File | From | Holds |
+|---|---|---|
+| `look/windows.json` | trees (`frame`, `win32`, rectangles), pictures | per window: frame, client background; per control: bounds in the client area (physical pixels at the recorded DPI), font, colours sampled from the picture, docking seen (a control spanning an edge of the client area), anchoring seen (only when the window was seen at two sizes), grid columns with x and width, header and row height |
+| `look/screens/<window>.png` | pictures | one picture per window and per opened menu, without data |
+| `look/texts.json` | clean trees | every interface word per window, with the access key as the toolkit writes it (`E&xit`), shortcuts, tooltips, message box texts |
+| `look/theme.json` | `desktop.json` | DPI, system fonts, theme; font names with why they are not carried (Windows and Java fonts are not redistributable and are on the machine) |
+| `navigation.json` | steps | windows (main, dialog, message box), which step opened and closed each, modal (seen when the window under it was read disabled), menus and items, menus never opened, tabs, MDI containers |
+| `rules.json` | trees, steps | per input: state on open, Win32 limits and styles, drop-down items, default button; validation: every message box after an action with the field shapes then (typed shapes win over a late snapshot) and the same action accepted later; "X is required" makes X required |
+| `steps/<recording>.json`, `steps/<recording>/<n>.png` | steps, trees, pictures | every step in order with the rows each grid showed after it, a message box's text and a picture after it |
+| `db/seed.sql`, `db/seed.json`, `steps/<recording>.values.yaml` | grids, steps | synthetic rows in each grid's shapes and codes, made with the replay values so the recorded outcomes happen again: a search key that finds as many rows as recorded; a refused and an accepted password with an `app_users` row |
+| `spec/CONSTITUTION.md`, `ARCHITECTURE.md`, `BUILD-PLAN.md`, `WINDOWS/<window>.md` | all of the above | the web set of build documents, one document per window |
+
+The package refuses a picture under `steps/` that is not byte for byte one the recorder kept
+after its check; the look's pictures are listed with their sha256 (the web look's rule).
+
+### Gap audit (2026-11-19)
+
+Before this, a desktop package held the brief, model, schema and app.yaml only. Audit of fresh
+recordings of the three reference apps against a web package (Demoblaze, blind round 3):
+
+| Area | Web | Desktop before | Desktop now |
+|---|---|---|---|
+| Geometry (window, client area, control bounds, DPI) | snapshots, CSS | missing (rectangles recorded, not packaged; no DPI, no client area) | have |
+| Fonts | names and files | missing | have for controls with a window of their own (WinForms text boxes, Win32); toolkit default otherwise; named, not carried (not redistributable) |
+| Colours | theme.json | missing | sampled from the pictures |
+| Pictures without data | rendered from masked snapshots | missing | have, masked and checked with OCR (Swing partial, see Limits) |
+| Texts | texts.json | partial (brief tables) | have, with access keys and shortcuts |
+| Navigation map | navigation.json | partial (message box owner, menus in the brief) | have |
+| Field rules and behaviour | rules.json | partial (read-only, password, items, message rules) | have (limits, styles, default buttons, validation with shapes) |
+| Data model and seed | schema, seed, values | partial (schema assumed from the grid) | have (seed and replay values made together) |
+| Data the app reads and writes | API catalogue | missing | **not capturable** (see Limits) |
+| Recorded steps | steps/*.json | missing | have, with pictures |
+| Build documents | spec/* per page | missing | have, per window |
+| Judge checks | acceptance, visual, expected actions | structure only | `verify --geometry --rows --pictures` |
+
+## Judging a rebuild
+
+`labctl desktop verify` compares structure by default. A judge adds:
+
+- `--geometry`: the client area's size and every control's bounds (within 2 px) and font;
+- `--rows`: the number of rows each grid shows after each step (a search's outcome);
+- `--pictures <dir>`: the live window after each step as a picture without data (made as the
+  recorder makes it), saved there and compared with the recorded one: the share of pixels that
+  differ (by more than 16 in a channel); above `--picture-threshold` (default 1 %) is a
+  difference. Data is drawn as its shape on both sides, so a rebuild with synthetic values of
+  the recorded shapes can match pixel for pixel.
+
+
+### Blind rebuild of CaseDesk (WinForms), 2026-11-19
+
+Method as the web trial's: record the reference flow, build the package, give only the unpacked
+package to a fresh coding agent (told not to read the repository, the reference application or
+anything else) to rebuild in .NET 6 WinForms with no NuGet, then replay the original
+recording against the rebuild with the package's own replay values and
+`--geometry --rows --pictures`, compare windows by eye, classify every failure. Trial files are
+outside the repository (`desktop-trial\`).
+
+| | Round 1 | Round 2 |
+|---|---|---|
+| Steps replayed / implied | 22 / 6 (8 failed) | 29 / 7 |
+| Structure (ids, names, types, classes, paths, states, items) | 0 differences | 0 |
+| Geometry (client areas, bounds within 2 px) and fonts | 0 | 0 |
+| Grid rows after each step | 0 | 0 |
+| Pictures above 1 % | main window 3.65–4.98 % (6 steps), case window 1.27 % (2 steps) | none (largest 0.84 %; 7 of 16 identical; the original app itself: largest 0.76 %) |
+| Verdict | FAIL | **PASS WITHIN DECLARED SCOPE, VERIFIED COMPLETE** |
+| Package gaps found | grid header (UI Automation height, not the property); label access keys; why `txtCaseNo` is named "Customer"; SQLite offline | none failing; reported: icon of a message box not listed, a combo box's inner parts, default buttons per window, the search rule |
+| Builder mistakes | none found (menu underlines under the replay, cause not found) | none |
+| Lab tooling | recorder snapshot lag (two steps; the original fails one of them too) | fixed (`tree_late`) |
+
+Round 2's report is `certification/rebuilds/winforms-casedesk-blind2.json`; the WinForms entry
+of the certification matrix is **CERTIFIED** on it. Both builders kept the data in a JSON file
+(SQLite needs a NuGet package) and built framework-dependent (a self-contained publish needs
+runtime packs from NuGet): stated in their notes, accepted by the task. Not done: a rebuild of
+the WPF or Swing application, and a judge run on another machine or DPI.
+
 ## Recording and verifying
 
 ```powershell
@@ -242,6 +328,34 @@ handles that error itself and pytest's fault handler reports it. The lookups suc
   arrived meanwhile, so an input is always located in a whole tree of the window.
 - Window titles are masked by rule (digits, after `:`, words seen as data); a title that holds a
   name never seen elsewhere in the recording is kept.
+- **What the application reads and writes is not captured.** A desktop application talks to
+  its database or service directly; the recorder sees windows. The package's tables are
+  inferred from grids and detail windows (`assumed`), the seed is synthetic in the recorded
+  shapes, and a search's matching rule is assumed (the seed says so). Capturing the traffic
+  would need a proxy, a driver or administrator rights (`pktmon` sees packets, not decrypted
+  SQL or HTTPS): not done.
+- **Fonts**: Win32 reports the font of controls with a window of their own that answer
+  `WM_GETFONT` (WinForms text boxes, Win32 controls). WinForms labels, buttons and grids paint
+  themselves and do not answer: the package says "toolkit default" for them. WPF and Java
+  controls have no window of their own: the package names the system font and the toolkit
+  default. Colours are sampled from the pictures: drawn colours, not property values.
+- **Docking and anchoring** are not exposed by UI Automation: a control spanning an edge of the
+  client area is reported as docked "as seen"; anchoring only when the recording saw the
+  window at two sizes.
+- **Pictures**: a place the tree does not expose (a custom-drawn control, Swing table cells the
+  bridge does not list) is not painted over. The OCR check then finds the data and deletes the
+  picture: on CaseDeskSwing 14 of 21 pictures were deleted (the main window's table), so a Swing
+  package has fewer pictures. OCR does not look for values shorter than four letters or
+  digits; the masks still cover every place the tree shows.
+- **Snapshot timing**: a window's tree and picture are read once per batch of actions (after
+  0.4 s of quiet). When a person or script keeps acting, a step followed in the same batch by
+  another action in its window gets a later state (CaseDesk: the Save click's tree showed the
+  summary typed four steps later). The recorder marks such a step `tree_late`; a window that
+  opened keeps the tree read when it opened. `verify` compares a late step's structure but not
+  its rows or picture; the package takes no picture, rows or field state from it.
+- WPF captions: the TextBlock a WPF button, header or label draws its text with is now kept as
+  structure when its text is the control's own (`_Search` in `Search`); recordings made before
+  hold it as a shape, so verify them against a fresh recording.
 - UWP/WinUI, Win32/MFC and JavaFX run through the same UI Automation code but were not
   recorded live here; they, and the Electron hand-off, are tested on fixtures only. Proven live:
   WinForms, WPF and Swing.

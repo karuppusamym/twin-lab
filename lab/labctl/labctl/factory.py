@@ -300,6 +300,10 @@ def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
             + "\n\n"
         )
         text = text.replace(marker, note + marker, 1) if marker in text else f"{text}\n{note}"
+    if model.stack.desktop:  # look, navigation, rules, steps, seed, documents (labctl.desktop.kit)
+        from labctl.desktop import kit
+
+        text = kit.extend(root, app_id, model, text)
     pub = publicdata.current()
     if pub is not None:  # which data is real public catalogue content, and who approved it
         marker = "## Running in the lab"
@@ -408,7 +412,7 @@ GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.
              "behaviours.json", "pages", "steps", "look", "api",
              "navigation.json", "codemap.json", "rules.json",
              "scripts", "session.json", "templates.json", "static", "vendor",
-             "THIRD-PARTY-NOTICES.md")  # fmt: skip
+             "THIRD-PARTY-NOTICES.md", "spec")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:

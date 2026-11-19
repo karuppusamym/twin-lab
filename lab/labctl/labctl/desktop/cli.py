@@ -54,7 +54,16 @@ def record(
     name: str = typer.Option(None, help="Recording name. Default: desktop-<UTC time>."),
     out: Path = typer.Option(None, help="Recording folder (instead of evidence/<app>/<name>/)."),
     arg: list[str] = typer.Option([], "--arg", help="An argument for the executable (repeat)."),
-    screenshots: bool = typer.Option(False, help="Keep a picture of the window per step."),
+    screenshots: bool = typer.Option(
+        False,
+        help="Keep a picture of the window per step "
+        "(with data: stays on this machine, never packaged).",
+    ),
+    pictures: bool = typer.Option(
+        True,
+        help="A picture per step without data (data painted "
+        "over, checked with OCR): the look the package carries.",
+    ),
     keep_open: bool = typer.Option(False, help="Leave the application running at the end."),
     max_minutes: float = typer.Option(30.0, help="Stop after this many minutes."),
 ) -> None:
@@ -65,7 +74,8 @@ def record(
     typer.echo(f"recording {exe.name}; use the application, then close it or press Ctrl+C")
     try:
         recorder.record(str(exe), path, args=list(arg), close=not keep_open,
-                        screenshots=screenshots, max_seconds=max_minutes * 60)  # fmt: skip
+                        screenshots=screenshots, pictures=pictures,
+                        max_seconds=max_minutes * 60)  # fmt: skip
     except (DesktopUnavailable, RuntimeError) as exc:
         _fail(exc)
     _done(path)
@@ -115,7 +125,16 @@ def attach(
     app_id: str = typer.Option(None, "--app", help="Application id: evidence/<app>/<name>/."),
     name: str = typer.Option(None, help="Recording name."),
     out: Path = typer.Option(None, help="Recording folder."),
-    screenshots: bool = typer.Option(False, help="Keep a picture of the window per step."),
+    screenshots: bool = typer.Option(
+        False,
+        help="Keep a picture of the window per step "
+        "(with data: stays on this machine, never packaged).",
+    ),
+    pictures: bool = typer.Option(
+        True,
+        help="A picture per step without data (data painted "
+        "over, checked with OCR): the look the package carries.",
+    ),
     max_minutes: float = typer.Option(30.0, help="Stop after this many minutes."),
 ) -> None:
     """Record an application that is already running (it keeps running afterwards)."""
@@ -125,7 +144,7 @@ def attach(
     typer.echo("recording; press Ctrl+C to stop")
     try:
         recorder.attach(path, pid=pid, process=process, title=title, screenshots=screenshots,
-                        max_seconds=max_minutes * 60)  # fmt: skip
+                        pictures=pictures, max_seconds=max_minutes * 60)  # fmt: skip
     except (DesktopUnavailable, RuntimeError) as exc:
         _fail(exc)
     _done(path)
@@ -206,6 +225,18 @@ def verify(
     java_main: str = typer.Option(
         None, "--java-main", help="A Java app: its main class (then --exe is its class path)."
     ),  # fmt: skip
+    geometry: bool = typer.Option(
+        False, help="Also compare the client area and every control's bounds (2 px) and font."
+    ),
+    rows: bool = typer.Option(False, help="Also compare how many rows each grid shows."),
+    pictures: Path = typer.Option(
+        None,
+        help="Save a picture without data of the window after "
+        "each step here and compare it with the recorded one.",
+    ),
+    picture_threshold: float = typer.Option(
+        1.0, help="Percent of differing pixels a picture may have."
+    ),
 ) -> None:
     """Start the built app, replay each recording, compare every window's controls."""
     from labctl.behaviour import fidelity
@@ -233,7 +264,15 @@ def verify(
                 cmd = djava.java_command(str(_java_exe()), str(exe), java_main)
                 report = djava.verify(cmd, rec, values=values)
             else:
-                report = dverify.verify(str(exe), rec, values=values)
+                report = dverify.verify(
+                    str(exe),
+                    rec,
+                    values=values,
+                    geometry=geometry,
+                    rows=rows,
+                    picture_threshold=picture_threshold,
+                    pictures_dir=(pictures / rec.name) if pictures else None,
+                )
         except DesktopUnavailable as exc:
             _fail(exc)
         typer.echo(report.markdown())

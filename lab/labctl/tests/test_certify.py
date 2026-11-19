@@ -413,8 +413,14 @@ def test_desktop_entries_run_only_when_asked_for(tmp_path, monkeypatch):
     mx = certify.load_matrix(MATRIX)
     for name in ("winforms", "java-swing"):
         got = certify.run_entry(mx.entry(name), ROOT, tmp_path)
-        assert got.result == NOT_RUN and got.reason == "set TWINLAB_DESKTOP_GUI=1"
-        assert {g.status for g in got.gates.values()} == {NOT_RUN}
+        live = {k: g.status for k, g in got.gates.items() if k != "rebuild"}
+        assert set(live.values()) == {NOT_RUN}
+        assert all(g.detail == "set TWINLAB_DESKTOP_GUI=1" for k, g in got.gates.items()
+                   if k != "rebuild")  # fmt: skip
+        if name == "winforms":  # its rebuild is a kept report: read without starting anything
+            assert got.gates["rebuild"].status == "PASS" and got.result == "PARTIAL"
+        else:
+            assert got.result == NOT_RUN and got.reason == "set TWINLAB_DESKTOP_GUI=1"
     monkeypatch.setenv(certify.DESKTOP_ENV, "1")  # asked for, but the folder is not there
     empty = tmp_path / "repo"
     empty.mkdir()

@@ -143,6 +143,13 @@ class JavaRecorder(Recorder):
         if raw is None or not self.win.user32.IsWindowVisible(hwnd):
             return None  # gone while it was read: the last tree of the window stays
         raw["_screen"] = rect[:2]
+        if getattr(self, "pictures", False):  # the pixels of this moment, for its picture
+            from labctl.desktop import winlook
+
+            try:
+                raw["_pixels"] = winlook.grab(hwnd)
+            except (OSError, ValueError):
+                pass
         return raw, privacy.clean(raw, self.known, self.structure)
 
     def _rect(self, hwnd: int) -> tuple[int, int, int, int] | None:

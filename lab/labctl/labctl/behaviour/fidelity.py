@@ -54,6 +54,9 @@ Check = Literal[
     # found by its locator whose ClassName, FrameworkId or parent path differs, and a locator
     # that matches more than one control.
     "changed", "ambiguous",
+    # Opt-in desktop judge checks (`labctl desktop verify --geometry --rows --pictures`): a
+    # control's bounds or font, a grid's row count, a window picture that differs.
+    "geometry", "font", "rows", "picture",
 ]  # fmt: skip
 SUPPORTED = {
     "goto",

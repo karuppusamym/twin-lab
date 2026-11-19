@@ -212,6 +212,10 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
     from labctl import vendor
 
     found.update(vendor.package_files(repo_root, app_id))
+    # A desktop application's look, rules, navigation, steps' pictures and documents.
+    from labctl.desktop import kit as desktop_kit
+
+    found.update(desktop_kit.package_files(repo_root, app_id))
     shots = repo_root / "evidence" / app_id / "screenshots"
     if shots.is_dir():
         for path in sorted(shots.rglob("*")):
@@ -1305,7 +1309,11 @@ def _build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None,
     if code_problems:
         raise PackageError(f"cannot package {app_id}: apps/{app_id}/codemap.json failed the "
                            "privacy check: " + "; ".join(code_problems[:10]))  # fmt: skip
-    look_problems = lookfeel.package_check(repo_root, app_id)
+    from labctl.desktop import kit as desktop_kit
+
+    look_problems = lookfeel.package_check(repo_root, app_id) + desktop_kit.package_check(
+        repo_root, app_id
+    )
     if look_problems:
         raise PackageError(
             f"cannot package {app_id}: the look (apps/{app_id}/look) failed the privacy check: "

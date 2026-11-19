@@ -2,6 +2,31 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Desktop build packages to the web's depth, and a blind WinForms rebuild
+An audit of fresh recordings of the three reference apps found a desktop package held only the
+brief, model, schema and app.yaml. Now (`labctl/desktop/`, docs/09-desktop.md):
+- **Recorder**: each window's frame (client area, DPI, border, boxes, where it opened), each
+  control's Win32 facts (font, length limit, multi-line, digits only, combo box style, default
+  button) and the machine's display settings. A picture per step **without data**
+  (`winlook.py`, `pictures.py`): every place the tree shows data is painted over in its own
+  colour and its shape drawn there in the control's font; when the recording ends each picture
+  is read with OCR while the data values are still in memory, and one that shows a value, or
+  could not be checked, is deleted (CaseDeskSwing: 14 of 21, the table cells the bridge does not
+  list). A step whose tree was read only after later actions is marked `tree_late`. WPF
+  captions drawn in a TextBlock are kept as structure.
+- **Package** (`kit.py`, `look.py`, `navigation.py`, `fieldrules.py`, `seeddata.py`,
+  `docs.py`): `look/` (windows.json with bounds, fonts, colours, docking, grid columns;
+  pictures; texts.json with access keys; theme.json), `navigation.json`, `rules.json`, the steps
+  with their pictures, a seed made with the replay values, and spec/ documents per window.
+- **Judge**: `labctl desktop verify --geometry --rows --pictures` and a verdict with assurance.
+- **Blind rebuild** of CaseDesk by a coding agent from the package alone: round 1 failed on
+  pictures only (a package gap in the grid header and unexplained menu underlines); round 2
+  **PASS WITHIN DECLARED SCOPE, VERIFIED COMPLETE**, every picture under 1 %. WinForms is
+  CERTIFIED in the matrix. Open: what a desktop app reads and writes (screens only, not SQL),
+  fonts of controls that paint themselves, Swing pictures and tables, no WPF/Swing rebuild yet;
+  `test_har.py::test_live_recording_of_the_showcase_gives_the_same_screens_and_routes` already
+  fails on main.
+
 ## 2026-11-19 — Demoblaze blind rebuild, round 3: lists in any order, masked footer, late picture
 Round 3 passed VERIFIED COMPLETE on a repeat run but its official run failed one case by
 chance: the cart's rows are keyed by random ids (UUIDs the page makes) and fetched in
