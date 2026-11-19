@@ -1362,8 +1362,10 @@ def replay(
                     if placed is not None:  # ids that were a typed value: as recorded
                         live = placed.redact_html(live)
                     diffs = compare_dom(expected_html, live, step.seq, supplied)
+                    # an element exclusion covers the element and what is inside it
+                    names = scope_mod.resolve(sc, expected_html, live) if diffs else {}
                     for d in diffs:
-                        ex = scope_mod.which(sc, d.element, step.url)
+                        ex = scope_mod.which(sc, d.element, step.url, names)
                         if ex is None:
                             report.differences.append(d)
                         else:
