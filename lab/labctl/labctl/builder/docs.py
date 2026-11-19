@@ -70,13 +70,23 @@ def rules(app: str, packaged, browser: bool, seed_loaded: bool) -> list[str]:
     api = f"{app}/api/catalogue.json" in have
     look = any(p.startswith(f"{app}/look/") for p in have)
     pictures = any(p.startswith(f"{app}/look/screens/") for p in have)
+    vendored = any(p.startswith(f"{app}/vendor/") and not p.endswith("/vendor.json") for p in have)
+    fonts = any(p.startswith(f"{app}/look/fonts/") for p in have)
     spec = f"{app}/{DIR}/"
     out = [
         "**Same technology and versions.** Build with the front-end framework and version, the "
         "server technology and the UI library the brief's *Stack to pin* names "
         f"(`{spec}{ARCHITECTURE}` repeats them). Do not substitute another because it is "
         "easier; where it names none, use the default it states, and pin and list every version "
-        "in BUILD-NOTES.md.",
+        "in BUILD-NOTES.md."
+        + (
+            f" The exact third-party library files and versions are available in `{app}/vendor/` "
+            f"(`vendor.json` lists them; licences in `{app}/THIRD-PARTY-NOTICES.md`): use them as "
+            "they are, never a stand-in of your own."
+            if vendored
+            else ""
+        )
+        + (f" The web fonts are in `{app}/look/fonts/`." if fonts else ""),
         "**Same selectors and ids.** Keep **every recorded selector, element id, class, "
         "`name`, iframe and shadow-DOM structure** exactly as the brief's screen tables and "
         f"`{app}/pages/*.html` show them. Automations find elements by these, and a changed id "
@@ -262,6 +272,7 @@ class Pkg:
         self.texts = (self.json(f"{self.app}/look/texts.json") or {}).get("screens") or {}
         self.templates = self.json(f"{self.app}/templates.json")  # labctl.templates
         self.network = self.json(f"{self.app}/api/network.json")  # labctl.netfacts
+        self.vendor = self.json(f"{self.app}/vendor/vendor.json")  # labctl.vendor
         self.endpoints: dict[str, dict] = {}
         for row in self.cat.get("endpoints") or []:
             doc = self.json(f"{self.app}/{row.get('file')}") if row.get("file") else None
@@ -782,6 +793,16 @@ def page_doc(pkg: Pkg, sc: Screen) -> str:
             w(f"- Styles written into the page: {_link(me, app + '/look/' + c['file'])}.")
     if pkg.look.get("css"):
         w(f"- Style sheets of the application: `{app}/look/css/` (see `{app}/look/manifest.json`).")
+    if pkg.look.get("fonts_carried"):
+        w(f"- Web fonts: `{app}/look/fonts/` (" + ", ".join(
+            f"`{f}`" for f in pkg.look["fonts_carried"][:6]) + "): the carried style sheets point "
+          "at them; serve them so the screen shows the real typography.")  # fmt: skip
+    from labctl import vendor as vendor_mod
+
+    libs = vendor_mod.page_lines(pkg.vendor, app, sc.path)
+    if libs:
+        w("")
+        lines += libs
     layout = pkg.theme.get("layout") or {}
     page_box = next((p for p in layout.get("pages") or [] if p.get("screen") == sc.name), None)
     if page_box:
@@ -1284,6 +1305,30 @@ def architecture_doc(pkg: Pkg) -> str:
         w("")
         lines += rows
     w("")
+    vendored = (pkg.vendor or {}).get("libraries") or []
+    if vendored or (pkg.vendor or {}).get("fonts"):
+        from labctl import vendor as vendor_mod
+
+        w("### Client libraries and fonts carried")
+        w("")
+        if vendored:
+            w(f"From `{app}/vendor/vendor.json`: the application's open-source client libraries, "
+              "byte for byte as the browser received them (licences in "
+              f"`{app}/THIRD-PARTY-NOTICES.md`). The same technology means these files:")  # fmt: skip
+            w("")
+            lines += vendor_mod.library_rows(pkg.vendor, app)
+            w("")
+            w(vendor_mod.use_text(app))
+            w("")
+        for x in (pkg.vendor or {}).get("not_carried") or []:
+            w(f"- Named, not carried: {x['name']} {x.get('version') or ''}".rstrip()
+              + f": {x['reason']}.")  # fmt: skip
+        fonts = (pkg.vendor or {}).get("fonts") or []
+        if fonts:
+            w(f"- Web fonts in `{app}/look/fonts/`: " + ", ".join(
+                f"{f['family']} (`{f['file']}`, {f.get('licence') or 'licence not identified'})"
+                for f in fonts[:8]) + ".")  # fmt: skip
+        w("")
     # --- layers ------------------------------------------------------------------------------
     w("## Layers")
     w("")
@@ -1801,7 +1846,8 @@ def inputs(repo_root: Path, app_id: str) -> dict[str, bytes]:
             rel = path.relative_to(app).as_posix()
             if path.is_file() and rel.split("/", 1)[0] in (
                     "BRIEF.md", "app.yaml", "navigation.json", "rules.json", "session.json",
-                    CODEMAP, "db", "api", "pages", "unrecorded", "steps", "look"):  # fmt: skip
+                    CODEMAP, "db", "api", "pages", "unrecorded", "steps", "look",
+                    "vendor"):  # fmt: skip
                 out[f"apps/{app_id}/{rel}"] = _content(path)
         return out
 

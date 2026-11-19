@@ -170,6 +170,21 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
                             "level (seen, declared, in code) and evidence, rules between fields, "
                             "behaviour while typing or choosing, state on load, session timers.",
     }  # fmt: skip
+    if rel == app + "THIRD-PARTY-NOTICES.md":
+        return ("The licences of the open-source libraries and fonts the package carries: name, "
+                "version, licence, original address, sha256, files, and the licence texts. Keep "
+                "it with those files.")  # fmt: skip
+    if rel == app + "vendor/vendor.json":
+        return ("Every third-party library carried and not carried (with the reason), each "
+                "file's original address and sha256, and which page loads which file.")  # fmt: skip
+    if rel.startswith(app + "vendor/"):
+        parts = rel[len(app + "vendor/") :].split("/")
+        what = f"{parts[0]} {parts[1]}" if len(parts) > 2 else "a library"
+        return (f"A file of the open-source library {what}, exactly as the browser received it: "
+                "use it as it is (licence in THIRD-PARTY-NOTICES.md).")  # fmt: skip
+    if rel.startswith(app + "look/fonts/"):
+        return ("A web font file of the application, carried because its licence allows "
+                "redistribution (THIRD-PARTY-NOTICES.md); the carried style sheets point at it.")  # fmt: skip
     if rel.startswith(app + "scripts/"):
         return ("The application's own script, carried on the owner's request (source maps "
                 "stripped, checked for secrets and hosts): reference for its rules.")  # fmt: skip

@@ -48,7 +48,7 @@ where = ["lab/labctl"]
 include = ["labctl*"]
 
 [tool.setuptools.package-data]
-labctl = ["portal/templates/*.html", "portal/static/*"]
+labctl = ["portal/templates/*.html", "portal/static/*", "licences/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["lab/labctl/tests", "reference/case-workbench/backend/tests", "lab/lab-agent/tests"]

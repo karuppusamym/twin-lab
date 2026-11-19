@@ -655,7 +655,7 @@ def test_the_brief_and_the_task_tell_the_builder_how_to_use_the_look(built):
                  "| button primary | 9px 22px 9px 22px | 2px solid #b4126e | 11px |",
                  "Main content width: 1040px (max-width 1040px)",
                  f"| `{lookapp.FONT}` | web font (declared with @font-face in css/app.css) |",
-                 "fonts are licensed, so font files are not copied",
+                 "fonts are licensed, so a font file is copied only when its licence allows",
                  "| `/static/img/logo.svg` | 120 x 32 | img#logo on parts; img#logo on parts-item | "
                  "`look/assets/logo.svg` |",
                  "no: under a folder for user content (avatars, uploads)",
@@ -753,7 +753,10 @@ def test_font_files_are_bundled_only_on_request(built, tmp_path, monkeypatch):
     assert lab["bundled"] is True and manifest["fonts_bundled"] is True
     assert lab["files"][0]["bundled"] == "fonts/labgrotesk-regular.woff2"
     assert "look/fonts/" in lab["to_do"]
-    assert "on request: `TWINLAB_LOOK_FONTS=bundle`" in lookfeel.brief_section(root, APP)
+    assert "on the owner's request (`TWINLAB_LOOK_FONTS=bundle`)" in lookfeel.brief_section(
+        root, APP
+    )
+    assert "carried on the owner's request" in lab["files"][0]["warning"]  # no licence identified
     assert "font files are in `look/fonts/`" in lookfeel.task_text(root, APP)
     assert any(rel.endswith("look/fonts/labgrotesk-regular.woff2")
                for rel, _ in lookfeel.package_files(root, APP))  # fmt: skip

@@ -46,7 +46,8 @@ def test_the_builder_may_change_run_but_nothing_else_in_app_yaml():
 
 def test_the_builder_may_not_edit_generated_inputs():
     for path in ("apps/qtt/BRIEF.md", "apps/qtt/db/schema.sql", "apps/qtt/pages/queue.html",
-                 "apps/qtt/look/theme.json"):  # fmt: skip
+                 "apps/qtt/look/theme.json", "apps/qtt/vendor/jquery/3.2.1/dist/jquery.min.js",
+                 "apps/qtt/THIRD-PARTY-NOTICES.md", "apps/qtt/look/fonts/lato.woff2"):  # fmt: skip
         assert any("generated from the evidence" in p for p in run({path: ("a", "b")})), path
     assert run({"apps/qtt/app/main.py": ("a", "b")}) == []
 

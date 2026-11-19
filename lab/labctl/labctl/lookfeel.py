@@ -11,8 +11,8 @@ structure and the inline styles. This module adds, from the same recordings:
 - `look/screens/<screen>.png`: a picture of each screen, rendered from the sanitised snapshot
   (interface text kept, data masked) with the carried style sheets. Never the recorder's own
   screenshots: those show real data;
-- `look/assets/`: the images of the interface (logo, icons, sprites), and with an explicit
-  opt-in `look/fonts/`: the web font files;
+- `look/assets/`: the images of the interface (logo, icons, sprites), and `look/fonts/`: the
+  web font files whose licence allows redistribution (`labctl.vendor.font_licence`);
 - `look/texts.json`: per screen, which texts are literal and which are placeholders for data;
 - `look/manifest.json`: every carried file, every font and image and why it is or is not
   carried, and the result of the privacy check.
@@ -24,8 +24,12 @@ Privacy rules (the brief repeats them):
   are dropped (never a host, never a query). Source-map comments are dropped. In strings and
   comments, e-mail addresses, numbers of three or more digits (strings only; font names are left
   alone) and names the recording shows as data are masked.
-- Fonts are licensed: the files are not copied. `TWINLAB_LOOK_FONTS=bundle` copies those seen in
-  the HAR; otherwise the manifest names each font, where it came from and a generic fallback.
+- Fonts are licensed: a font file seen in the HAR is copied when its licence allows
+  redistribution (its own `name` table says so, or its family is a known open font; the
+  licences go into `THIRD-PARTY-NOTICES.md`, `labctl.vendor`). The manifest names every other
+  font, why it is not copied, where it came from and a generic fallback.
+  `TWINLAB_LOOK_FONTS=bundle` copies every font file the HAR holds (with a warning for those
+  whose licence is not identified), `off` copies none.
 - Images: only static files of the application's own origin that the interface uses (a style
   sheet, or an `<img>` or icon outside data cells), without a query, without a record number in
   the path, not under an upload folder, up to `har.MAX_BODY` bytes. Never user content.
@@ -55,7 +59,7 @@ from labctl import sanitize
 LOOK_DIR = "look"
 MANIFEST = "manifest.json"
 FORMAT = "twinlab-look/1"
-FONTS_ENV = "TWINLAB_LOOK_FONTS"  # "bundle": copy the web font files seen in the HAR
+FONTS_ENV = "TWINLAB_LOOK_FONTS"  # "bundle": every font file; "off": none; default: licensed ones
 SWITCH_ENV = "TWINLAB_LOOK"  # "off": carry no look at all
 MAX_DATA_URI = 64 * 1024  # an image embedded in a style sheet, kept up to this many characters
 MAX_TOTAL = 20 * 1024 * 1024  # all bundled images of one application
@@ -211,7 +215,8 @@ class CssRefs:
     dropped: list[str] = field(default_factory=list)  # addresses (shown paths) not carried
     images: list[str] = field(default_factory=list)  # resource urls of images it uses
     fonts: list[str] = field(default_factory=list)  # resource urls of font files it names
-    embedded_fonts: int = 0  # font files embedded as data: addresses (dropped unless opted in)
+    embedded_fonts: int = 0  # font files embedded as data: addresses
+    kept_fonts: int = 0  # of those, the ones kept (their licence allows it, or the opt-in)
 
 
 def scrub(text: str, known: set[str] = frozenset(), numbers: bool = True) -> str:
@@ -236,14 +241,15 @@ def clean_css(
     lookup=None,
     place=None,
     known: set[str] = frozenset(),
-    fonts: bool = False,
+    fonts=False,
 ) -> tuple[str, CssRefs]:
     """A style sheet as the application wrote it, safe to carry (the rules in the module text).
 
     `base` is the sheet's own address, `lookup(url)` the `Resource` an address names (or None)
     and `place(resource)` where that resource is carried, relative to the sheet (or None when it
-    is not carried). `fonts`: keep the font files (the opt-in). Selectors, colours, sizes and
-    every declaration stay as they are.
+    is not carried). `fonts`: keep the font files embedded as `data:` addresses (a bool, or a
+    function of the address that says it per font). Selectors, colours, sizes and every
+    declaration stay as they are.
     """
     refs = CssRefs()
     lookup = lookup or (lambda url: None)
@@ -257,7 +263,9 @@ def clean_css(
             kind = raw[5:].split(";")[0].split(",")[0].lower()
             if "font" in kind:
                 refs.embedded_fonts += 1
-                return f'url("{raw}")' if fonts else "url(#font-not-carried)"
+                keep = fonts(raw) if callable(fonts) else fonts
+                refs.kept_fonts += 1 if keep else 0
+                return f'url("{raw}")' if keep else "url(#font-not-carried)"
             if kind.startswith("image/") and len(raw) <= MAX_DATA_URI:
                 return f'url("{raw}")'
             return "url(#)"
@@ -321,7 +329,8 @@ def css_findings(css: str, data: Data) -> list[str]:
 
 
 _FONT_FACE = re.compile(r"@font-face\s*\{([^}]*)\}", re.IGNORECASE)
-_DECL = re.compile(r"([a-z-]+)\s*:\s*([^;]+)", re.IGNORECASE)
+# a value may hold `url(data:font/woff;base64,...)`: its semicolons do not end the declaration
+_DECL = re.compile(r"([a-z-]+)\s*:\s*((?:url\([^)]*\)|[^;])+)", re.IGNORECASE)
 _SRC = re.compile(
     r"url\(\s*[\"']?(?P<addr>[^\"')]+)[\"']?\s*\)(?:\s*format\(\s*[\"']?(?P<fmt>[\w-]+)[\"']?\s*\))?"
     r"|local\(\s*[\"']?(?P<local>[^\"')]+)[\"']?\s*\)",
@@ -1413,18 +1422,47 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
             item["where"].append(where)
         return item
 
-    # Fonts and style sheets.
-    font_taken: set[str] = set()
-    font_files: dict[str, str] = {}  # resource url -> carried file (the opt-in only)
-    keep_fonts = bundle_fonts()
+    # Fonts and style sheets. A font file is carried when its licence allows redistribution
+    # (labctl.vendor.font_licence), every one with TWINLAB_LOOK_FONTS=bundle, none with `off`.
+    from labctl import libraries, vendor
 
-    def place_from(prefix: str):
+    font_taken: set[str] = set()
+    font_files: dict[str, str] = {}  # resource url -> carried file
+    font_licences: dict[str, vendor.Licence] = {}  # resource url -> what is known of its licence
+    mode = vendor.font_mode()
+    keep_fonts = mode == "bundle"
+    css_taken: set[str] = set()
+    sheets = [r for r in found.values() if r.kind == "css"]
+    css_names = {r.url: _file_name(r.path, css_taken) for r in sheets}
+    family_of: dict[str, str] = {}  # font resource url -> the family a @font-face gives it
+    library_of: dict[str, tuple[str, vendor.Licence]] = {}  # sheet url -> third-party library
+    for res in sheets:
+        raw = res.body.decode("utf-8", "replace")
+        for face in font_faces(raw, res.url, lookup):
+            for f in face["files"]:
+                hit = lookup(f["_url"]) if f.get("_url") else None
+                if hit is not None:
+                    family_of.setdefault(hit.url, face["family"])
+        lib = libraries.identify(res.path, raw, own=res.host in own_hosts, query=res.query)
+        if lib is not None and lib.name not in vendor._NOT_NAMED:
+            library_of[res.url] = (lib.name, vendor.library_licence(lib.name, [raw]))
+
+    def font_licence(res: Resource, sheet: Resource | None) -> vendor.Licence:
+        if res.url not in font_licences:
+            name, lic = library_of.get(sheet.url, (None, None)) if sheet else (None, None)
+            font_licences[res.url] = vendor.font_licence(
+                res.body, family_of.get(res.url), unquote(res.path.rsplit("/", 1)[-1]), lic, name
+            )
+        return font_licences[res.url]
+
+    def place_from(prefix: str, sheet: Resource | None = None):
         def place(res: Resource) -> str | None:
             if res.kind == "css":
                 name = css_names.get(res.url)
                 return name if name else None
             if res.kind == "font":
-                if not keep_fonts:
+                if mode == "off" or not (keep_fonts or font_licence(res, sheet).ok):
+                    font_licence(res, sheet)
                     return None
                 if res.url not in font_files:
                     font_files[res.url] = f"fonts/{_file_name(res.path, font_taken)}"
@@ -1436,22 +1474,44 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
 
         return place
 
-    css_taken: set[str] = set()
-    sheets = [r for r in found.values() if r.kind == "css"]
-    css_names = {r.url: _file_name(r.path, css_taken) for r in sheets}
+    def embedded_from(sheet: Resource):
+        """Whether a font embedded in `sheet` as a `data:` address is kept."""
+
+        def keep(uri: str) -> bool:
+            if mode != "licensed":
+                return mode == "bundle"
+            lib = library_of.get(sheet.url)
+            if lib is not None and lib[1].ok:
+                return True  # part of a library whose licence allows redistribution
+            head, _, body = uri.partition(",")
+            try:
+                data_ = base64.b64decode(body) if ";base64" in head.lower() else b""
+            except ValueError:
+                return False
+            return vendor.font_licence(data_).ok
+
+        return keep
+
     css_list, faces = [], []
     for res in sheets:
         raw = res.body.decode("utf-8", "replace")
-        text, refs = clean_css(raw, res.url, lookup, place_from("../"), data.names, keep_fonts)
+        text, refs = clean_css(raw, res.url, lookup, place_from("../", res), data.names,
+                               embedded_from(res))  # fmt: skip
         name = css_names[res.url]
         _write(out / "css" / name, text)
         for face in font_faces(raw, res.url, lookup):
+            if refs.kept_fonts:
+                for f in face["files"]:
+                    if f.get("embedded"):
+                        f["bundled"] = f"embedded in css/{name}"
             faces.append({**face, "declared_in": f"css/{name}"})
         css_list.append({
             "file": f"css/{name}", "source": _shown_path(res.path),
             "from": "the application's own origin" if res.host in own_hosts else "another host",
             "bytes": len(text.encode("utf-8")), "imports": [f"css/{i}" for i in refs.imports],
             "not_carried": sorted(set(refs.dropped)), "embedded_fonts": refs.embedded_fonts,
+            **({"embedded_fonts_kept": refs.kept_fonts} if refs.embedded_fonts else {}),
+            **({"library": library_of[res.url][0]} if res.url in library_of else {}),
         })  # fmt: skip
     inline_list = []
     for name, read in sorted(reads.items()):
@@ -1589,12 +1649,33 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
         for face in variants:
             for f in face["files"]:
                 url = f.get("_url")
+                res = lookup(url) if url else None
+                lic = None
+                if res is not None:
+                    lic = font_licences.get(res.url) or vendor.font_licence(
+                        res.body, face["family"], unquote(res.path.rsplit("/", 1)[-1])
+                    )
+                carried = font_files.get(res.url) if res is not None else f.get("bundled")
+                reason = None
+                if res is not None and not carried:
+                    reason = (f"no font is carried ({FONTS_ENV}=off)" if mode == "off" else
+                              lic.why_not or "its licence does not allow redistribution")  # fmt: skip
+                elif url and res is None:
+                    reason = "the recording never loaded this file"
+                warning = None
+                if carried and lic is not None and not lic.ok:
+                    warning = (f"carried on the owner's request ({FONTS_ENV}=bundle) although "
+                               + (lic.why_not or "its licence is not identified"))  # fmt: skip
                 files.append({k: v for k, v in {
                     "path": f["path"], "format": f["format"], "bytes": f.get("bytes"),
                     "weight": face["weight"], "style": face["style"],
                     "in_har": f.get("in_har", False), "embedded": f.get("embedded"),
                     "declared_in": face["declared_in"],
-                    "bundled": font_files.get(url) if url else None,
+                    "bundled": carried or None,
+                    "licence": lic.id if lic is not None and lic.ok else None,
+                    "licence_from": lic.source if lic is not None and lic.ok else None,
+                    "copyright": lic.copyright if lic is not None else None,
+                    "not_carried": reason, "warning": warning,
                 }.items() if v is not None})  # fmt: skip
         item = {
             "family": family,
@@ -1608,11 +1689,19 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
         }  # fmt: skip
         if low in declared:
             item["loaded_in_pictures"] = low in loaded
+            why = next((f["not_carried"] for f in files if f.get("not_carried")
+                        and f.get("in_har")), None)  # fmt: skip
+            licences = sorted({f["licence"] for f in files if f.get("licence")})
             item["to_do"] = (
-                "The font files are in look/fonts/: use them under the font's licence."
+                "The font file is in look/fonts/ (or embedded in the carried style sheet), and the "
+                "carried style sheet points at it: serve it, under its licence ("
+                + (", ".join(licences) or "not identified: carried on request") + "; see "
+                "THIRD-PARTY-NOTICES.md). Variants the recording never loaded are not carried: "
+                f"they fall back to the carried file or `{item['generic_fallback']}`."
                 if item["bundled"] else
-                f"Not copied (fonts are licensed). Obtain `{family}` under its licence and serve "
-                f"it at the path the style sheet names, or use the fallback `{item['generic_fallback']}`."
+                f"Not copied (fonts are licensed). {(why[0].upper() + why[1:]) if why else 'The recording never loaded its file'}. "
+                f"Obtain `{family}` under its licence and serve it at the path the style sheet "
+                f"names, or use the fallback `{item['generic_fallback']}`."
             )  # fmt: skip
         elif low in SYSTEM_FONTS:
             item["to_do"] = "Nothing to obtain: name it in font-family as the original does."
@@ -1632,6 +1721,8 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
         "inline_css": inline_list,
         "fonts": fonts,
         "fonts_bundled": keep_fonts,
+        "font_mode": mode,
+        "fonts_carried": sorted(font_files.values()),
         "images": image_list,
         "screens": screens,
         "pictures": "rendered from the sanitised page snapshots with the carried style sheets; "
@@ -1644,7 +1735,13 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
             "css": "the application's code, kept as written; addresses reduced to carried files "
             "or dropped; e-mail addresses, record numbers and recorded names in strings and "
             "comments masked",
-            "fonts": "named, not copied" if not keep_fonts else f"copied on request ({FONTS_ENV})",
+            "fonts": {
+                "licensed": "copied when the font's licence allows redistribution (its "
+                "name table, or a known open family); every other font named, not copied",
+                "bundle": f"every font file copied on request ({FONTS_ENV}=bundle), with "
+                "a warning where the licence is not identified",
+                "off": f"named, not copied ({FONTS_ENV}=off)",
+            }[mode],
             "images": "only static files of the application's own origin that the interface uses",
             "pictures": "rendered, never recorded",
         },
@@ -1900,10 +1997,19 @@ def brief_section(root: Path, app_id: str, refused: list[str] | None = None) -> 
         w.append("")
     else:
         w += ["No font family could be read (no picture was rendered).", ""]
+    mode = manifest.get("font_mode") or ("bundle" if manifest.get("fonts_bundled") else "off")
+    carried = manifest.get("fonts_carried") or []
     w += [
-        "Privacy rule: fonts are licensed, so font files are not copied into the package"
-        + (f" (here they were, on request: `{FONTS_ENV}=bundle`)." if manifest["fonts_bundled"]
-           else f". The owner can allow it with `{FONTS_ENV}=bundle` when the brief is made.")
+        {"licensed": "Licence rule: fonts are licensed, so a font file is copied only when its "
+                     "licence allows redistribution: its own name table says so, or its family "
+                     "is a known open font. The others are named above with the reason.",
+         "bundle": "Licence rule: every font file of the recording was copied on the owner's "
+                   f"request (`{FONTS_ENV}=bundle`), also where the licence was not identified "
+                   "(the manifest and `THIRD-PARTY-NOTICES.md` say which).",
+         "off": f"No font file is copied (`{FONTS_ENV}=off`)."}[mode]
+        + (" Carried: " + _ticks([f"look/{c}" for c in carried], 12) + "; the carried style "
+           "sheets point at them, the pictures were rendered with them, and their licences are "
+           "in `THIRD-PARTY-NOTICES.md`." if carried else "")
         + " Without the file, a picture shows the fallback font.",
         "",
         "### Images and icons",
@@ -1998,8 +2104,9 @@ def task_text(root: Path, app_id: str) -> str:
         f"- `{app}/look/texts.json`: per screen, which texts are literal (copy them exactly) and "
         "which are placeholders for data (letters `x`/`X`, digits `9`: show your data there).",
         f"- `{app}/look/manifest.json`: the fonts to use (font files are "
-        + ("in `look/fonts/`" if manifest.get("fonts_bundled") else "not included: obtain them or "
-           "use the fallback named there")
+        + ("in `look/fonts/`, and the carried style sheets point at them"
+           if manifest.get("fonts_carried") or manifest.get("fonts_bundled") else
+           "not included: obtain them or use the fallback named there")
         + ") and the images of the interface"
         + (" in `look/assets/`" if any(i["bundled"] for i in manifest["images"]) else "")
         + ".",
