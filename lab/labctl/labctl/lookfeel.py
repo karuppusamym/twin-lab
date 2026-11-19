@@ -79,10 +79,7 @@ SYSTEM_FONTS = {
     "lucida console": "monospace",
 }  # fmt: skip
 # A folder with one of these names holds what users put there, not the interface.
-UPLOAD_WORDS = {"upload", "uploads", "avatar", "avatars", "attachment", "attachments", "user",
-                "users", "profile", "profiles", "media", "files", "file", "documents", "document",
-                "photo", "photos", "download", "downloads", "userfiles", "tmp", "temp",
-                "customers", "customer", "accounts", "account"}  # fmt: skip
+UPLOAD_WORDS = sanitize.UPLOAD_WORDS
 # A query that only names a version of a static file (`logo.png?v=3`).
 VERSION_KEYS = {"v", "ver", "version", "rev", "cache", "cb", "t", "ts", "h", "hash", "_"}
 DATA_PARENTS = {"td", "dd", "textarea", "output", "pre"}
@@ -174,7 +171,10 @@ def resources(har: dict) -> list[Resource]:
 
 def _file_name(path: str, taken: set[str]) -> str:
     """A file name for a carried file: the address's last part, record numbers masked, unique."""
-    base = sanitize.mask_identifiers(unquote(path.rstrip("/").rsplit("/", 1)[-1])) or "file"
+    last = unquote(path.rstrip("/").rsplit("/", 1)[-1])
+    # a static file named by a word keeps its name, as the page snapshots do (static_file_name)
+    base = last if sanitize.static_file_name(unquote(path)) else sanitize.mask_identifiers(last)
+    base = base or "file"
     base = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-.") or "file"
     name, n = base[-80:], 1
     while name.lower() in taken:
@@ -449,6 +449,26 @@ def interface_image(res: Resource, own_hosts: set[str], in_data: bool = False) -
     if in_data:
         return "shown inside a data cell (content of a record, not the interface)"
     return None
+
+
+def _missing_reason(src: str, found) -> str:
+    """Why an image a page snapshot shows has no file: its address was masked in the snapshot
+    (a record number, so the file it names is a record's), or the browser never asked for it."""
+    path = urlsplit(src).path
+    if re.search(r"9{3,}", path):
+        shape = re.compile(
+            "^"
+            + re.sub(
+                r"9+", lambda m: r"\d{%d}" % len(m.group()), re.escape(path.rsplit("/", 1)[-1])
+            )
+            + "$"
+        )
+        if any(shape.match(r.path.rsplit("/", 1)[-1]) for r in found if r.kind == "image"):
+            return (
+                "in the recording, but its address holds a record number, masked in the "
+                "page snapshot: the file is a record's, not the interface's"
+            )
+    return "not in the recording (the browser did not ask for it)"
 
 
 # --- the sanitised pages ----------------------------------------------------------------------------
@@ -1300,7 +1320,7 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
                 item = images.setdefault("missing " + shown, {
                     "path": shown, "type": None, "bytes": None, "width": None, "height": None,
                     "where": [], "bundled": False, "file": None,
-                    "reason": "not in the recording (the browser did not ask for it)"})  # fmt: skip
+                    "reason": _missing_reason(src, found.values())})  # fmt: skip
                 if f"{where} on {name}" not in item["where"]:
                     item["where"].append(f"{where} on {name}")
     for item in images.values():

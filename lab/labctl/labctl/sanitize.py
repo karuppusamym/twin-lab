@@ -167,12 +167,61 @@ def mask_attributes(attrs):
     return [
         (
             k,
-            mask_identifiers(v)
+            (mask_asset_url(v) if k.lower() in ASSET_ATTRS else mask_identifiers(v))
             if v and (k.lower() in IDENTIFIER_ATTRS or k.lower().startswith("data-"))
             else v,
         )
         for k, v in attrs
     ]
+
+
+# --- static files of the application's own origin ---------------------------------------------------
+
+ASSET_ATTRS = {"src", "href", "poster", "srcset"}
+STATIC_FILE = re.compile(
+    r"\.(png|gif|jpe?g|svg|webp|ico|avif|bmp|css|js|mjs|woff2?|ttf|otf|eot)$", re.IGNORECASE
+)
+# A folder with one of these names holds what users put there, not the interface.
+UPLOAD_WORDS = {"upload", "uploads", "avatar", "avatars", "attachment", "attachments", "user",
+                "users", "profile", "profiles", "media", "files", "file", "documents", "document",
+                "photo", "photos", "download", "downloads", "userfiles", "tmp", "temp",
+                "customers", "customer", "accounts", "account"}  # fmt: skip
+# Words of a file name that say only whose file it is (`user_4711.png`): not a name of its own.
+KEY_FILE_WORDS = UPLOAD_WORDS | {"img", "image", "images", "pic", "picture", "thumb", "thumbnail",
+                                 "id", "item", "record", "doc", "scan", "logo", "icon"}  # fmt: skip
+
+
+def static_file_name(path: str) -> bool:
+    """Whether the last part of a path is a static file the application ships, named by a word
+    (`blazemeter-favicon-512x512.png`, `Lumia_1520.jpg`): an image, style sheet, script or font
+    whose name holds a word of three or more letters that is not only a key's prefix (`user`,
+    `img`), outside a folder for user content. Such a name is the interface's (a builder needs
+    it to carry the file), not a record's: `10023.png`, `user_4711.jpg`, a hash or a UUID are."""
+    parts = path.split("?", 1)[0].split("#", 1)[0].rstrip("/").split("/")
+    last = parts[-1]
+    if not STATIC_FILE.search(last) or any(c in last for c in "@:,=;"):
+        return False
+    folders = {w for part in parts[:-1] for w in re.split(r"[^a-z]+", part.lower()) if w}
+    if folders & UPLOAD_WORDS:
+        return False
+    stem = last.rsplit(".", 1)[0]
+    if re.fullmatch(r"[0-9a-f-]{16,}", stem, re.IGNORECASE):
+        return False  # a hash or a UUID
+    named = [w for w in re.findall(r"[A-Za-z]{3,}", stem) if w.lower() not in KEY_FILE_WORDS]
+    return bool(named)
+
+
+def mask_asset_url(value: str) -> str:
+    """An address in `src`/`href`: a relative address of a static file of the application's own
+    origin keeps its file name (`static_file_name`); its folders, its query and any other address
+    have record numbers masked as everywhere (`mask_identifiers`)."""
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc or not static_file_name(parts.path):
+        return mask_identifiers(value)
+    head, _, last = parts.path.rpartition("/")
+    path = (mask_identifiers(head) + "/" if _ else "") + last
+    rest = value[len(parts.path) :]
+    return path + mask_identifiers(rest)
 
 
 ID_SEGMENT = re.compile(
@@ -227,18 +276,57 @@ def words(value) -> set[str]:
     return out
 
 
-def names_in(value) -> set[str]:
+PROSE_WORDS = 12  # a string of more words than this is prose (a description), not a name field
+
+
+def names_in(value, prose: bool = True) -> set[str]:
     """The words a value writes with a capital (`Ann Hartley`, but not `no` or `NEW`), lower-case:
-    how names show in data. Strings in JSON too."""
+    how names show in data. Strings in JSON too. `prose=False` leaves out strings of more than
+    `PROSE_WORDS` words: in a description every sentence and term starts with a capital
+    (`the Touch Bar`), and a name the data holds is in a short value of its own as well."""
     out: set[str] = set()
     if isinstance(value, str):
-        out.update(w.lower() for w in re.findall(r"(?<![\w])[A-Z][a-z'’-]+", value))
+        if prose or len(value.split()) <= PROSE_WORDS:
+            out.update(w.lower() for w in re.findall(r"(?<![\w])[A-Z][a-z'’-]+", value))
     elif isinstance(value, dict):
         for v in value.values():
-            out |= names_in(v)
+            out |= names_in(v, prose)
     elif isinstance(value, list):
         for v in value[:500]:
-            out |= names_in(v)
+            out |= names_in(v, prose)
+    return out
+
+
+PHRASE_MAX = 80  # characters: a value longer than this is not shown whole as a title
+
+
+def phrase(text: str) -> str:
+    """A text as `phrases_in` keeps it: lower-case, spaces collapsed."""
+    return " ".join(text.split()).lower()
+
+
+def phrases_in(value) -> set[str]:
+    """The short values of an answer that a page may show whole as a title or a link (`Samsung
+    galaxy s6`, `HTC One M9`), as `phrase()` writes them: strings of two to `PROSE_WORDS` words up
+    to `PHRASE_MAX` characters, and single words that mix letters and digits (`X200`). Such a text
+    on a page is the record's value as a whole, lower-case words and short tokens included."""
+    out: set[str] = set()
+    if isinstance(value, str):
+        p = phrase(value)
+        n = len(p.split())
+        if (
+            p
+            and len(p) <= PHRASE_MAX
+            and re.search(r"[^\W\d_]", p)
+            and (2 <= n <= PROSE_WORDS or (n == 1 and re.search(r"\d", p) and len(p) >= 3))
+        ):
+            out.add(p)
+    elif isinstance(value, dict):
+        for v in value.values():
+            out |= phrases_in(v)
+    elif isinstance(value, list):
+        for v in value[:500]:
+            out |= phrases_in(v)
     return out
 
 
@@ -440,6 +528,19 @@ DATA_WORDS = {"value", "values", "note", "notes", "comment", "comments", "descri
               "customer", "payer", "user", "owner", "author", "ref", "number", "no", "id", "code",
               "account", "iban", "card"}  # fmt: skip
 NAV_WORDS = {"nav", "navbar", "menu", "menubar", "sidebar", "breadcrumb", "breadcrumbs", "tabs"}
+# The classes a media player library gives the controls it draws (video.js, Plyr, MediaElement,
+# JW Player). Their texts (`Play Video`, `Current Time`, `This is a modal window.`) are the
+# library's own interface, the same in every application; it shows no record. Data-shaped
+# tokens in them (a time, a number) are still masked.
+PLAYER_CLASS = re.compile(
+    r"^(video-js|vjs-[\w-]+|plyr(__[\w-]+)?|mejs__[\w-]+|mejs-[\w-]+|jw-[\w-]+)$"
+)
+
+
+def _player(classes: str) -> bool:
+    return any(PLAYER_CLASS.match(c) for c in classes.split())
+
+
 TEXT_ATTRS = ("title", "aria-label", "placeholder", "alt")
 # A data-* attribute value that is a name in the page's code: lower-case, no spaces, no number.
 DATA_NAME = re.compile(r"[a-z][a-z_.:-]{0,39}")
@@ -566,7 +667,10 @@ class _Page(HTMLParser):
                  vary: dict[str, set[str]] | None = None, mode: str | None = None):  # fmt: skip
         super().__init__(convert_charrefs=True)
         self.known = known  # words the recording shows as data elsewhere (lower-case)
+        # of those, the short values shown whole (`phrases_in`: with a space or a digit)
+        self.phrases = {k for k in known if " " in k or any(c.isdigit() for c in k)}
         self.vocab = vocab  # words the interface itself uses (lower-case)
+        self.widget_now = False  # the element being opened is a media player's control
         self.vary = vary or {}  # place on the screen -> tokens that differ between snapshots
         self.strict = (mode or page_text_mode()) == "strict"
         self.out: list[str] = []
@@ -743,6 +847,8 @@ class _Page(HTMLParser):
         self.classes.update(c for c in a.get("class", "").split() if c)
         self._facts(tag, a, raw_attrs)
         self._grid_start(tag, a, closed)
+        self.widget_now = bool(self.flags and self.flags[-1].get("widget")) or _player(
+            a.get("class", ""))  # fmt: skip
         self._element(tag, a)
         if tag in ("iframe", "frame") and a.get("src"):
             sel = f"{tag}#{a['id']}" if a.get("id") else (
@@ -755,6 +861,7 @@ class _Page(HTMLParser):
                     self.vocab_seen |= words(a[name])
 
         self.out.append(f"<{tag}{self._attrs(tag, attrs)}{' /' if closed else ''}>")
+        self.widget_now = False
         if tag not in VOID and not closed:
             row_header = tag == "th" and (a.get("scope") == "row" or "tbody" in self.stack)
             self.flags.append(self._flags(tag, a, row_header))
@@ -789,7 +896,10 @@ class _Page(HTMLParser):
         classes = ".".join(c for c in a.get("class", "").split()[:2] if c)
         sel = f"{tag}#{a['id']}" if a.get("id") else tag + (f".{classes}" if classes else "") + (
             f'[role="{role}"]' if role and not classes else "")  # fmt: skip
+        widget = parent.get("widget", False) or _player(a.get("class", ""))
+        holder = holder and not widget
         return {"data": data, "message": message or parent["message"], "nav": nav,
+                "widget": widget,
                 "holder": holder, "own_message": message, "key": f"{parent['key']}/{place}",
                 "sel": sel, "hidden": "hidden" in a or parent.get("hidden", False), "buf": []}  # fmt: skip
 
@@ -824,6 +934,8 @@ class _Page(HTMLParser):
         (names) are masked everywhere."""
         if self.strict:
             return mask(value)
+        if self.widget_now:  # a media player's control: its library's own label
+            return interface_text(value, self.known, self.vocab, names=False, label=True)
         label = tag in ("input", "select", "textarea", "button")
         return interface_text(value, self.known, self.vocab, label=label)
 
@@ -1066,8 +1178,15 @@ class _Page(HTMLParser):
                 vocab = vocab | code  # the choice's text repeats its own code: see code_words()
             elif ctx == "holder" and self.title_words:
                 vocab = vocab | self.title_words  # the application's name, as the title has it
-            text = interface_text(data, self.known, vocab, vary, names=own not in LABEL_TAGS,
-                                  holder=ctx == "holder", label=label)  # fmt: skip
+            widget = bool(self.flags and self.flags[-1].get("widget"))
+            if widget:  # a media player's own controls: read as labels (see PLAYER_CLASS)
+                text = interface_text(data, self.known, vocab, names=False, label=True)
+            elif self._phrase(data, vocab):  # a record's value shown whole (a title, a link)
+                self.values |= words(data)
+                text = mask(data)
+            else:
+                text = interface_text(data, self.known, vocab, vary, names=own not in LABEL_TAGS,
+                                      holder=ctx == "holder", label=label)  # fmt: skip
             # the interface's own words: what such a place says, unless it reads like a name
             if (
                 in_vocab
@@ -1085,6 +1204,12 @@ class _Page(HTMLParser):
             if f["own_message"]:
                 f["buf"].append(text)
         self.out.append(escape(text, quote=False))
+
+    def _phrase(self, data: str, vocab: set[str]) -> bool:
+        """Whether a text is, as a whole, a short value the recording's answers hold
+        (`phrases_in`), and not only words of the interface itself."""
+        p = phrase(data)
+        return bool(p) and p in self.phrases and not words(p) <= vocab
 
     def _data_cell(self) -> bool:
         """Inside a table or description cell, or an element with an id: where records show."""

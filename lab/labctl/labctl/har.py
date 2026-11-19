@@ -1780,7 +1780,8 @@ def _items(data: Any) -> list[dict]:
 def page_knowledge(doms, entries) -> tuple[set[str], set[str]]:
     """(data words, interface words) of a recording, lower-case, for masking its pages.
 
-    Data words: what its data cells, field values and API answers show. Interface words: what
+    Data words: what its data cells, field values and API answers show, and the short values of
+    the answers as a whole (`sanitize.phrases_in`: they hold a space or a digit). Interface words: what
     its labels, buttons, headers, options and menus say. A word in both is the interface's."""
     doms = list(doms)
     pages = doms + [e.resp_text for e in entries if e.resp_text and e.resp_mime == "text/html"]
@@ -1789,13 +1790,17 @@ def page_knowledge(doms, entries) -> tuple[set[str], set[str]]:
         # API answers keep no text (resp_text is for documents and scripts), so their values come
         # from the parsed JSON. A name an API returned is data wherever a page shows it, even as
         # one title-case word in a heading or option.
-        if e.resp_json is not None and e.status < 400:
-            known |= sanitize.names_in(e.resp_json)
-        elif e.resp_text and "json" in (e.resp_mime or ""):
+        # A value shown whole (a product's or a customer's name in a link or a heading) is data
+        # as a whole, lower-case words and short tokens included: `sanitize.phrases_in`.
+        # Capitalised words of prose (descriptions) are not names: `names_in(prose=False)`.
+        answer = e.resp_json if e.resp_json is not None and e.status < 400 else None
+        if answer is None and e.resp_json is None and e.resp_text and "json" in (e.resp_mime or ""):
             try:
-                known |= sanitize.names_in(json.loads(e.resp_text))
+                answer = json.loads(e.resp_text)
             except ValueError:
-                pass
+                answer = None
+        if answer is not None:
+            known |= sanitize.names_in(answer, prose=False) | sanitize.phrases_in(answer)
     for text in pages:
         known |= sanitize.page(text).names
     # The interface's words, read knowing the data: an option or button that names a customer
