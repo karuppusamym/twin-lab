@@ -1,0 +1,46 @@
+<ui:composition xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:h="http://xmlns.jcp.org/jsf/html"
+                xmlns:f="http://xmlns.jcp.org/jsf/core"
+                xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+                xmlns:p="http://primefaces.org/ui">
+  <h2 id="subTitle">New case</h2>
+  <!-- A wizard: each step is an ajax call that validates the step and renders the next one. -->
+  <p:wizard id="wiz" step="#{wizard.step}" flowListener="#{wizard.onFlow}" nextLabel="Next" backLabel="Back">
+    <p:tab id="basics" title="Basics">
+      <p:messages id="basicsMessages"/>
+      <div class="field">
+        <p:outputLabel for="newTitle" value="Title"/>
+        <p:inputText id="newTitle" value="#{wizard.title}" required="true"
+                     requiredMessage="Title is required"/>
+      </div>
+      <div class="field">
+        <p:outputLabel for="newPriority" value="Priority"/>
+        <h:selectOneMenu id="newPriority" value="#{wizard.priority}">
+          <f:selectItem itemValue="Low" itemLabel="Low"/>
+          <f:selectItem itemValue="Normal" itemLabel="Normal"/>
+          <f:selectItem itemValue="High" itemLabel="High"/>
+        </h:selectOneMenu>
+      </div>
+    </p:tab>
+    <p:tab id="ownerStep" title="Owner">
+      <div class="field">
+        <span class="label">Owner</span>
+        <h:outputText id="chosenOwner" value="#{wizard.owner}"/>
+        <h:outputText value="none chosen" rendered="#{empty wizard.owner}" styleClass="note"/>
+      </div>
+      <!-- The dialog framework: picker.xhtml opens in an iframe in a dialog. -->
+      <p:commandButton id="pickOwner" value="Pick owner" action="#{wizard.pickOwner}" process="@this">
+        <p:ajax event="dialogReturn" listener="#{wizard.onOwnerChosen}" update="main:wiz"/>
+      </p:commandButton>
+    </p:tab>
+    <p:tab id="confirmStep" title="Confirm">
+      <table class="fields">
+        <tr><td>Title</td><td><h:outputText id="confirmTitle" value="#{wizard.title}"/></td></tr>
+        <tr><td>Priority</td><td><h:outputText id="confirmPriority" value="#{wizard.priority}"/></td></tr>
+        <tr><td>Owner</td><td><h:outputText id="confirmOwner" value="#{wizard.owner}"/></td></tr>
+      </table>
+      <p:commandButton id="finish" value="Create case" action="#{wizard.finish}" process="@this"
+                       update="main:content main:growl main:count"/>
+    </p:tab>
+  </p:wizard>
+</ui:composition>
