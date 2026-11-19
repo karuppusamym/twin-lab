@@ -152,6 +152,15 @@ def generate(
     force: bool = False,
     data: str | None = None,
 ) -> Result:
+    """The brief and everything it carries, from the app's evidence. An approved
+    `public-data.yaml` beside a recording (labctl.publicdata) is in force throughout."""
+    from labctl import publicdata
+
+    with publicdata.active_for(Path(root), app_id):
+        return _generate(root, app_id, system, source, db_engine, force, data)
+
+
+def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
     from labctl import contract
 
     if (not automations(root, app_id) and not flows(root, app_id)
@@ -249,14 +258,25 @@ def generate(
     from labctl import pagerules
 
     text = pagerules.extend(root, app_id, model, text)
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    if pub is not None:  # which data is real public catalogue content, and who approved it
+        marker = "## Running in the lab"
+        note = "## Public catalogue data\n\n" + pub.note() + "\n"
+        text = text.replace(marker, note + marker, 1) if marker in text else f"{text}\n{note}"
     _write(brief_file, text)
     if not model.stack.desktop:  # the app pipeline builds a container; a desktop app has none
         write_workflow(root, app_id)
     kept = app_file.exists()
-    if not kept:
-        _write(
-            app_file, yaml.safe_dump(brief_mod.app_yaml(result, root), sort_keys=False, width=100)
-        )
+    made = brief_mod.app_yaml(result, root)
+    if kept:  # generated again: only `run:`, approved rule levels and onboarding choices stay
+        try:
+            old = yaml.safe_load(app_file.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            old = {}
+        made = brief_mod.merge_app_yaml(old if isinstance(old, dict) else {}, made)
+    _write(app_file, yaml.safe_dump(made, sort_keys=False, width=100))
     files = [model_file, brief_file, schema_file, app_file]
     if behaviours_file.exists():
         files.append(behaviours_file)

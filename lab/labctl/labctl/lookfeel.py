@@ -79,10 +79,7 @@ SYSTEM_FONTS = {
     "lucida console": "monospace",
 }  # fmt: skip
 # A folder with one of these names holds what users put there, not the interface.
-UPLOAD_WORDS = {"upload", "uploads", "avatar", "avatars", "attachment", "attachments", "user",
-                "users", "profile", "profiles", "media", "files", "file", "documents", "document",
-                "photo", "photos", "download", "downloads", "userfiles", "tmp", "temp",
-                "customers", "customer", "accounts", "account"}  # fmt: skip
+UPLOAD_WORDS = sanitize.UPLOAD_WORDS
 # A query that only names a version of a static file (`logo.png?v=3`).
 VERSION_KEYS = {"v", "ver", "version", "rev", "cache", "cb", "t", "ts", "h", "hash", "_"}
 DATA_PARENTS = {"td", "dd", "textarea", "output", "pre"}
@@ -174,7 +171,10 @@ def resources(har: dict) -> list[Resource]:
 
 def _file_name(path: str, taken: set[str]) -> str:
     """A file name for a carried file: the address's last part, record numbers masked, unique."""
-    base = sanitize.mask_identifiers(unquote(path.rstrip("/").rsplit("/", 1)[-1])) or "file"
+    last = unquote(path.rstrip("/").rsplit("/", 1)[-1])
+    # a static file named by a word keeps its name, as the page snapshots do (static_file_name)
+    base = last if sanitize.static_file_name(unquote(path)) else sanitize.mask_identifiers(last)
+    base = base or "file"
     base = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-.") or "file"
     name, n = base[-80:], 1
     while name.lower() in taken:
@@ -186,8 +186,9 @@ def _file_name(path: str, taken: set[str]) -> str:
 
 
 def _shown_path(path: str) -> str:
-    """An address as the manifest names it: the path only, record numbers masked."""
-    return sanitize.mask_identifiers(sanitize.route_pattern(path))[-160:]
+    """An address as the manifest names it: the path only, record numbers masked (a static file
+    named by a word keeps its name, as in the page snapshots)."""
+    return sanitize.mask_asset_url(sanitize.route_pattern(path))[-160:]
 
 
 # --- style sheets -----------------------------------------------------------------------------------
@@ -431,16 +432,20 @@ def interface_image(res: Resource, own_hosts: set[str], in_data: bool = False) -
     that only names a version: `?v=3`), with no
     record number in its path, not under a folder that holds what users put there, up to the
     size the analysis reads (`har.MAX_BODY`), and not shown inside a data cell."""
-    from labctl import har
+    from labctl import har, publicdata
 
     if res.host not in own_hosts:
         return "served by another host"
+    pub = publicdata.current()
+    declared = pub is not None and pub.image(res.path)  # product photos the owner declared
     if res.query and not all(
         q.split("=", 1)[0].lower() in VERSION_KEYS for q in res.query.split("&") if q
     ):
         return "asked for with a query (not a static file)"
     if len(res.body) > har.MAX_BODY:
         return f"larger than {har.MAX_BODY} bytes"
+    if declared:
+        return None
     if res.key != res.path:
         return "a record number in its path (content of a record, not the interface)"
     folders = {w for part in res.path.lower().split("/")[:-1] for w in re.split(r"[^a-z]+", part)}
@@ -449,6 +454,128 @@ def interface_image(res: Resource, own_hosts: set[str], in_data: bool = False) -
     if in_data:
         return "shown inside a data cell (content of a record, not the interface)"
     return None
+
+
+DIALOG_SEP = "--dialog-"  # screens/<screen>--dialog-<id>.png: a dialog drawn open
+_BACKDROP_HIDE = ".modal-backdrop{display:none!important}body.modal-open{overflow:auto!important}"
+
+
+def dialogs_seen_open(recordings: list[Path]) -> dict[str, set[str]]:
+    """Per address pattern, the dialogs (`#id`) some snapshot of the recordings shows open."""
+    from labctl import har
+
+    out: dict[str, set[str]] = {}
+    for path in recordings:
+        try:
+            rec = har.load(path)
+        except (OSError, ValueError):
+            continue
+        for step in rec.steps:
+            if step.dom is None or not step.url.startswith("http"):
+                continue
+            html = step.dom.read_text(encoding="utf-8", errors="replace")
+            pattern = sanitize.route_pattern(urlsplit(step.url).path or "/")
+            found = {d for d in har.open_dialogs(html) if d.startswith("#")}
+            out.setdefault(pattern, set()).update(found)
+    return out
+
+
+def _hide(idents: list[str]) -> str:
+    return "".join('[id="' + d[1:] + '"]{display:none!important}' for d in idents)
+
+
+def without_dialogs(html: str) -> str:
+    """A page snapshot with every open dialog closed (hidden), for the screen's own picture."""
+    from labctl import har
+
+    shut = [d for d in har.open_dialogs(html) if d.startswith("#")]
+    if not shut:
+        return html
+    return _inject(html, "<style>" + _hide(shut) + _BACKDROP_HIDE + "</style>")
+
+
+def with_dialog_open(html: str, ident: str) -> str | None:
+    """A page snapshot with one dialog drawn open (Bootstrap: `show`, displayed, a backdrop),
+    every other dialog closed. None when the page has no element of that id."""
+    from labctl import har
+
+    m = re.search(r'<([A-Za-z][\w-]*)\b[^>]*\bid="' + re.escape(ident.lstrip("#")) + r'"[^>]*>',
+                  html)  # fmt: skip
+    if m is None:
+        return None
+    new = re.sub(r'\saria-hidden="true"', "", m.group(0))
+    if re.search(r'\sclass="', new):
+        new = re.sub(r'\sclass="([^"]*)"', lambda c: f' class="{c.group(1)} show"', new, count=1)
+    if m.group(1).lower() == "dialog" and " open" not in new:
+        new = new[:-1] + " open>"
+    style = "display: block;"
+    if re.search(r'\sstyle="', new):
+        new = re.sub(r'\sstyle="([^"]*)"',
+                     lambda s: ' style="' + re.sub(r"display\s*:\s*none;?", "", s.group(1))
+                     + " " + style + '"', new, count=1)  # fmt: skip
+    else:
+        new = new[:-1] + f' style="{style}">'
+    html = html[: m.start()] + new + html[m.end() :]
+    backdrop = '<div class="modal-backdrop fade show"></div>'
+    html = (
+        html.replace("</body>", backdrop + "</body>", 1) if "</body>" in html else html + backdrop
+    )
+    others = [d for d in har.open_dialogs(html) if d.startswith("#") and d != ident]
+    return _inject(html, "<style>" + _hide(others) + "</style>") if others else html
+
+
+def _inject(html: str, block: str) -> str:
+    head = re.search(r"</head>", html, re.IGNORECASE)
+    if head is not None:
+        return html[: head.start()] + block + html[head.start() :]
+    return block + html
+
+
+def interface_image_paths(recordings: list[Path]) -> set[str]:
+    """The address paths (`/imgs/Lumia_1520.jpg`) of the images `write()` carries as interface
+    images: static files of the application's own origin (`interface_image`) named by a word
+    (`sanitize.static_file_name`). An answer field holding such a path names a carried file."""
+    from labctl import har
+
+    out: set[str] = set()
+    for path in recordings:
+        try:
+            rec = har.load(path)
+        except (OSError, ValueError):
+            continue
+        own = {urlsplit(s.url).netloc.lower() for s in rec.steps if s.url.startswith("http")}
+        for res in resources(rec.har):
+            if (res.kind == "image" and interface_image(res, own) is None
+                    and sanitize.static_file_name(res.path)):  # fmt: skip
+                out.add(res.path)
+    return out
+
+
+def names_image(value, images: set[str]) -> bool:
+    """Whether an answer's value is the address of one of `images` (relative or absolute path)."""
+    if not isinstance(value, str) or not value or len(value) > 300 or "://" in value:
+        return False
+    return "/" + value.split("?", 1)[0].lstrip("./") in images
+
+
+def _missing_reason(src: str, found) -> str:
+    """Why an image a page snapshot shows has no file: its address was masked in the snapshot
+    (a record number, so the file it names is a record's), or the browser never asked for it."""
+    path = urlsplit(src).path
+    if re.search(r"9{3,}", path):
+        shape = re.compile(
+            "^"
+            + re.sub(
+                r"9+", lambda m: r"\d{%d}" % len(m.group()), re.escape(path.rsplit("/", 1)[-1])
+            )
+            + "$"
+        )
+        if any(shape.match(r.path.rsplit("/", 1)[-1]) for r in found if r.kind == "image"):
+            return (
+                "in the recording, but its address holds a record number, masked in the "
+                "page snapshot: the file is a record's, not the interface's"
+            )
+    return "not in the recording (the browser did not ask for it)"
 
 
 # --- the sanitised pages ----------------------------------------------------------------------------
@@ -706,6 +833,13 @@ def known_data(recordings: list[Path]) -> Data:
                 _strings(e.resp_json, texts)
         data.tokens |= _data_tokens(texts)
     data.tokens.discard("")
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    if pub is not None:  # declared public catalogue values may show in the look
+        data.names -= pub.words()
+        public = pub.tokens()
+        data.tokens = {t for t in data.tokens if not pub.text(t) and t.lower() not in public}
     return data
 
 
@@ -724,10 +858,27 @@ LOOK_JS = r"""
     return c ? s + "." + c : s;
   };
   const box = (s, p) => [s[p + "Top"], s[p + "Right"], s[p + "Bottom"], s[p + "Left"]].join(" ");
+  // a background image or gradient: the element's own, else that of a child that covers it
+  // (a footer whose inner row carries the gradient)
+  const bgImage = (el, depth) => {
+    const own = getComputedStyle(el).backgroundImage;
+    if (own && own !== "none") return own;
+    if (depth >= 2) return "";
+    const r = el.getBoundingClientRect();
+    for (const c of Array.from(el.children).slice(0, 8)) {
+      const b = c.getBoundingClientRect();
+      if (r.width * r.height > 0 && b.width * b.height >= 0.9 * r.width * r.height) {
+        const got = bgImage(c, depth + 1);
+        if (got) return got;
+      }
+    }
+    return "";
+  };
   const pick = (el) => {
     const s = getComputedStyle(el);
     return {
-      color: s.color, background: s.backgroundColor, font_family: s.fontFamily,
+      color: s.color, background: s.backgroundColor, background_image: bgImage(el, 0),
+      font_family: s.fontFamily,
       font_size: s.fontSize, font_weight: s.fontWeight, font_style: s.fontStyle,
       line_height: s.lineHeight, letter_spacing: s.letterSpacing,
       text_transform: s.textTransform, text_align: s.textAlign,
@@ -749,7 +900,7 @@ LOOK_JS = r"""
     table: "table", th: "th", td: "td",
     header: "header, [role=banner], #header, #topbar, .navbar, .topbar, .app-header",
     nav: "nav, [role=navigation], .nav, .menu, .sidebar", main: "main, [role=main]",
-    footer: "footer, [role=contentinfo]", form: "form", fieldset: "fieldset",
+    footer: "footer, [role=contentinfo], [id^=foot], .footer", form: "form", fieldset: "fieldset",
     dialog: "dialog, [role=dialog], .dialog, .modal",
     error: "[role=alert], .error, .alert-danger, .invalid-feedback, [class*=error], [class*=danger]",
     success: "[role=status], .success, .notice, .alert-success, [class*=success]",
@@ -940,12 +1091,22 @@ def _clear(value: str) -> bool:
     return value in ("", "transparent", "rgba(0, 0, 0, 0)")
 
 
+def background_image(value: str) -> str:
+    """A computed `background-image` as a token: gradients with hex colours, an image's address
+    as the path of the carried file (never the rendering's host)."""
+    value = re.sub(r"rgba?\([^)]*\)", lambda m: colour(m.group()), value or "")
+    value = re.sub(r'url\("?' + re.escape(RENDER_HOST) + r'([^")]*)"?\)', r"url(\1)", value)
+    return value.strip()
+
+
 def _style(group: dict) -> dict:
     """One group's computed style, colours as hex, nothing empty."""
     out = {}
     for key, value in (group.get("style") or {}).items():
         if key in ("color", "background"):
             value = "transparent" if _clear(value) else colour(value)
+        elif key == "background_image":
+            value = background_image(value)
         elif key in ("border", "border_bottom"):
             width, _, rest = value.partition(" ")
             kind, _, col = rest.partition(" ")
@@ -988,8 +1149,9 @@ def _font(variant: dict | None) -> dict | None:
 def _control(variant: dict | None) -> dict | None:
     if not variant:
         return None
-    keys = ("background", "color", "border", "border_bottom", "radius", "padding", "margin",
-            "height", "font_size", "font_weight", "shadow", "text_transform")  # fmt: skip
+    keys = ("background", "background_image", "color", "border", "border_bottom", "radius",
+            "padding", "margin", "height", "font_size", "font_weight", "shadow",
+            "text_transform")  # fmt: skip
     return {k: variant[k] for k in keys if k in variant}
 
 
@@ -1034,6 +1196,10 @@ def theme(looks: dict[str, dict], viewport: dict | None = None) -> dict:
         "menu_link": (first("nav_link") or {}).get("color"),
         "border": ((inp or {}).get("border") or "").split(" ")[-1] or None,
         "header_background": (header or {}).get("background"),
+        "header_background_image": (header or {}).get("background_image"),
+        "footer_background": (first("footer") or {}).get("background"),
+        "footer_background_image": (first("footer") or {}).get("background_image"),
+        "page_background_image": (body or {}).get("background_image"),
         "header_text": (header or {}).get("color"),
         "table_header_background": (th or {}).get("background"),
         "table_row_border": ((td or {}).get("border_bottom") or "").split(" ")[-1] or None,
@@ -1216,6 +1382,10 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
         nonlocal total
         ikey = res.host + res.path  # one file, whatever version its address names
         item = images.get(ikey)
+        if item is not None and not in_data and item["reason"].startswith("shown inside a data"):
+            # first met in a data cell (the cart's row), also shown as the interface shows it
+            del images[ikey]
+            item = None
         if item is None:
             why = interface_image(res, own_hosts, in_data)
             if why is None and res.ext == ".svg" and data.findings(
@@ -1300,7 +1470,7 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
                 item = images.setdefault("missing " + shown, {
                     "path": shown, "type": None, "bytes": None, "width": None, "height": None,
                     "where": [], "bundled": False, "file": None,
-                    "reason": "not in the recording (the browser did not ask for it)"})  # fmt: skip
+                    "reason": _missing_reason(src, found.values())})  # fmt: skip
                 if f"{where} on {name}" not in item["where"]:
                     item["where"].append(f"{where} on {name}")
     for item in images.values():
@@ -1325,7 +1495,19 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
         served[found[url].key] = (found[url].body, found[url].mime or "font/woff2")
         served["/" + rel] = served[found[url].key]
     viewport = _viewport(recordings)
-    rendered, why_not = render({n: (patterns[n], pages[n]) for n in pages}, served, viewport)
+    # Each screen drawn with no dialog open; each dialog the recording showed open on that screen
+    # drawn on its own, open over it.
+    seen_open = dialogs_seen_open(recordings)
+    to_draw = {n: (patterns[n], without_dialogs(pages[n])) for n in pages}
+    dialog_of: dict[str, tuple[str, str]] = {}
+    for n in pages:
+        for ident in sorted(seen_open.get(patterns[n], set())):
+            html = with_dialog_open(pages[n], ident)
+            if html is not None:
+                key = f"{n}{DIALOG_SEP}{_file_name(ident.lstrip('#'), set())}"
+                to_draw[key] = (patterns[n], html)
+                dialog_of[key] = (n, ident)
+    rendered, why_not = render(to_draw, served, viewport)
 
     screens = []
     texts: dict[str, list[dict]] = {}
@@ -1345,8 +1527,23 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
                          height=size[1] if size else None,
                          sha256=hashlib.sha256(shot.png).hexdigest(),
                          not_loaded=[a for a in shot.asked if not a.endswith((".js", ".mjs"))])  # fmt: skip
+        for key, (screen, ident) in sorted(dialog_of.items()):
+            dshot = rendered.get(key)
+            if screen != name or dshot is None:
+                continue
+            _write(out / "screens" / f"{key}.png", dshot.png)
+            entry.setdefault("dialogs", []).append({
+                "dialog": ident, "picture": f"screens/{key}.png",
+                "sha256": hashlib.sha256(dshot.png).hexdigest(),
+                "drawn": "open over the screen, as the recording showed it"})  # fmt: skip
         screens.append(entry)
-    design = theme({n: r.look for n, r in rendered.items()}, viewport) if rendered else None
+    # tokens from the screens; from a dialog's picture only the dialog's own style
+    looks = {n: r.look for n, r in rendered.items() if n not in dialog_of}
+    for key in dialog_of:
+        if key in rendered:
+            roles = rendered[key].look.get("roles") or {}
+            looks[key] = {"roles": {"dialog": roles.get("dialog") or []}}
+    design = theme(looks, viewport) if rendered else None
     if design is not None:
         _write(out / "theme.json", _json(design))
     _write(out / "texts.json", _json({
@@ -1485,10 +1682,11 @@ def check_files(out: Path, manifest: dict, data: Data,
                     problems.append(f"texts.json ({screen}, {item.get('where')}) holds `{hit}`")
     for screen, shown in sorted((picture_texts or {}).items()):
         hits: set[str] = set()
+        base = screen.split(DIALOG_SEP)[0]  # a dialog's picture: the codes of its screen
         for line in shown.splitlines():
             line = " ".join(line.split())
-            hits.update(data.findings(line, codes.get(screen, set()),
-                                      label=line in labels.get(screen, set())))  # fmt: skip
+            hits.update(data.findings(line, codes.get(base, set()),
+                                      label=line in labels.get(base, set())))  # fmt: skip
         for hit in sorted(hits)[:5]:
             problems.append(f"the picture screens/{screen}.png shows `{hit}`")
     for path in sorted((out / "assets").glob("*.svg")) if (out / "assets").is_dir() else []:
@@ -1525,6 +1723,8 @@ def package_check(root: Path, app_id: str, recordings: list[Path] | None = None)
     listed = {
         s["picture"]: s.get("sha256") for s in manifest.get("screens") or [] if s.get("picture")
     }
+    for s in manifest.get("screens") or []:  # a dialog drawn open over its screen
+        listed.update({d["picture"]: d.get("sha256") for d in s.get("dialogs") or []})
     for path in sorted(out.rglob("*")):
         rel = path.relative_to(out).as_posix()
         if not path.is_file() or path.suffix.lower() not in (
@@ -1739,8 +1939,10 @@ def brief_section(root: Path, app_id: str, refused: list[str] | None = None) -> 
                 seen_h.add(t["where"])
                 holders.append(t["where"] + ("" if t["kind"] == "text" else f" ({t['kind']})"))
         picture = f"`look/{s['picture']}`" if s.get("picture") else "no picture"
+        drawn = "".join(f"; dialog `{d['dialog']}` drawn open: `look/{d['picture']}`"
+                        for d in s.get("dialogs") or [])  # fmt: skip
         w += [f"**{s['screen']}** (`{s['address']}`): picture {picture}, snapshot "
-              f"`{s['page']}`.", ""]  # fmt: skip
+              f"`{s['page']}`{drawn}.", ""]  # fmt: skip
         w.append("- Literal texts, copy exactly: " + (_ticks(literal, 60) if literal else "none")
                  + ".")  # fmt: skip
         if mixed:

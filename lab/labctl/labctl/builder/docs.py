@@ -248,7 +248,10 @@ class Pkg:
         self.nav = self.json(f"{self.app}/navigation.json") or {}
         self.cat = self.json(f"{self.app}/api/catalogue.json") or {}
         self.rules = self.json(f"{self.app}/rules.json") or {}
-        self.session = self.json(f"{self.app}/session.json")
+        # session.json: the sign-in facts, or only the cookies when nobody signed in (then the
+        # app has no sign-in, and `session` is None as without the file)
+        self.session_doc = self.json(f"{self.app}/session.json")
+        self.session = self.session_doc if (self.session_doc or {}).get("sign_in") else None
         self.codemap = self.json(f"{self.app}/{CODEMAP}")
         self.seed = self.json(f"{self.app}/db/seed.json") or {}
         self.conf = self.yaml(f"{self.app}/app.yaml") or {}
@@ -1464,11 +1467,14 @@ def architecture_doc(pkg: Pkg) -> str:
 
 def session_lines(pkg: Pkg) -> list[str]:
     """ARCHITECTURE's section on sign-in, the session and every cookie."""
-    from labctl import signin
 
     app = pkg.app
     out = ["## Sign-in, session and cookies", ""]
     ses = pkg.session
+    if not ses and pkg.session_doc:  # no sign-in recorded: only the cookies
+        out += [f"From `{app}/session.json`: no sign-in was recorded; build no sign-in screen.", ""]
+        out += cookie_table(pkg.session_doc.get("cookies") or [])
+        return out
     if not ses:
         body = pkg.section("Sign-in and session")
         out += [("Unknown: the package has no `session.json`. " if not body else "")
@@ -1516,8 +1522,16 @@ def session_lines(pkg: Pkg) -> list[str]:
         f"- Users are rows of `{tables.get('users')}`, sessions rows of "
         f"`{tables.get('sessions')}` (`db/schema.sql`); a session survives a restart."
     )
-    out += ["", "**Cookies.** " + signin.COOKIE_ABOUT, ""]
-    cookies = ses.get("cookies") or []
+    out += cookie_table(ses.get("cookies") or [])
+    return out
+
+
+def cookie_table(cookies: list[dict]) -> list[str]:
+    """Every cookie of `session.json`: who sets it, its attributes, who clears it, its use."""
+    from labctl import cookies as cookie_mod
+    from labctl import signin
+
+    out = ["**Cookies.** " + signin.COOKIE_ABOUT, ""]
     if cookies:
         out += ["| Cookie | Set by | Path | Domain | HttpOnly | Secure | SameSite | Lifetime | "
                 "Cleared by |", "|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
@@ -1525,7 +1539,8 @@ def session_lines(pkg: Pkg) -> list[str]:
             a = c.get("attributes") or {}
 
             def where(items) -> str:
-                return "<br>".join(f"`{x.get('request')} {x.get('status')}`"
+                return "<br>".join(f"script `{x['script']}`" if x.get("script") else
+                                   f"`{x.get('request')} {x.get('status')}`"
                                    + (f" (step {x['step']}, `{x.get('screen')}`)"
                                       if x.get("step") else "") for x in items) or "-"  # fmt: skip
 
@@ -1537,8 +1552,17 @@ def session_lines(pkg: Pkg) -> list[str]:
                        f"{_cell(a.get('same_site', 'unknown'))} | "
                        f"{_cell(a.get('lifetime', 'unknown'))} | "
                        f"{where(c.get('cleared_by') or [])} |")  # fmt: skip
-        out += ["", "Set each cookie with the same name and attributes from the same response, "
-                "with a value of your own; clear it where the recording cleared it.", ""]  # fmt: skip
+        uses = [f"- `{c.get('name')}`: {cookie_mod.use_text(c)}" for c in cookies
+                if cookie_mod.use_text(c)]  # fmt: skip
+        written = [f"- `{c.get('name')}`: its script writes "
+                   + ", ".join(f"`{x}`" for x in c["script_attributes"])
+                   for c in cookies if c.get("script_attributes") and not c.get("attributes")]  # fmt: skip
+        if uses or written:
+            out += ["", "How each cookie is used (requests, body fields, the shape of its value; "
+                    "never a value):", "", *uses, *written]  # fmt: skip
+        out += ["", "Set each cookie with the same name and attributes from the same response or "
+                "script, with a value of your own of the same shape; clear it where the recording "
+                "cleared it.", ""]  # fmt: skip
     else:
         out += ["No response of the recording set a cookie with attributes the package holds "
                 "(names, if any, are above).", ""]  # fmt: skip

@@ -272,6 +272,51 @@ class Exchange:
     cookies: set[str] = field(default_factory=set)  # cookie NAMES sent or set; never a value
 
 
+# The second-level labels under a two-letter country code that are not a site of their own
+# (`example.co.uk` is the site, not `co.uk`). An approximation of the public suffix list: a host
+# it gets wrong is at worst one more host of another site, which `api_hosts` never adds.
+GENERIC_SLD = frozenset({"ac", "co", "com", "edu", "gov", "govt", "ltd", "mil", "ne", "net", "nic",
+                         "or", "org", "plc", "sch"})  # fmt: skip
+
+
+def site_of(host: str) -> str | None:
+    """The site a host belongs to (`api.shop.example` and `www.shop.example`: `shop.example`), or
+    None when it shares none: an address with a port, an IP address, a single label."""
+    host = (host or "").lower().strip().rstrip(".")
+    if not host or ":" in host or "." not in host or re.fullmatch(r"[\d.]+", host):
+        return None
+    labels = host.split(".")
+    n = 3 if len(labels[-1]) == 2 and labels[-2] in GENERIC_SLD else 2
+    return ".".join(labels[-n:]) if len(labels) >= n else None
+
+
+def api_hosts(app_hosts: set[str], entries: list[Exchange]) -> set[str]:
+    """Hosts of the same site as the application's pages that the pages only called an API on,
+    and never loaded a page from: the application's own API on a separate origin (pages on
+    `www.shop.example` calling `api.shop.example`). A host of another site is never one, nor an
+    address with a port (`localhost:8101` beside `localhost:8102` is another application)."""
+    sites = {s for h in app_hosts if (s := site_of(h))}
+    if not sites:
+        return set()
+    pages = {e.host for e in entries if e.kind in ("document", "form")}
+    return {e.host for e in entries
+            if e.kind == "api" and e.host not in app_hosts and e.host not in pages
+            and site_of(e.host) in sites}  # fmt: skip
+
+
+def referer_path(referer: str, request_host: str) -> str:
+    """The path of the page a Referer names, or "" when it does not name one. A request to
+    another origin carries only the page's origin by the browsers' default policy
+    (`strict-origin-when-cross-origin`): its `/` is not the page, so it says nothing."""
+    ref = urlsplit(referer or "")
+    if not ref.netloc:
+        return ""
+    if ref.netloc.lower() != (request_host or "").lower() and ref.path in ("", "/") \
+            and not ref.query:  # fmt: skip
+        return ""
+    return ref.path
+
+
 def _text(content: dict) -> str | None:
     text = content.get("text")
     if text is None:
@@ -1721,13 +1766,45 @@ def _entity(pattern: str) -> str | None:
     return None
 
 
+def open_dialogs(html: str) -> list[str]:
+    """The dialogs a page snapshot shows open (`behaviour.dom.shown`): `#id` of each, or its
+    tag when it has none."""
+    from labctl.behaviour import dom as domlib
+
+    tree = domlib.parse_html(html)
+    return [f"#{n.id}" if n.id else n.tag for n in domlib._walk(tree)
+            if domlib.is_dialog(n) and domlib.shown(n)
+            and not sanitize._player(n.attrs.get("class") or "")]  # fmt: skip
+
+
+def list_key(data: Any):
+    """The key under which an envelope answer holds its list of records (`items`, `Items`,
+    `DATA`: `ITEM_KEYS` in any case), or None. `{"Items": [...], "LastEvaluatedKey": {...}}`
+    (DynamoDB) is a list of items; its other keys describe the page, not records."""
+    if not isinstance(data, dict):
+        return None
+    by_lower: dict[str, Any] = {}
+    for k in data:
+        by_lower.setdefault(str(k).lower(), k)
+    for name in ITEM_KEYS:
+        k = by_lower.get(name)
+        if k is not None and isinstance(data[k], list):
+            return k
+    return None
+
+
+def is_list_answer(data: Any) -> bool:
+    """A list of records: a JSON array, or an envelope with one (`list_key`)."""
+    return isinstance(data, list) or list_key(data) is not None
+
+
 def _items(data: Any) -> list[dict]:
     if isinstance(data, list):
         return [x for x in data if isinstance(x, dict)]
     if isinstance(data, dict):
-        lists = [k for k in ITEM_KEYS if isinstance(data.get(k), list)]
-        if lists:
-            return [x for x in data[lists[0]] if isinstance(x, dict)]
+        key = list_key(data)
+        if key is not None:
+            return [x for x in data[key] if isinstance(x, dict)]
         return [data]
     return []
 
@@ -1735,7 +1812,8 @@ def _items(data: Any) -> list[dict]:
 def page_knowledge(doms, entries) -> tuple[set[str], set[str]]:
     """(data words, interface words) of a recording, lower-case, for masking its pages.
 
-    Data words: what its data cells, field values and API answers show. Interface words: what
+    Data words: what its data cells, field values and API answers show, and the short values of
+    the answers as a whole (`sanitize.phrases_in`: they hold a space or a digit). Interface words: what
     its labels, buttons, headers, options and menus say. A word in both is the interface's."""
     doms = list(doms)
     pages = doms + [e.resp_text for e in entries if e.resp_text and e.resp_mime == "text/html"]
@@ -1744,13 +1822,17 @@ def page_knowledge(doms, entries) -> tuple[set[str], set[str]]:
         # API answers keep no text (resp_text is for documents and scripts), so their values come
         # from the parsed JSON. A name an API returned is data wherever a page shows it, even as
         # one title-case word in a heading or option.
-        if e.resp_json is not None and e.status < 400:
-            known |= sanitize.names_in(e.resp_json)
-        elif e.resp_text and "json" in (e.resp_mime or ""):
+        # A value shown whole (a product's or a customer's name in a link or a heading) is data
+        # as a whole, lower-case words and short tokens included: `sanitize.phrases_in`.
+        # Capitalised words of prose (descriptions) are not names: `names_in(prose=False)`.
+        answer = e.resp_json if e.resp_json is not None and e.status < 400 else None
+        if answer is None and e.resp_json is None and e.resp_text and "json" in (e.resp_mime or ""):
             try:
-                known |= sanitize.names_in(json.loads(e.resp_text))
+                answer = json.loads(e.resp_text)
             except ValueError:
-                pass
+                answer = None
+        if answer is not None:
+            known |= sanitize.names_in(answer, prose=False) | sanitize.phrases_in(answer)
     for text in pages:
         known |= sanitize.page(text).names
     # The interface's words, read knowing the data: an option or button that names a customer
@@ -1776,6 +1858,16 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
     hosts |= {urlsplit(s.url).netloc.lower() for s in rec.steps if s.url.startswith("http")}
     if not hosts:
         hosts = {e.host for e in entries}
+    siblings = api_hosts(hosts, entries)
+    hosts |= siblings
+    if siblings:
+        n = sum(1 for e in entries if e.host in siblings and e.kind == "api")
+        model.problems.append(
+            f"{ev}: {n} API request(s) went to {len(siblings)} other host(s) of the pages' own "
+            "site (a separate API origin, such as api. beside www.): analysed as this "
+            "application's API on the same paths. The pages call that origin, not their own: "
+            "say in BUILD-NOTES.md which address the rebuilt pages call and what serves it"
+        )
     others = [e for e in entries if e.host not in hosts and e.kind == "api"]
     entries = [e for e in entries if e.host in hosts]
     if others:
@@ -1788,6 +1880,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
     # own requests are not this application's routes or tables.
     step_hosts = {urlsplit(s.url).netloc.lower() for s in rec.steps if s.url.startswith("http")}
     framed = {e.host for e in entries if e.host not in step_hosts} if step_hosts else set()
+    framed -= siblings  # an API origin of the same site is the pages' own API, not a frame
     framed_calls = sorted({f"{e.method} {sanitize.route_pattern(e.path)}" for e in entries
                            if e.host in framed and e.kind not in ("document", "asset")})  # fmt: skip
     framed_docs = {sanitize.route_pattern(e.path) for e in entries
@@ -1891,8 +1984,9 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         if e.method == "POST" and sanitize.route_pattern(e.path) in jsf_views:
             return sanitize.route_pattern(e.path)  # a JSF form posts to its own view
         ref = urlsplit(e.request.get("referer", ""))
-        if ref.netloc.lower() in hosts and ref.path:
-            return sanitize.route_pattern(ref.path)
+        path = referer_path(e.request.get("referer", ""), e.host)
+        if ref.netloc.lower() in hosts and path:
+            return sanitize.route_pattern(path)
         before = [p for t, p in timeline if e.started and t <= e.started]
         return before[-1] if before else None
 
@@ -1959,6 +2053,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         entity = _entity(pattern)
         if method != "GET" and entity in tables and entity not in acc.tables:
             acc.tables.append(entity)
+    _rpc_tables(entries, routes, tables, codes, not_codes, screens)
 
     for (method, pattern), acc in routes.items():
         timing = None
@@ -2090,9 +2185,12 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             el.actions = el.actions + [a for a in actions if a not in el.actions]
         files = []
         if acc.pages and pages_dir is not None:
-            # the fullest snapshot: most ids, then most classes (a list with its rows), then latest
+            # the fullest snapshot with no dialog open (the screen as it is drawn without one:
+            # its picture must not show a modal over it): most ids, then most classes (a list
+            # with its rows), then latest
             best = max(enumerate(acc.pages),
-                       key=lambda p: (len(p[1].ids), len(p[1].classes), p[0]))[1]  # fmt: skip
+                       key=lambda p: (not open_dialogs(p[1].html), len(p[1].ids),
+                                      len(p[1].classes), p[0]))[1]  # fmt: skip
             pages_dir.mkdir(parents=True, exist_ok=True)
             safe_name = re.sub(r"[^A-Za-z0-9.-]+", "-", name).strip("-.")[:80] or "page"
             out = (
@@ -2711,6 +2809,64 @@ def _form_columns(info: sanitize.PageInfo, pattern: str, heads: list[str], table
         if (2 <= len(codes) <= MAX_CODES and all(codes) and not NOT_CODE_FIELD.search(col)
                 and col not in ("id",)):  # fmt: skip
             t.codes.setdefault(col, {}).update(dict.fromkeys(codes))
+
+
+# A remote-procedure path names a verb and the resource it acts on in one word: `viewcart`,
+# `addtocart`, `deleteitem`, `get_orders`.
+RPC_PATH = re.compile(
+    r"^(?:view|get|list|load|fetch|read|show|find|search|add|create|new|insert|save|update|edit|"
+    r"set|put|delete|del|remove|rm)(?:_?(?:to|from|in|into))?_?(?P<noun>[a-z][a-z_]{2,})$"
+)
+GENERIC_NOUNS = {"item", "items", "row", "rows", "entry", "record", "records", "line", "lines"}
+
+
+def rpc_noun(pattern: str) -> str | None:
+    """The resource a remote-procedure path acts on: `/addtocart` -> `cart`, `/viewcart` ->
+    `cart`, `/deleteitem` -> `item`. None for a path that is not a verb and a noun."""
+    last = next((s for s in reversed(pattern.split("/")) if s and not s.startswith("{")), "")
+    m = RPC_PATH.match(last.lower())
+    return m.group("noun").strip("_") if m else None
+
+
+def _rpc_tables(entries, routes, tables, codes, not_codes, screens) -> None:
+    """Tables a remote-procedure API shows through POST answers (no GET lists them):
+
+    - an answer whose records have exactly the columns of a known table is a read of that table
+      (`POST /bycat` filtering `entries`, `POST /view` reading one of them);
+    - another list answer of a verb-and-noun path is a table of that noun (`POST /viewcart`
+      listing `cart`), and every verb on the same noun writes it (`/addtocart`);
+    - a verb on a generic noun (`/deleteitem`) acts on the table such a list read showed on the
+      same screen."""
+    read: dict[tuple[str, str], str] = {}
+    for e in entries:
+        if e.method == "GET" or not (200 <= e.status < 300) or e.resp_json is None:
+            continue
+        key = (e.method, sanitize.route_pattern(e.path))
+        if key not in routes:
+            continue
+        items = _items(e.resp_json)
+        cols = {str(k) for i in items[:20] for k, v in i.items() if not isinstance(v, (dict, list))}
+        same = next((t for t, have in tables.items() if len(cols) >= 2 and cols ==
+                     {k for k in have if not k.startswith("{")}), None)  # fmt: skip
+        noun = rpc_noun(key[1])
+        if same is None and is_list_answer(e.resp_json) and noun and noun not in GENERIC_NOUNS:
+            same = _entity("/" + noun)
+        if same is None:
+            continue
+        _collect(same, items, tables, codes, not_codes, routes[key].tables)
+        read[key] = same
+    for key, acc in routes.items():
+        if key[0] == "GET" or acc.tables:
+            continue
+        noun = rpc_noun(key[1])
+        table = _entity("/" + noun) if noun else None
+        if table in tables:
+            acc.tables.append(table)
+        elif noun in GENERIC_NOUNS:
+            near = {read[k] for scr in screens.values() if key in scr.calls
+                    for k in scr.calls if k in read and rpc_noun(k[1])}  # fmt: skip
+            if len(near) == 1:
+                acc.tables.append(near.pop())
 
 
 def _collect(entity, items, tables, codes, not_codes, route_tables) -> None:

@@ -273,6 +273,10 @@ def test_dialogs(site, tmp_path):
     assert [(d["dialog"]["kind"], d["dialog"]["choice"]) for d in dialogs] == [
         ("confirm", "accept"), ("confirm", "dismiss"), ("alert", "accept"), ("prompt", "accept")]  # fmt: skip
     assert all(isinstance(d["caused_by"], int) for d in dialogs)
+    # the message is the application's text, recorded with each dialog (Demoblaze trial: the
+    # "Product added." alert never reached the package)
+    assert [d["dialog"].get("message") for d in dialogs] == [
+        "Delete it?", "Delete it?", "Saved", "Your name?"]  # fmt: skip
     assert dialogs[3]["typed_shape"] == "A A"
     texts = "".join(p.read_text("utf-8", "replace") for p in rec.rglob("*") if p.is_file()
                     and p.suffix != ".png")  # fmt: skip

@@ -98,6 +98,8 @@ class Ex:
     cookies_sent: tuple = ()
     cookies_set: tuple = ()
     auth_scheme: str = ""
+    resp_empty: bool = False  # the answer had no body at all (0 bytes)
+    resp_length: int | None = None  # its Content-Length, when it said one
     # The cookies the response set, by name, with their attributes (path, domain relative to the
     # host, flags, lifetime as a duration): sanitize.cookie_attributes. Never a value.
     cookie_attrs: tuple = ()
@@ -179,6 +181,8 @@ def _exchanges(har_doc: dict, hosts: set[str]) -> list[Ex]:
 def _extras(entry: dict, post: dict, content: dict) -> dict:
     """The fields of `Ex` the API catalogue reads. Header values that could be a credential are
     never kept: a cookie gives its name, an Authorization header its scheme."""
+    from labctl import har
+
     req, resp = entry.get("request") or {}, entry.get("response") or {}
 
     def heads(side: dict, name: str) -> list[str]:
@@ -202,15 +206,20 @@ def _extras(entry: dict, post: dict, content: dict) -> dict:
     scheme = next((v.split(" ", 1)[0] for v in heads(req, "authorization") if " " in v), "")
     referer = next(iter(heads(req, "referer")), "")
     location = next(iter(heads(resp, "location")), "") or str(resp.get("redirectURL") or "")
+    length = next(iter(heads(resp, "content-length")), "").strip()
     return {
         "body": body,
         "req_type": req_type or ("application/json" if body is not None else ""),
         "resp_type": str(content.get("mimeType") or "").split(";")[0].strip().lower(),
-        "referer": urlsplit(referer).path if referer else "",
+        # a cross-origin call's Referer is the page's origin only: it names no page
+        "referer": har.referer_path(referer, urlsplit(str(req.get("url") or "")).netloc),
         "location": urlsplit(location).path if location else "",
         "cookies_sent": tuple(sorted(n for n in sent if sanitize.COOKIE_NAME.match(n))),
         "cookies_set": tuple(sorted(n for n in made if sanitize.COOKIE_NAME.match(n))),
         "auth_scheme": scheme if re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{1,20}", scheme) else "",
+        "resp_empty": not (content.get("text") or "")
+        and (length == "0" or (not length and content.get("size") == 0)),
+        "resp_length": int(length) if length.isdigit() else None,
         "cookie_attrs": tuple(sanitize.cookie_attributes(entry)),
     }
 
@@ -222,17 +231,13 @@ def load_part(app: str, part: Path) -> Part:
     hosts = {urlsplit(str(s.get("url") or "")).netloc.lower() for s in raw
              if str(s.get("url") or "").startswith("http")}  # fmt: skip
     doc = har.load(part).har
+    if hosts:  # the pages' own API on another origin of their site
+        hosts |= har.api_hosts(hosts, har.exchanges(doc))
     exs = sorted(_exchanges(doc, hosts), key=lambda e: e.started)
-    timed = [(s["seq"], har._time(s.get("ts"))) for s in raw]
+    timed = [(s["seq"], har._time(s.get("ts")), s.get("action")) for s in raw]
     owner: dict[int, list[Ex]] = {}
-    # The recorder logs a typing step, the key press and the submit it causes a few ms after the
-    # request they send has started: a step logged within LAG after a request still owns it.
-    lag = timedelta(milliseconds=150)
     for e in exs:
-        at = None
-        for seq, ts in timed:
-            if ts is not None and ts <= e.started + lag:
-                at = seq
+        at = stepfacts.step_at(timed, e.started)  # the one rule: a step logged just after owns it
         if at is not None:
             owner.setdefault(at, []).append(e)
 
@@ -281,8 +286,7 @@ def _options(node) -> list[tuple[str, str]]:
 def _items(data) -> list[dict] | None:
     from labctl import har
 
-    if isinstance(data, list) or (isinstance(data, dict) and any(
-            isinstance(data.get(k), list) for k in har.ITEM_KEYS)):  # fmt: skip
+    if har.is_list_answer(data):
         return har._items(data)
     return None
 
@@ -358,6 +362,7 @@ class ListDesign:
     # Per identifier number, what the answers first showed of that record (a list row or the
     # record's own GET): read only for code values, booleans and empty fields, never copied as data.
     seen: dict[int, dict] = field(default_factory=dict)
+    first_items: list[dict] = field(default_factory=list)  # the first full answer (in memory)
 
 
 @dataclass
@@ -482,6 +487,8 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
             if items is None:
                 continue
             d = lists.setdefault(e.route, ListDesign(e.route, har._entity(e.route)))
+            if len(items) > len(d.first_items) and not wrote:
+                d.first_items = items
             if not wrote:
                 d.before_writes = max(d.before_writes, len(items))
                 d.total_before = max(d.total_before, _count(e.data, items)[0])
@@ -656,6 +663,7 @@ def seed_rows(
             row: dict = {}
             for col in table.columns:
                 row[col.name] = _cell(c, d, col, i, n, first_pool, others, scales)
+            _public_cells(row, d, i)
             out.append(row)
         rows[table.name] = out
         what = f"{d.rows} row(s)"
@@ -668,6 +676,30 @@ def seed_rows(
             rows[t.name] = []
             notes.append(f"`{t.name}`: no rows (no recorded list showed its records)")
     return rows, notes
+
+
+def lookfeel_names_image(value, c: Core) -> bool:
+    """Whether a value is the path of an image the look carries (`lookfeel.names_image`)."""
+    from labctl import lookfeel
+
+    if not hasattr(c, "_images"):
+        c._images = lookfeel.interface_image_paths([p.path for p in c.parts])  # type: ignore[attr-defined]
+    return lookfeel.names_image(value, c._images)  # type: ignore[attr-defined]
+
+
+def _public_cells(row: dict, d: ListDesign, i: int) -> None:
+    """Row `i` of a list the owner declared public (labctl.publicdata): its declared fields hold
+    the recorded record's values (the secret checks apply); the rest stays synthetic."""
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    if pub is None or i >= len(d.first_items) or pub.endpoint("GET", d.route) is None:
+        return
+    item = d.first_items[i]
+    for name in row:
+        key = next((k for k in item if _key(k) == _key(name)), None)
+        if key is not None and pub.field_public("GET", d.route, key, item[key]):
+            row[name] = item[key]
 
 
 def col_of(table, key: str | None) -> str:
@@ -690,6 +722,9 @@ def _cell(c: Core, d: ListDesign, col, i: int, n: int, first: list[str], others:
             if n in chosen:
                 words.append(s.term)
     values = _column_values(col.name, d)
+    images = [v for v in values if lookfeel_names_image(v, c)]
+    if values and len(images) == len(values):  # a carried interface image: its real file name
+        return sorted(set(images))[i % len(set(images))]
     info = obs.classify_column(col.name, values) if values else {"kind": "unknown"}
     kind = info.get("kind")
     fn, ln = (
@@ -760,6 +795,13 @@ def seed_sql(app: str, rows: dict, tables: list, engine: str, notes: list[str]) 
              "the recordings showed. Load exactly these rows,",
              "-- once, into the empty tables of db/schema.sql: the acceptance replay depends on "
              f"them. Dialect: {engine}.", *[f"-- {n}" for n in notes]]  # fmt: skip
+    from labctl import publicdata
+
+    pub = publicdata.current()
+    if pub is not None:  # the owner declared some of it public: say which, and who approved
+        lines.insert(1, "-- Except: the declared columns of lists the owner declared public hold "
+                     "real public catalogue data, as recorded (approved by "
+                     + "; ".join(str(d.approved_by) for d in pub.decls) + ").")  # fmt: skip
     for table in ordered(tables):
         data = rows.get(table.name) or []
         if not data:

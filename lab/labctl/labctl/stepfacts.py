@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -39,6 +40,31 @@ ID_VALUE = re.compile(r"^([A-Z]{1,8})([-_/.]?)(\d{2,12})$")
 ID_FIELD = re.compile(r"(^|_)(id|no|number|num|ref|reference|code|key)$", re.I)
 ID_WORDS = {"id", "no", "nr", "number", "num", "ref", "reference", "key", "ident"}
 COUNT_FIELDS = ("total", "count", "total_count", "totalCount", "pages", "page_count")
+# The recorder logs a click, a typing step, the key press and the submit it causes a few ms after
+# the request they send has started (the page's listener runs first): a step logged within LAG
+# after a request still owns it.
+LAG = timedelta(milliseconds=150)
+
+
+NO_CAUSE = ("dialog",)  # a dialog shows what a request answered: it never sends one
+
+
+def step_at(timed, started: datetime | None):
+    """The step a request belongs to. `timed` is `(key, logged at[, action])` in step order: the
+    last step logged at or before the request started, or less than `LAG` after it (the action
+    that sent it, or the page change that action caused, logged late), but never a dialog (the
+    "Product added" alert logged 148 ms after the call whose answer brought it). The one rule
+    for every module that matches steps to requests (step facts, seed plan, and through them
+    navigation, API catalogue and page rules)."""
+    if started is None:
+        return None
+    at = None
+    for key, ts, *rest in timed:
+        if ts is None:
+            continue
+        if ts <= started or (ts <= started + LAG and (not rest or rest[0] not in NO_CAUSE)):
+            at = key
+    return at
 
 
 def _steps(part: Path) -> list[dict]:
@@ -89,7 +115,9 @@ def facts(part: Path) -> Facts:
     rec = har.load(part)
     hosts = {urlsplit(s.get("url") or "").netloc.lower() for s in raw
              if str(s.get("url") or "").startswith("http")}  # fmt: skip
-    entries = [e for e in har.exchanges(rec.har) if not hosts or e.host in hosts]
+    every = har.exchanges(rec.har)
+    hosts |= har.api_hosts(hosts, every)  # the pages' own API on another origin of their site
+    entries = [e for e in every if not hosts or e.host in hosts]
     doms = {s["seq"]: t for s in raw if (t := _read(part, s.get("dom"))) is not None}
     befores = {s["seq"]: t for s in raw if (t := _read(part, s.get("dom_before"))) is not None}
     known, vocab = har.page_knowledge([*doms.values(), *befores.values()], entries)
@@ -102,19 +130,16 @@ def facts(part: Path) -> Facts:
         info = sanitize.page(html, known, vocab)
         return {(m["selector"], m["text"]) for m in info.messages if not m["hidden"]}
 
-    # Each request goes to the last step at or before it; a page's own document to the page
+    # Each request goes to its step (`step_at`); a page's own document to the page
     # load it became, when one followed within a few seconds (a back or forward is its own step).
-    timed = [(i, har._time(s.get("ts"))) for i, s in enumerate(raw)]
+    timed = [(i, har._time(s.get("ts")), s.get("action")) for i, s in enumerate(raw)]
     owner: dict[int, list] = {}
     for e in entries:
         if e.kind == "asset" or e.started is None:
             continue
-        at = None
-        for i, ts in timed:
-            if ts is not None and ts <= e.started:
-                at = i
+        at = step_at(timed, e.started)
         if e.kind == "document":
-            load = next((i for i, ts in timed if ts is not None and ts >= e.started
+            load = next((i for i, ts, _a in timed if ts is not None and ts >= e.started
                          and (ts - e.started).total_seconds() < 3 and raw[i].get("action") == "goto"
                          and _pattern(raw[i].get("url")) == sanitize.route_pattern(e.path)), None)  # fmt: skip
             at = load if load is not None else at
@@ -145,6 +170,14 @@ def facts(part: Path) -> Facts:
             row["typed_shape"] = str(s["typed_shape"])[:64]
         if s.get("option_index") is not None:
             row["option_index"] = s["option_index"]
+        dialog = s.get("dialog")
+        if isinstance(dialog, dict) and dialog.get("kind") in ("alert", "confirm", "prompt"):
+            row["dialog"] = {"kind": dialog["kind"], "choice": dialog.get("choice") or "dismiss"}
+            if isinstance(dialog.get("message"), str) and dialog["message"].strip():
+                # the application's text, masked again with what the recording knows as data
+                text = sanitize.mask_message(dialog["message"], known)
+                row["dialog"]["message"] = text
+                row["messages"] = [{"selector": f"browser {dialog['kind']}", "text": text}]
         if reqs:
             row["requests"] = reqs
         if here and here != row["screen"]:
@@ -155,7 +188,8 @@ def facts(part: Path) -> Facts:
             page_before_html = befores.get(s["seq"]) or page_before
             new = sorted(messages(html) - messages(page_before_html))
             if new:
-                row["messages"] = [{"selector": a, "text": b} for a, b in new]
+                row["messages"] = [*row.get("messages", []),
+                                   *({"selector": a, "text": b} for a, b in new)]  # fmt: skip
             page_before = html
         if here:
             screen_before = here
@@ -219,7 +253,11 @@ def _target(step: dict) -> str | None:
     from labctl import locate
 
     sel = str(step.get("selector") or "")
-    if not sel or re.search(r"#[A-Za-z_][\w-]*$", sel.split(">>>")[-1].strip()):
+    # An id the page gives several elements (`a#itemc` on each category link) does not name one
+    # element: the ranked locator then says which.
+    shared = any(c.get("kind") == "id" and (c.get("count") or 0) > 1
+                 for c in step.get("locators") or [])  # fmt: skip
+    if not sel or (re.search(r"#[A-Za-z_][\w-]*$", sel.split(">>>")[-1].strip()) and not shared):
         return None
     for cand in step.get("locators") or []:
         kind = cand.get("kind")
@@ -288,8 +326,7 @@ def _identifiers(entries, doms: dict[int, str]) -> tuple[list[dict], list[dict]]
             continue
         route = f"{e.method} {sanitize.route_pattern(e.path)}"
         items = har._items(e.resp_json)
-        if isinstance(e.resp_json, dict) and any(isinstance(e.resp_json.get(k), list)
-                                                 for k in har.ITEM_KEYS):  # fmt: skip
+        if isinstance(e.resp_json, dict) and har.list_key(e.resp_json) is not None:
             info = lists.setdefault(route, {"route": route, "rows": 0, "answers": 0})
             info["answers"] += 1
             info["rows"] = max(info["rows"], len(items))
@@ -443,7 +480,9 @@ def write_steps(root: Path, app_id: str) -> tuple[list[Path], list[Facts]]:
             "step number; `global`, when present, the number in the whole recording across "
             "applications that the brief cites. `target`, where the selector is not an element's "
             "own id (it may match several elements), is the ranked locator the replay finds the "
-            "element by. The value the acceptance replay types at each step, when generated, is "
+            "element by. `dialog` is a browser alert, confirm or prompt: its kind, the answer "
+            "given and its message (interface text, data masked). The value the acceptance "
+            "replay types at each step, when generated, is "
             "in `<recording>.values.yaml` beside this file.",
             "steps": f.steps,
         }

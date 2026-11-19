@@ -489,6 +489,26 @@ A HAR or a database export from a real system holds customer data, cookies and t
   are replaced by synthetic values of the same shape.
 - Where real-shaped values are needed, they go through the keyed masking from Prod Echo first.
 - Only the model, the brief and the generated schema are committed.
+- Interface, not data, and kept because a builder needs it: the file names of static images,
+  style sheets, scripts and fonts of the application's own origin that are named by a word
+  (`blazemeter-favicon-512x512.png`; a file named by a number, hash or key prefix, or under a
+  user-content folder, stays masked); the control texts of a media player library (video.js,
+  Plyr, MediaElement, JW Player); short code lists (`cat`: phone, notebook, monitor); browser
+  dialog messages, masked like any message. A short answer value a page shows whole (a product
+  or customer name in a link or heading) is masked whole.
+- **Public catalogue data, declared by the owner** (`public-data.yaml` beside the recording,
+  `labctl.publicdata`). Off by default. For an application whose shown content is a public
+  catalogue (product names, descriptions, prices, category codes, product photos) the owner may
+  declare whole endpoints (method and path, every field or the fields named), page regions and
+  image path prefixes public. `labctl evidence public-data <recording>` drafts the file from the
+  recording, unapproved, with every endpoint and its fields under `seen:` and nothing public.
+  Nothing is used without `approved_by`. Once approved, the declared values are carried as
+  recorded in the page snapshots (outside data cells: a cart's rows stay masked), the API
+  examples, the seed rows and `look/` (declared photos carried as images), and the brief and
+  `BUILD_TASK.md` say which data is real and who approved it. Everything not declared is masked
+  as before, and inside declared data a field named like a credential or a contact, a value
+  shaped like an e-mail address, token, key, JWT, UUID or cookie, and a typed value's shape are
+  never carried.
 
 ## Proving it on the reference app
 

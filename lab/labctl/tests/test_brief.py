@@ -338,10 +338,17 @@ def test_brief_command_writes_files_and_will_not_overwrite_without_force(tmp_pat
     assert "CREATE TABLE cases" in (out / "db/schema.sql").read_text(encoding="utf-8")
     App.model_validate(yaml.safe_load((out / "app.yaml").read_text(encoding="utf-8")))
 
-    (out / "app.yaml").write_text("id: showcase  # edited by a person\n", encoding="utf-8")
+    # a person's part of app.yaml stays; its generated parts are made again (Demoblaze trial:
+    # a stale `stack.data` of a first run contradicted the brief)
+    conf = yaml.safe_load((out / "app.yaml").read_text(encoding="utf-8"))
+    conf["run"] = {"web": 8080, "health": "/api/health"}
+    conf["stack"]["data"] = {"kind": "browser"}
+    (out / "app.yaml").write_text(yaml.safe_dump(conf), encoding="utf-8")
     assert runner.invoke(app, args).exit_code == 1
     assert runner.invoke(app, [*args, "--force"]).exit_code == 0
-    assert "edited by a person" in (out / "app.yaml").read_text(encoding="utf-8")
+    again = yaml.safe_load((out / "app.yaml").read_text(encoding="utf-8"))
+    assert again["run"] == {"web": 8080, "health": "/api/health"}
+    assert "data" not in again["stack"]
 
 
 def test_brief_command_refuses_an_unknown_engine(tmp_path, monkeypatch):

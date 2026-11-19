@@ -213,20 +213,23 @@ def _cookie_facts(found: dict, c, owner_of: dict) -> None:
 
 
 def cookie_lines(found: dict) -> list[str]:
-    """The brief's lines on each cookie: name, who sets it, attributes, when it is cleared."""
+    """The brief's lines on each cookie: name, who sets it (a response or the application's
+    script), attributes, when it is cleared, and how it is used (labctl.cookies)."""
+    from labctl import cookies
+
     out = []
     for row in found.get("cookie_facts") or []:
         a = row.get("attributes") or {}
-        sets = "; ".join(f"`{w['request']} {w['status']}`"
-                         + (f" (step {w['step']}, on `{w['screen']}`)" if w.get("step") else "")
-                         for w in row["set_by"]) or "no recorded response"  # fmt: skip
+        sets = cookies.where_set(row)
         flags = [f"Path `{a['path']}`" if a.get("path") else "",
                  f"Domain: {a['domain']}" if a.get("domain") else "",
                  "HttpOnly" if a.get("http_only") else "not HttpOnly",
                  "Secure" if a.get("secure") else "not Secure",
                  f"SameSite {a['same_site']}" if a.get("same_site") else "",
                  "Partitioned" if a.get("partitioned") else "",
-                 str(a.get("lifetime") or "")] if a else ["attributes not recorded"]  # fmt: skip
+                 str(a.get("lifetime") or "")] if a else (
+            ["attributes the script writes: " + ", ".join(f"`{x}`" for x in row["script_attributes"])]
+            if row.get("script_attributes") else ["attributes not recorded"])  # fmt: skip
         cleared = "; ".join(f"`{w['request']} {w['status']}`"
                             + (f" (step {w['step']})" if w.get("step") else "")
                             for w in row["cleared_by"])  # fmt: skip
@@ -234,6 +237,7 @@ def cookie_lines(found: dict) -> list[str]:
                    + (" (the session)" if row.get("session_cookie") else "")
                    + f": set by {sets}; " + ", ".join(f for f in flags if f)
                    + (f"; cleared by {cleared}" if cleared else "; never cleared in the recording")
+                   + (f"; {cookies.use_text(row)}" if cookies.use_text(row) else "")
                    + (". Later requests sent it back." if row.get("sent_back") else ".")
                    + " Its value is never kept and is not needed.")  # fmt: skip
     return out
@@ -385,12 +389,21 @@ def write(root: Path, app: str, found: dict | None, taken: dict, endpoints: dict
 # --- the brief -----------------------------------------------------------------------------------
 
 
-def brief_section(app: str, found: dict | None, done: dict | None) -> str:
+def brief_section(app: str, found: dict | None, done: dict | None,
+                  cookie_rows: list[dict] | None = None) -> str:  # fmt: skip
+    """The brief's *Sign-in and session*. `cookie_rows` (`labctl.cookies.facts`): every cookie,
+    also when nobody signed in; by default the rows `observe()` found."""
     out = [HEADING + "\n"]
+    rows = cookie_rows if cookie_rows is not None else (found or {}).get("cookie_facts") or []
     if not found:
         out += ["No sign-in was recorded: the recording never typed a password. Build no sign-in "
-                "screen and protect nothing, unless a screen of this brief is one.\n", DATA_RULE, ""]  # fmt: skip
+                "screen and protect nothing, unless a screen of this brief is one.\n"]  # fmt: skip
+        if rows:
+            out += ["**Cookies** (names as the original uses them; values are never kept):\n",
+                    *cookie_lines({"cookie_facts": rows}), "", COOKIE_RULE, ""]  # fmt: skip
+        out += [DATA_RULE, ""]
         return "\n".join(out) + "\n"
+    found = {**found, "cookie_facts": rows}
     call = found.get("call") or {}
     fields = ", ".join(f"`{f['selector']}`" + (" (the password)" if f["password"] else "")
                        for f in found.get("fields") or [])  # fmt: skip
@@ -506,12 +519,20 @@ COOKIE_ABOUT = (
 )
 
 
-def facts_doc(app: str, found: dict | None) -> dict | None:
+def facts_doc(app: str, found: dict | None, cookie_rows: list[dict] | None = None) -> dict | None:
     """`session.json`: the sign-in and session facts of `observe()`, for the builder and the
     package's generated documents. Never a user name, password, token or cookie value: the
     seeded user is in `db/seed.sql`, the replay values in `steps/*.values.yaml`."""
-    if not found:
+    rows = cookie_rows if cookie_rows is not None else (found or {}).get("cookie_facts") or []
+    if not found and not rows:
         return None
+    if not found:  # nobody signed in; the cookies the application uses all the same
+        return {"format": FORMAT, "app": app,
+                "about": ("No sign-in was recorded. Every cookie the application uses, by name: "
+                          "who sets it, its attributes, how it is used. " + COOKIE_ABOUT),
+                "sign_in": None, "session": {"mechanism": "no sign-in recorded"},
+                "cookies": rows}  # fmt: skip
+    found = {**found, "cookie_facts": rows}
     attempts = [{k: v for k, v in a.items() if k != "recording"} for a in found["attempts"]]
     mechanism = ("cookie" if found["cookies"] else
                  "Authorization header" if found["schemes"] else "not recorded")  # fmt: skip
@@ -534,10 +555,11 @@ def facts_doc(app: str, found: dict | None) -> dict | None:
     }  # fmt: skip
 
 
-def write_facts(root: Path, app: str, found: dict | None) -> Path | None:
-    """Write `apps/<app>/session.json` (removed when nobody signed in)."""
+def write_facts(root: Path, app: str, found: dict | None,
+                cookie_rows: list[dict] | None = None) -> Path | None:  # fmt: skip
+    """Write `apps/<app>/session.json` (removed when nobody signed in and no cookie was seen)."""
     path = Path(root) / "apps" / app / FILE
-    doc = facts_doc(app, found)
+    doc = facts_doc(app, found, cookie_rows)
     if doc is None:
         path.unlink(missing_ok=True)
         return None

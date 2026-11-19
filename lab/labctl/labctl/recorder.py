@@ -54,7 +54,8 @@ clicks it was made of; the blank page a browser starts on is a `setup` step the 
 itself. A click, key press or submit that loads another page is observed at that page
 (`after: navigation`, no snapshot of its own), whatever the page's speed. Steps may also carry
 `shadow` (open/closed root), `surface: canvas`, `option_index` (select), `dialog` ({kind,
-choice}; a prompt's text is a typed value), `files` on an `upload` step (name shape, type, size
+choice, message}; the message is interface text with data masked, `dialog_message`; a prompt's
+text is a typed value), `files` on an `upload` step (name shape, type, size
 class: never the file), `download` ({name_shape, ext}) and `service_worker`.
 
 The DOM is captured inside the page, after each navigation (full load or history change) and after
@@ -847,7 +848,8 @@ LISTENER_JS = r"""
       const r = orig.apply(this, args);
       const choice = kind === "alert" ? "accept" : kind === "confirm" ? (r ? "accept" : "dismiss")
         : (r === null ? "dismiss" : "accept");
-      const extra = {dialog: {kind, choice}};
+      // the message is the application's text (data in it is masked in Python: mask_message)
+      const extra = {dialog: {kind, choice, message: String(args[0] === undefined ? "" : args[0]).slice(0, 500)}};
       if (kind === "prompt" && typeof r === "string") {
         if (r.trim() === "") extra.blank = r.slice(0, 64);
         else { const tid = FRAME_ID + "-" + (++tidSeq); secret(tid, r); extra.tid = tid; extra.typed_shape = shapeOf(r); }
@@ -994,6 +996,19 @@ def _shape(text: str) -> str:
     from labctl.behaviour.dom import shape
 
     return shape(text) or ""
+
+
+def dialog_message(text, secrets=None) -> str:
+    """The message of a browser dialog (alert, confirm, prompt) as the step keeps it: the
+    application's interface text (`Product added.`), with any typed value replaced by its shape
+    and every value-like word masked (`sanitize.mask_message`: digits, e-mail addresses)."""
+    from labctl import sanitize
+
+    if not isinstance(text, str) or not text.strip():
+        return ""
+    if secrets:
+        text = secrets.redact_text(text)
+    return sanitize.mask_message(" ".join(text.split()))
 
 
 def _locators(raw) -> list[dict]:
@@ -1636,6 +1651,9 @@ class _Steps:
         if isinstance(d, dict) and d.get("kind") in ("alert", "confirm", "prompt"):
             step["dialog"] = {"kind": d["kind"],
                               "choice": "accept" if d.get("choice") == "accept" else "dismiss"}  # fmt: skip
+            message = dialog_message(d.get("message"), self.secrets)
+            if message:
+                step["dialog"]["message"] = message
         if isinstance(event.get("files"), list):
             step["files"] = [{"name_shape": str(f.get("name_shape") or "")[:64],
                               "type": str(f.get("type") or "")[:80],

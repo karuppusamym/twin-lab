@@ -134,15 +134,21 @@ def _label(node, labels: dict[str, str]) -> str:
 
 def _inside(node) -> list[str]:
     out = []
+    widget = False  # inside a carousel or slider: not the menu that happens to hold it
     for a in _ancestors(node):
         role = (a.attrs.get("role") or "").lower()
-        if a.tag == "dialog" or role in DIALOG_ROLES or a.attrs.get("aria-modal") == "true":
+        classes = _attr_classes(a)
+        if "carousel" in classes or a.attrs.get("data-ride") == "carousel" or (
+                a.attrs.get("aria-roledescription") or "").lower() in ("carousel", "slider"):  # fmt: skip
+            out.append(f"carousel `{canon(a)}`")
+            widget = True
+        elif a.tag == "dialog" or role in DIALOG_ROLES or a.attrs.get("aria-modal") == "true":
             out.append(f"dialog `{canon(a)}`")
         elif role == "tabpanel":
             out.append(f"tab panel `{canon(a)}`")
         elif a.tag == "form":
             out.append(f"form `{canon(a)}`")
-        elif a.tag in ("nav", "menu") or role in ("navigation", "menu", "menubar"):
+        elif (a.tag in ("nav", "menu") or role in ("navigation", "menu", "menubar")) and not widget:
             out.append(f"menu `{canon(a)}`")
     return out
 
@@ -259,13 +265,18 @@ def _subview_states(tree) -> dict[str, tuple[str, bool]]:
     for node in domlib._walk(tree):
         role = (node.attrs.get("role") or "").lower()
         prefix = _frame_prefix(node)
-        if node.tag == "dialog":
-            out[prefix + canon(node)] = ("dialog", "open" in node.attrs and domlib._visible(node))
-        elif role in DIALOG_ROLES or node.attrs.get("aria-modal") == "true":
-            out[prefix + canon(node)] = ("dialog", domlib._visible(node))
+        if domlib.is_dialog(node):
+            if _in_player(node):  # a media player's own dialogs (captions settings): its library's
+                continue
+            # open as drawn: Bootstrap keeps every modal in the page, `show`n when open
+            out[prefix + canon(node)] = ("dialog", domlib.shown(node))
         elif role == "tabpanel":
             out[prefix + canon(node)] = ("tab panel", domlib._visible(node))
     return out
+
+
+def _in_player(node) -> bool:
+    return any(sanitize._player(a.attrs.get("class") or "") for a in [node, *_ancestors(node)])
 
 
 def subviews(pages: Pages, screen: str) -> dict[str, dict]:
@@ -319,15 +330,21 @@ def subviews(pages: Pages, screen: str) -> dict[str, dict]:
 def _view_title(node, tree) -> str:
     from labctl.behaviour import dom as domlib
 
+    # Its own title first: an `aria-labelledby` that names an element outside the dialog is a
+    # mistake of the page (Demoblaze's video modal names the Log in modal's title).
     ref = node.attrs.get("aria-labelledby")
-    if ref:
-        named = next((n for n in domlib._walk(tree) if n.id == ref), None)
-        if named is not None:
-            return domlib._text(named)[:80]
+    inside = list(domlib._walk(node))
+    named = next((n for n in inside if ref and n.id == ref), None)
+    if named is not None:
+        return domlib._text(named)[:80]
+    head = next((n for n in inside if re.fullmatch(r"h[1-6]|legend", n.tag)
+                 or "modal-title" in (n.attrs.get("class") or "").split()), None)  # fmt: skip
+    if head is not None and domlib._text(head):
+        return domlib._text(head)[:80]
     if node.attrs.get("aria-label"):
         return node.attrs["aria-label"][:80]
-    head = next((n for n in domlib._walk(node) if re.fullmatch(r"h[1-6]|legend", n.tag)), None)
-    return domlib._text(head)[:80] if head is not None else ""
+    named = next((n for n in domlib._walk(tree) if ref and n.id == ref), None)
+    return domlib._text(named)[:80] if named is not None else ""
 
 
 def _record_of(ctx, step: dict) -> str | None:

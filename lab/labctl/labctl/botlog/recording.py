@@ -67,7 +67,8 @@ class RecStep:
     caused_by_outside: dict | None = None  # {app, step}: the cause went to another application
     option_index: int | None = None  # select: the position of the option chosen
     left: bool = False  # type: the field had lost the focus when the snapshot was taken
-    dialog: dict | None = None  # dialog: {kind: confirm|alert|prompt, choice: accept|dismiss}
+    # dialog: {kind: confirm|alert|prompt, choice: accept|dismiss, message: masked text}
+    dialog: dict | None = None
     files: list[dict] = field(default_factory=list)  # upload: name shape, type, size class
     download: dict | None = None  # download: {name_shape, ext}
     shadow: str | None = None  # open | closed: the target is inside a shadow root
