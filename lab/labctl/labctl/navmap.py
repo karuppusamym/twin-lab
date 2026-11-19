@@ -742,12 +742,15 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
     }
 
 
-def write(root: Path, app: str, brief, ctxs: list) -> dict | None:
+def write(root: Path, app: str, brief, ctxs: list, extend=None) -> dict | None:
+    """`extend(doc)`: adds what other evidence shows (labctl.codemap: the code's routes)."""
     path = Path(root) / "apps" / app / FILE
     if not ctxs:
         path.unlink(missing_ok=True)
         return None
     doc = build(root, app, brief, ctxs)
+    if extend is not None:
+        doc = extend(doc) or doc
     text = json.dumps(doc, indent=1, ensure_ascii=False).replace("\r\n", "\n") + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(text.encode("utf-8"))
@@ -778,6 +781,8 @@ def brief_sections(app: str, doc: dict | None) -> str:
         out += ["**From screen to screen** (step numbers of `steps/<recording>.json`):\n",
                 "| From | Element | How | Requests | To | Steps |", "|---|---|---|---|---|---|"]  # fmt: skip
         for m in doc["transitions"]:
+            if m.get("source", "recording") != "recording":
+                continue  # links on pages and the code's own: in their sections
             how = (
                 m["by"]
                 + (f" (key {m['key']})" if m.get("key") else "")

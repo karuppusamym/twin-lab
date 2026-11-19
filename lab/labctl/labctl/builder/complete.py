@@ -41,8 +41,8 @@ def problems(repo_root: Path, app_id: str) -> list[str]:
         out.append("navigation.json is missing: no navigation map and no actions list "
                    "(regenerate the brief)")  # fmt: skip
     for screen in (nav or {}).get("screens") or []:
-        if not screen.get("in_scope"):
-            continue
+        if not screen.get("in_scope") or screen.get("source") == "code":
+            continue  # a screen only the code has: no snapshot by nature (codemap.json)
         if not screen.get("elements") and not str(screen.get("kind") or "").startswith(
                 ("shown in a frame", "stand-in")):  # fmt: skip
             out.append(f"screen `{screen.get('path')}` has no actions list (no snapshot of it "
@@ -64,6 +64,12 @@ def problems(repo_root: Path, app_id: str) -> list[str]:
             if "json" in str(r.get("content_type") or "") and not r.get("schema"):
                 out.append(f"endpoint `{name}` answer {status}: no schema (its body was not "
                            "recorded: the page did not read it)")  # fmt: skip
+    code = _json(app / "codemap.json")
+    for m in (code or {}).get("missing_code") or []:
+        routes = ", ".join(f"`{r}`" for r in m.get("routes") or [])
+        out.append(f"code `{m.get('file')}`" + (f" (route {routes})" if routes else "")
+                   + " was never downloaded: what it shows is unknown (`labctl evidence "
+                   "fetch-code <recording> --yes`, then regenerate the brief)")  # fmt: skip
     api_dir = app / "api"
     if api_dir.is_dir() and cat is None and any(api_dir.glob("*.json")):
         out.append("api/catalogue.json is missing though endpoint files exist")
@@ -124,6 +130,10 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
         app + "navigation.json": "Every screen, how each is reached and left, dialogs, tabs, "
                                  "frames, popup windows, and every element of each screen with "
                                  "what it did.",
+        app + "codemap.json": "What the application's code defines: every route (recorded or "
+                              "only in code), guards, lazy chunks, menus, tabs, dialogs, API "
+                              "calls (called or not), interface texts, lists of values, "
+                              "third-party libraries.",
         app + "api/catalogue.json": "Index of the endpoints the pages called, the list "
                                     "parameters' effects and the field map.",
     }  # fmt: skip
