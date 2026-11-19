@@ -17,11 +17,18 @@ record whose title is the value typed at an earlier step (or named in the bindin
 control's path inside it; candidates that would pick such a control by position are not kept.
 The first candidate that matches exactly one element is the target. When none does, the step is
 BLOCKED with what each candidate matched: one of several is never taken.
+
+An id, test id or class that was a whole typed value is recorded as its placeholder
+(`tl-typed-a`, labctl.typedvalues), as the rebuilt page has it. The step names the step that
+value was typed at (`typed_placeholders`); given the values the replay types (`typed`), each
+such candidate is also tried with the value in place of the placeholder, right after it, so the
+same step finds the element on the rebuilt page and on the application itself.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
 
 FRAME = " >>> "
@@ -108,14 +115,59 @@ def describe(cand: dict) -> str:
     return f"css {cand.get('css')}"
 
 
-def candidates(step) -> list[dict]:
+# A placeholder in a selector: `#tl-typed-a`, `.tl-typed-a`, or an attribute selector's value.
+_PLACEHOLDER = re.compile(
+    r"""([#.])(tl-typed-[a-z]+)(?![\w-])|(["'])(tl-typed-[a-z]+)["']|(?<==)(tl-typed-[a-z]+)\b"""
+)
+
+
+def _unplaced(cand: dict, typed: dict[str, str]) -> dict | None:
+    """The candidate with each placeholder it names replaced by the value typed (None when it
+    names none the replay has a value for)."""
+
+    def css(m: re.Match) -> str:
+        ph = m.group(2) or m.group(4) or m.group(5)
+        value = typed.get(ph)
+        if value is None:
+            return m.group()
+        if m.group(1) == "#":
+            return f"[id={json.dumps(value)}]"
+        if m.group(1) == ".":
+            return f"[class~={json.dumps(value)}]"
+        return json.dumps(value)
+
+    out = dict(cand)
+    if cand.get("kind") in ("id", "testid") and cand.get("value") in typed:
+        out["value"] = typed[cand["value"]]
+    for k in ("css", "rows", "control"):
+        if isinstance(cand.get(k), str):
+            out[k] = _PLACEHOLDER.sub(css, cand[k])
+    return out if out != cand else None
+
+
+def candidates(step, typed: dict[str, str] | None = None) -> list[dict]:
     """The step's ranked candidates. A step from an older recording has its selector only; a
-    newer one also has its selector last, unless the target is a per-record control."""
+    newer one also has its selector last, unless the target is a per-record control. With
+    `typed` (placeholder -> the value the replay typed for it), a candidate naming a
+    placeholder is followed by the same candidate naming the value."""
     element = parts(step.selector)[1] if step.selector else None
     out = [dict(c) for c in getattr(step, "locators", None) or []]
     per_record = any(c.get("kind") == "record" for c in out)
     if element and not per_record and element not in ("body", "html"):
         out.append({"kind": "css", "css": element})
+    if typed:
+        out = [x for c in out for x in (c, _unplaced(c, typed)) if x is not None]
+    return out
+
+
+def typed_values(step, values: dict[int, str]) -> dict[str, str]:
+    """placeholder -> the value bound to the step it was typed at, for a step that names
+    placeholders (`typed_placeholders`)."""
+    out = {}
+    for note in getattr(step, "typed_placeholders", None) or []:
+        value = values.get(note.get("typed_at")) if isinstance(note, dict) else None
+        if isinstance(value, str) and value.strip():
+            out[str(note.get("placeholder"))] = value.strip()
     return out
 
 
@@ -206,12 +258,14 @@ def _css(scope, selector: str, title: str | None):
     return None, 0, None
 
 
-def resolve(page, step, title: str | None = None, timeout_ms: int = 5000):
+def resolve(page, step, title: str | None = None, timeout_ms: int = 5000,
+            typed: dict[str, str] | None = None):  # fmt: skip
     """(Locator, what found it) for the step's target: the first candidate, in rank order, that
     matches exactly one element, waiting up to `timeout_ms` for the page to show it. One of
     several is never taken: Unresolved is raised, saying what each candidate matched.
-    (None, None) when the step names no element (a key pressed on the page itself)."""
-    cands = candidates(step)
+    (None, None) when the step names no element (a key pressed on the page itself). `typed`:
+    see `candidates`."""
+    cands = candidates(step, typed)
     if not cands:
         return None, None
     scope = _scope(page, step)

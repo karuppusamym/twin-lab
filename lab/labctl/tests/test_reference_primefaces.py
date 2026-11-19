@@ -16,6 +16,7 @@ Skipped where the application cannot be built: without a JDK, or without the jar
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -98,6 +99,21 @@ def test_every_state_inside_the_workspace_has_its_opener_snapshot_and_section(ga
     assert any(a.get("event") == "dialogReturn" for a in actions)
     assert any("PrimeFaces.openDialog" in str(a.get("evals")) for a in actions)
     assert p["widgets"] >= 10  # DataTable, Dialog, Wizard, TabView, AccordionPanel, ...
+
+
+def test_typing_report_leaves_the_reports_menu_item_its_id(gates):
+    """The flow types "report" into the table's filter. A typed value used to be taken out of
+    every attribute as a substring, so `main:navReports` became `main:navAs` and the Reports
+    sub-page lost its opener's selector; a typed value is now taken out only where it is a
+    value (labctl.typedvalues)."""
+    assert _load("flow").FILTER == "report"
+    p = gates["package"]
+    work = next(s for s in p["navigation"]["screens"] if s["path"] == "/workspace.xhtml")
+    assert "a#main:navReports" in {e["selector"] for e in work["elements"]}
+    openers = {v["opened_by"][0]["selector"] for v in work["subviews"]
+               if v.get("state_of") and v["opened_by"]}  # fmt: skip
+    assert "a#main\\:navReports" in openers
+    assert "navAs" not in json.dumps(p["navigation"])
 
 
 def test_the_recording_replays_on_a_fresh_instance_with_no_failed_step(gates):

@@ -409,8 +409,10 @@ Proven on `reference/web/caseboard-primefaces` (Mojarra 2.3.9, PrimeFaces 10.0.0
 with no JSF form on it (the address is then the only clue), sub-pages that no partial response
 replaced (a region swapped by plain script), PrimeFaces' client-side state saving, `p:fileUpload`,
 push (`p:socket`), and the server's navigation rules themselves (`faces-config.xml` outcomes are
-code the HAR does not hold). The recorder takes every typed value out of what it writes, ids and
-attribute values included: a value that an id or a label also holds is masked there too.
+code the HAR does not hold). The recorder takes a typed value out of what it writes only where it
+is a value, as a whole word (`labctl/typedvalues.py`): typing `report` leaves the id
+`main:navReports` and the menu item "Reports" as they are; an id that is the whole typed value
+becomes a placeholder (`tl-typed-a`) that the rebuild and the replay share.
 
 ### What the application's code defines
 

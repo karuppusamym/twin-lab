@@ -79,6 +79,7 @@ The test skips where there is no JDK or the jars are missing (CI).
   `closeDynamic` needs.
 - The wizard's current step is bound to the bean (`step="#{wizard.step}"`): with the dynamic
   include the component's own state does not survive the swap.
-- The flow types no word that an id or a label of the interface also holds: the recorder takes
-  every typed value out of what it writes, ids included (`report` would turn `main:navReports`
-  into `main:navAs`).
+- The flow filters the cases by `report`, a word the id `main:navReports` and the menu item
+  "Reports" also hold: the recorder takes a typed value out only where it is a value, as a whole
+  word (`labctl/typedvalues.py`), so both are recorded and replayed as they are (it used to
+  turn `main:navReports` into `main:navAs`).

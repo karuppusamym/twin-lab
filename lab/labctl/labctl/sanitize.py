@@ -32,8 +32,11 @@ Page text, two modes (`TWINLAB_PAGE_TEXT`, or `with page_text("strict"):`):
   ids, classes and names remain.
 
 Values a person typed never reach this module: the recorder replaces them with their shape in
-everything it writes (labctl.recorder._Secrets), before any of this runs; it masks nothing else
-in the browser, so this rule is the only one for page text. In interface mode style sheets are
+everything it writes, before any of this runs, where they are a value (text, form values,
+content attributes, address queries) and as a whole token; ids, classes and names keep a typed
+value inside them, and one that is a whole typed value is the placeholder `tl-typed-a`
+(labctl.typedvalues). It masks nothing else in the browser, so this rule is the only one for
+page text. In interface mode style sheets are
 kept (they are the application's code, not data), without `url(...)` addresses.
 """
 
