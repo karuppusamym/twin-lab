@@ -251,6 +251,42 @@ def test_json_path_and_matching():
     assert acc._same(["a  b"], ["a b"]) and not acc._same([1, 2], [2, 1])
 
 
+def test_unordered_texts_compare_as_a_multiset():
+    assert acc.same_multiset(["a", "b"], ["b", "a"]) and acc.same_multiset(["a  b"], ["a b"])
+    assert not acc.same_multiset(["a", "a"], ["a", "b"])  # each item as often
+    assert not acc.same_multiset(["a"], ["a", "a"]) and not acc.same_multiset("a", ["a"])
+    assert acc._compare("equals", ["a", "b"], ["b", "a"], unordered=True)
+    assert not acc._compare("equals", ["a", "b"], ["b", "a"])
+    bad = {
+        "on-count": {"check": "count", "locator": "li", "unordered": True, "equals": 2},
+        "contains": {"check": "texts", "locator": "li", "unordered": True, "contains": "a"},
+        "not-a-list": {"check": "texts", "locator": "li", "unordered": True, "equals": "a"},
+    }
+    for cid, entry in bad.items():
+        assert acc.parse_case({"id": cid, **entry}, 1).problem, cid
+    ok = acc.parse_case({"id": "t", "check": "texts", "locator": "li", "unordered": True,
+                         "equals": ["a", "b"]}, 1)  # fmt: skip
+    assert ok.problem is None and ok.unordered
+
+
+def test_an_unordered_texts_case_passes_in_any_order(recorded, tmp_path):
+    first, second = kit.typed_steps(recorded)
+    b1, b2 = {"binding": first}, {"binding": second}
+    spec = tmp_path / "cases.yaml"
+    spec.write_text(yaml.safe_dump({"cases": [
+        {"id": "any-order", "check": "texts", "locator": ".todo-list li label", "unordered": True,
+         "equals": [b2, b1]},
+        {"id": "pinned-order", "check": "texts", "locator": ".todo-list li label",
+         "equals": [b2, b1]},
+        {"id": "missing-item", "check": "texts", "locator": ".todo-list li label",
+         "unordered": True, "equals": [b1, b1]},
+    ]}), "utf-8")  # fmt: skip
+    r = run(recorded, tmp_path, acceptance=spec)
+    status = {c.id: c.status for c in r.report.cases}
+    assert status == {"any-order": "PASS", "pinned-order": "FAIL", "missing-item": "FAIL"}
+    assert "any order" in r.by["any-order"].note
+
+
 def test_no_typed_value_in_the_report(recorded, tmp_path):
     r = run(recorded, tmp_path)
     text = r.report.model_dump_json().lower() + r.report.markdown().lower()

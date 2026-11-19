@@ -189,6 +189,9 @@ What a judge checks against, and how the replay compares:
 - **Addresses.** An empty fragment (`/#`, left by a link `href="#"`) is the same address as none;
   a fragment that is not empty is compared.
 - **Step numbers.** Drafts beside the whole recording use its numbers, in `after:`, ids and notes.
+- **Lists in any order.** A `texts` acceptance case with `unordered: true` compares the texts as
+  a multiset: the same items, each as often, in any order. Use it for a list whose order the
+  original does not guarantee (rows keyed by random ids, rows fetched by parallel requests).
 
 ## The look of the application
 

@@ -21,6 +21,11 @@ cases:
     check: texts            # see below
     locator: .todo-list li label
     equals: [{binding: 4}, {binding: 6}]   # the values bound to steps 4 and 6
+  - id: cart-titles
+    check: texts
+    locator: "#tbodyid > tr > td:nth-child(2)"
+    unordered: true         # the same items in any order (a multiset): for a list whose order
+    equals: [Nokia, Samsung]   # the recording does not show to be stable
   - id: one-left
     check: text
     locator: {role: status}                # or css text, {css}, {text}, {label}, {testid}
@@ -43,7 +48,8 @@ cases:
 ```
 
 Checks: `text` (the visible text of one element; `equals`, `contains` or `matches`), `texts`
-(the texts of every match, in order), `count`, `value` (a field's value), `checked`, `disabled`,
+(the texts of every match, in order; `unordered: true` compares them as a multiset, the same
+items as often in any order, for a list whose order is not stable), `count`, `value` (a field's value), `checked`, `disabled`,
 `visible`, `url` (path, query and fragment, the origin left out), `storage` (`present`, or the
 value at `path`), and `outcome`. A locator that must name one element and matches several is
 BLOCKED, never the first of them. Expected values are literals or `{binding: <step>}` (the value
@@ -95,6 +101,7 @@ class Case:
     database: str | None = None
     store: str | None = None
     reload: bool = False
+    unordered: bool = False  # texts: compare as a multiset, in any order
     fresh_context: bool = False
     automation: str | None = None
     case: str | None = None
@@ -175,6 +182,7 @@ def parse_case(entry: dict, n: int) -> Case:
         if entry.get(name) is not None:
             setattr(case, name, str(entry[name]))
     case.reload = bool(entry.get("reload", False))
+    case.unordered = bool(entry.get("unordered", False))
     case.fresh_context = bool(entry.get("fresh_context", False))
     case.basis = str(entry.get("basis") or "evidence")
     if case.problem:
@@ -193,6 +201,12 @@ def parse_case(entry: dict, n: int) -> Case:
         case.problem = f"{check} needs locator:"
     elif case.op is None and check not in ("visible", "outcome", "storage"):
         case.problem = "no expectation: give equals, contains or matches"
+    elif case.unordered and check != "texts":
+        case.problem = "unordered: applies to a texts check only"
+    elif case.unordered and case.op != "equals":
+        case.problem = "unordered: needs equals: (a list of the expected texts)"
+    elif case.unordered and not isinstance(case.expected, list):
+        case.problem = "unordered: equals: must be a list"
     elif _has_todo(case.expected) or _has_todo(case.locator) or _has_todo(case.path):
         case.problem = "not completed: a value is still TODO"
     return case
@@ -344,7 +358,26 @@ def _same(expected, actual) -> bool:
     return expected == actual
 
 
-def _compare(op: str | None, expected, actual) -> bool:
+def same_multiset(expected, actual) -> bool:
+    """The same items as often, in any order (each expected item matched to one actual item)."""
+    if not isinstance(expected, list) or not isinstance(actual, list):
+        return False
+    if len(expected) != len(actual):
+        return False
+    left = list(actual)
+    for want in expected:
+        for i, got in enumerate(left):
+            if _same(want, got):
+                del left[i]
+                break
+        else:
+            return False
+    return True
+
+
+def _compare(op: str | None, expected, actual, unordered: bool = False) -> bool:
+    if unordered and op in (None, "equals"):
+        return same_multiset(expected, actual)
     if op == "contains":
         if isinstance(actual, list):
             return any(_same(expected, a) for a in actual)
@@ -440,7 +473,9 @@ def evaluate(page, case: Case, expected, outcome_judge=None) -> tuple[str, Any, 
         return (PASS if _compare(case.op, expected, n) else FAIL), n, None
     if check == "texts":
         actual = [_norm(t) for t in loc.all_inner_texts()]
-        return (PASS if _compare(case.op, expected, actual) else FAIL), show(actual), None
+        ok = _compare(case.op, expected, actual, unordered=case.unordered)
+        note = "compared in any order (unordered)" if case.unordered else None
+        return (PASS if ok else FAIL), show(actual), note
     if n == 0:
         return FAIL, None, f"no element matches {describe_locator(case.locator)}"
     if n > 1:
@@ -621,6 +656,9 @@ def template(rec) -> str:
         "# or {binding: <step>} / {record: <step>} from bindings.yaml. Never a value of the real\n"
         "# system. Replace every TODO (a TODO blocks its case) and delete what does not matter.\n"
         "# hint: is for you; it is ignored. required: false makes a case optional.\n"
+        "# unordered: true on a texts case compares the list in any order (as a multiset); keep\n"
+        "# it unless the order is shown to be stable (a sortable key that is not random, or a\n"
+        "# sort control the recording used).\n"
     )
     body = {"version": 1, "recording": rec.id, "scope": [TODO], "excluded": [], "unobserved": [],
             "unsupported": [], "cases": cases}  # fmt: skip
