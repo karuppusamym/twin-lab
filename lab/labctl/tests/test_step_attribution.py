@@ -23,6 +23,8 @@ def test_step_at_allows_the_recorders_lag():
              (8, t0 + 148 * ms, "dialog")]  # fmt: skip
     assert stepfacts.step_at(steps, t0 + 0 * ms) == 6
     assert stepfacts.step_at([(5, t0, "goto"), (8, t0 + 148 * ms, "dialog")], t0 + ms) == 5
+    # the click logged 1 ms before, its hash change 7 ms after: still the click
+    assert stepfacts.step_at([(9, t0, "click"), (10, t0 + 8 * ms, "goto")], t0 + ms) == 9
 
 
 def test_step_facts_and_seed_plan_agree(tmp_path):
