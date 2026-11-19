@@ -1212,6 +1212,7 @@ def replay(
     blocked_requests: list[str] = []
     excluded_requests: list[str] = []
     step_shots: dict[int, str] = {}
+    running: dict = {"seq": None, "done": False}  # the step being replayed, for the guard
     browser_info = visual_setup = None
     service_worker = any(s.service_worker for s in rec.steps)
     with sync_playwright() as pw:
@@ -1242,7 +1243,12 @@ def replay(
                     return
                 else:
                     why = "a source origin" if o in omap.mapping else "an origin with no replica"
-                    blocked_requests.append(f"{r.request.method} {url[:200]} ({why})")
+                    # which step was running: a refusal fails a replay whose steps all passed,
+                    # so the report says where it came from
+                    when = (f"; during step {running['seq']}" if running["seq"] is not None
+                            else "; before the first step" if not running["done"]
+                            else "; after the last step")  # fmt: skip
+                    blocked_requests.append(f"{r.request.method} {url[:200]} ({why}{when})")
                 r.abort()
 
             ctx.route("**/*", route)
@@ -1292,6 +1298,7 @@ def replay(
                                     app=omap.name(_origin(step.url)) if _origin(step.url)
                                     else None)  # fmt: skip
                 reports.append(report)
+                running["seq"] = step.seq
                 if stopped:
                     report.status, report.outcome = "skipped", "not_run"
                     report.note = "not run: the replay stopped at an earlier step"
@@ -1378,6 +1385,7 @@ def replay(
                             stopped = True
                 if judging is not None:
                     judging.at(page, step.seq, step.seq)
+            running["seq"], running["done"] = None, True
             page = run.tabs.get(run.current) or next(iter(run.tabs.values()), None)
             if after is not None and page is not None:
                 after(page)

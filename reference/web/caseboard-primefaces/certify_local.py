@@ -180,6 +180,10 @@ def replay_summary(report) -> dict:
         "skipped": cov.skipped,
         "blocked": cov.unresolved + cov.missing_value + cov.unsupported + cov.unmapped,
         "differences": [d.text() for s in report.steps for d in s.differences],
+        # a request refused to the source (or an origin with no replica) fails a replay whose
+        # steps all passed: the summary says which, and during which step
+        "blocked_requests": list(report.blocked_requests)[:20],
+        "problems": list(report.problems)[:10],
         "first_failing_step": None if failing is None else {
             "seq": failing.seq, "action": failing.action, "selector": failing.selector,
             "status": failing.status, "note": failing.note,
