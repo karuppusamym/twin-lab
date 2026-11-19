@@ -172,7 +172,23 @@ does the same.
 To replay a recording that crosses applications in one run, give each source origin its
 replica: `labctl behaviour fidelity <recording> --map https://real.example=http://localhost:8101`
 (repeat per application), or keep a `replicas.yaml` beside the recording. What is deliberately
-left out of the comparison goes in a reviewed `scope.yaml`.
+left out of the comparison goes in a reviewed `scope.yaml`; an `element:` exclusion covers the
+element and everything inside it (a video player's parts, named by their own ids).
+
+What a judge checks against, and how the replay compares:
+- **Pictures.** A click gets no picture of its own: it is observed where its page settled. To
+  see the record a click acted on, open its `dom/<seq>.before.html` and the next step's picture
+  (`bindings.yaml` names both under `check_against:`); `screens/<seq>.png` of the click does not
+  exist. A picture taken after the next action had begun says `picture_settled: false`, and the
+  visual draft makes that state optional with the reason.
+- **Regions that change by themselves** (a carousel that rides, a video, a CSS animation, an
+  element that changed between two snapshots with no action between) are excluded in every
+  drafted visual state, each with its reason.
+- **Settling.** After each step the replay waits at least as long as the recorder did for a
+  quiet page (`recording.json`) and until the page's CSS transitions have ended (at most 3 s).
+- **Addresses.** An empty fragment (`/#`, left by a link `href="#"`) is the same address as none;
+  a fragment that is not empty is compared.
+- **Step numbers.** Drafts beside the whole recording use its numbers, in `after:`, ids and notes.
 
 ## The look of the application
 

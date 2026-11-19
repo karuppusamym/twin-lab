@@ -141,14 +141,71 @@ def screen_matches(pattern: str, url: str | None) -> bool:
     return fnmatch.fnmatchcase(path, pattern)
 
 
-def which(scope: Scope | None, element: str, url: str | None) -> Exclusion | None:
-    """The declaration that excludes a difference on `element` at a step on `url`, if any."""
+def subtree_names(html: str | None, selector: str) -> set[str]:
+    """The names differences use (`#id`, `tag[name='x']` and `tag#id.class` signatures, as
+    labctl.behaviour.fidelity.compare_dom writes them) of every element the selector matches in
+    a snapshot and of every element inside one: a widget's inner parts are named by their own
+    ids (`#example-video_html5_api`), never by the widget's class."""
+    from labctl.behaviour import dom as domlib
+    from labctl.behaviour.drafts import _matches, _parse
+
+    out: set[str] = set()
+    parsed = _parse(selector or "")
+    if not html or not parsed:
+        return out
+    root = domlib.parse_html(html)
+
+    def sig(node) -> str:
+        s = node.tag + (f"#{node.id}" if node.id else "")
+        return s + "".join(f".{c}" for c in node.classes if c not in domlib.POINTER_CLASSES)
+
+    inside: set[int] = set()
+    sigs: set[str] = set()
+    for top in [n for n in domlib._walk(root) if _matches(n, parsed)]:
+        for node in [top, *domlib._walk(top)]:
+            if not node.tag or node.tag.startswith("#") or id(node) in inside:
+                continue
+            inside.add(id(node))
+            if node.id:
+                out.add(f"#{node.id}")
+            if node.attrs.get("name") and node.tag in domlib.INTERACTIVE:
+                out.add(f"{node.tag}[name='{node.attrs['name']}']")
+            sigs.add(sig(node))
+    if sigs:
+        # a signature an element outside the matched ones also has (`a.nav-link`) is not theirs
+        # alone: a difference on it is still compared
+        outside = {sig(n) for n in domlib._walk(root)
+                   if n.tag and id(n) not in inside}  # fmt: skip
+        out |= {s for s in sigs if "#" in s or s not in outside}
+    return out
+
+
+def resolve(scope: Scope | None, *snapshots: str | None) -> dict[str, set[str]]:
+    """exclusion id -> the names of the elements its `element:` matches, with everything inside
+    them, in these snapshots (the recorded one, and the live one for what only the replica's
+    widget has)."""
+    if scope is None:
+        return {}
+    out: dict[str, set[str]] = {}
+    for ex in scope.usable:
+        if ex.element:
+            out[ex.id] = set().union(*(subtree_names(h, ex.element) for h in snapshots))
+    return out
+
+
+def which(scope: Scope | None, element: str, url: str | None,
+          names: dict[str, set[str]] | None = None) -> Exclusion | None:  # fmt: skip
+    """The declaration that excludes a difference on `element` at a step on `url`, if any.
+    `names` (from `resolve`) also lets an element exclusion cover the elements inside the one
+    it names."""
     if scope is None:
         return None
     for ex in scope.usable:
         if ex.screen and screen_matches(ex.screen, url):
             return ex
         if ex.element and element_matches(ex.element, element):
+            return ex
+        if ex.element and names and element in names.get(ex.id, ()):
             return ex
     return None
 

@@ -2,6 +2,31 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Demoblaze blind rebuild, round 2: the lab's own replay and judging defects
+The judge's official replay failed only on defects in the lab's tooling; each is fixed with a
+test (`test_replay_empty_fragment.py`, `test_replay_settle.py`,
+`test_recorder_unsettled_picture.py`, `test_visual_self_changing.py`,
+`test_scope_element_subtree.py`, `test_draft_numbering.py`, `test_replay_refused_request.py`):
+- **Empty fragment**: `/#` (a link `href="#"`) is the same address as `/` in the replay's
+  address compare; a fragment that is not empty is still compared. The origin map keeps the
+  recorded empty fragment; the recorder writes the address as the browser shows it.
+- **Settling**: after each step (typing aside) the replay waits at least the recorder's quiet
+  time (`recording.json`) and until running CSS transitions and animations have ended (read-only
+  `document.getAnimations()`, at most 3 s; endless ones are never waited for).
+- **Unsettled pictures**: a recorder picture taken after the next action began is kept and
+  marked `picture_settled: false` (older recordings: read by the quiet time); the visual draft
+  makes that state optional with the reason.
+- **Self-changing regions**: the visual draft excludes riding carousels, videos, CSS animations
+  and elements that changed with no action between, in every state, with the reason.
+- **Element exclusions** in `scope.yaml` cover the element and everything inside it, resolved
+  against the recorded (and live) snapshot.
+- **Numbering and pointers**: drafted acceptance ids and notes use the numbering of `after:`;
+  `bindings.yaml` says which files show a clicked record (`check_against:` its `before`
+  snapshot and the next step's picture).
+- **Refused requests** name the step they came during: with an origin map one fails a replay
+  whose steps all passed (the one cause in `fidelity.py` for the PrimeFaces reference's
+  unreproduced fail).
+
 ## 2026-11-19 — Demoblaze package, second trial: what the builder and the judge could not use
 A package built from the public Demoblaze recording (with the approved public-data declaration),
 a blind rebuild from it and a judge's replay found these; each is fixed in `labctl` with a test

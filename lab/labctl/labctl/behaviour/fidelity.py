@@ -418,7 +418,7 @@ def _rebase(url: str, base_url: str | None) -> str:
     b, u = urlsplit(base_url), urlsplit(url)
     if u.scheme not in ("http", "https"):  # about:blank (a new tab) is no address of the app
         return url
-    return urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment))
+    return _keep_empty_fragment(url, urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment)))
 
 
 SETTLE_MAX_MS = 30000
@@ -451,12 +451,53 @@ def _settle(page, settle_ms: int, page_work: bool = True) -> None:
     if not hasattr(page, "_tl_inflight"):
         page.wait_for_timeout(settle_ms)
         return
-    quiet = waited = 0
+    quiet = waited = moving = 0
     while quiet < settle_ms and waited < SETTLE_MAX_MS:
         page.wait_for_timeout(50)
         waited += 50
         idle = page._tl_inflight == 0 and not (page_work and _page_busy(page))
+        if idle and page_work and moving < ANIMATION_MAX_MS and _animating(page):
+            # a dialog fading out, a panel sliding in: the recorder's snapshot shows the end
+            moving += 50
+            idle = False
         quiet = quiet + 50 if idle else 0
+
+
+# How long a replay waits for CSS transitions and animations to end, at most, per step: a page
+# whose transitions never stop (a carousel sliding every few seconds) is compared after it.
+ANIMATION_MAX_MS = 3000
+# Read-only: a CSS transition or animation (or a Web Animation) running now that ends by itself.
+# One that repeats forever (a spinner) is never waited for.
+ANIMATING_JS = """() => {
+  try {
+    return document.getAnimations().some(a => {
+      if (a.playState !== "running" || !a.effect) return false;
+      const end = a.effect.getComputedTiming().endTime;
+      return Number.isFinite(end) && end > 0;
+    });
+  } catch (e) { return false; }
+}"""
+
+
+def _animating(page) -> bool:
+    try:
+        return bool(page.evaluate(ANIMATING_JS))
+    except Exception:  # noqa: BLE001 - a page that is navigating is not animating in this sense
+        return False
+
+
+def recorder_quiet_ms(rec: Recording) -> int | None:
+    """How long the recorder waited for a quiet page before each snapshot (`recording.json`,
+    settle.quiet_ms), or None when the recording does not say."""
+    import json
+
+    path = Path(rec.path) / "recording.json"
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        quiet = int((meta.get("settle") or {}).get("quiet_ms"))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    return quiet if quiet > 0 else None
 
 
 def _page_busy(page) -> bool:
@@ -595,7 +636,8 @@ class OriginMap:
         if target is None:
             return None
         b = urlsplit(target)
-        return urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment))
+        return _keep_empty_fragment(url or "",
+                                    urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment)))  # fmt: skip
 
     def name(self, origin: str | None) -> str | None:
         return self.names.get(origin or "") or origin or None
@@ -1131,6 +1173,10 @@ def replay(
     else:
         bnd_path = None
     size, run_viewport = _viewport(viewport, vspec)
+    # After a step the replay waits as the recorder did before its snapshot: for a quiet page at
+    # least as long, and until the page's CSS transitions and animations have ended (_settle). A
+    # typed value's snapshot was taken when the person moved on: `settle_ms` alone.
+    step_settle = max(settle_ms, recorder_quiet_ms(rec) or 0)
     reports: list[StepReport] = []
     problems: list[str] = recording_damage(rec)
     stopped = False
@@ -1166,6 +1212,7 @@ def replay(
     blocked_requests: list[str] = []
     excluded_requests: list[str] = []
     step_shots: dict[int, str] = {}
+    running: dict = {"seq": None, "done": False}  # the step being replayed, for the guard
     browser_info = visual_setup = None
     service_worker = any(s.service_worker for s in rec.steps)
     with sync_playwright() as pw:
@@ -1196,7 +1243,12 @@ def replay(
                     return
                 else:
                     why = "a source origin" if o in omap.mapping else "an origin with no replica"
-                    blocked_requests.append(f"{r.request.method} {url[:200]} ({why})")
+                    # which step was running: a refusal fails a replay whose steps all passed,
+                    # so the report says where it came from
+                    when = (f"; during step {running['seq']}" if running["seq"] is not None
+                            else "; before the first step" if not running["done"]
+                            else "; after the last step")  # fmt: skip
+                    blocked_requests.append(f"{r.request.method} {url[:200]} ({why}{when})")
                 r.abort()
 
             ctx.route("**/*", route)
@@ -1214,7 +1266,7 @@ def replay(
                 vis_mod.prepare(p, vspec)
             base_mod.apply(ctx, p, base, replica_origin)
             p.goto(url)
-            _settle(p, settle_ms)
+            _settle(p, step_settle)
             return ctx, p
 
         try:
@@ -1231,7 +1283,7 @@ def replay(
                 judging = judge_mod.Judging(
                     rec, spec, vspec, binding=binding, record=record_title, artifacts=artifacts,
                     outcome_judge=outcome_judge, fresh=fresh, run_viewport=run_viewport,
-                    settle=lambda p: _settle(p, settle_ms))  # fmt: skip
+                    settle=lambda p: _settle(p, step_settle))  # fmt: skip
             if not stopped and base is not None:
                 try:
                     notes.update(base_mod.apply(context, page, base, replica_origin))
@@ -1246,6 +1298,7 @@ def replay(
                                     app=omap.name(_origin(step.url)) if _origin(step.url)
                                     else None)  # fmt: skip
                 reports.append(report)
+                running["seq"] = step.seq
                 if stopped:
                     report.status, report.outcome = "skipped", "not_run"
                     report.note = "not run: the replay stopped at an earlier step"
@@ -1299,7 +1352,8 @@ def replay(
                 if step.action == "tab-close" or page is None or page.is_closed():
                     reached.add(step.seq)
                     continue
-                _settle(page, settle_ms, page_work=step.action != "type")
+                typed = step.action == "type"
+                _settle(page, settle_ms if typed else step_settle, page_work=not typed)
                 reached.add(step.seq)
                 report.replica_origin = _origin(page.url) or None
                 if step.seq in deferred:
@@ -1315,8 +1369,10 @@ def replay(
                     if placed is not None:  # ids that were a typed value: as recorded
                         live = placed.redact_html(live)
                     diffs = compare_dom(expected_html, live, step.seq, supplied)
+                    # an element exclusion covers the element and what is inside it
+                    names = scope_mod.resolve(sc, expected_html, live) if diffs else {}
                     for d in diffs:
-                        ex = scope_mod.which(sc, d.element, step.url)
+                        ex = scope_mod.which(sc, d.element, step.url, names)
                         if ex is None:
                             report.differences.append(d)
                         else:
@@ -1329,6 +1385,7 @@ def replay(
                             stopped = True
                 if judging is not None:
                     judging.at(page, step.seq, step.seq)
+            running["seq"], running["done"] = None, True
             page = run.tabs.get(run.current) or next(iter(run.tabs.values()), None)
             if after is not None and page is not None:
                 after(page)
@@ -1598,8 +1655,21 @@ _SESSION_IN_PATH = re.compile(r"(;jsessionid=)[^;/?#]*", re.I)
 def same_address(url: str) -> str:
     """An address as two sessions can share it. A Java server writes the session's id into the
     path (`/login.xhtml;jsessionid=node01ab...`) until it knows the browser keeps cookies; the id
-    is new in every session, so that it is there is compared, never its value."""
-    return _SESSION_IN_PATH.sub(r"\1*", url)
+    is new in every session, so that it is there is compared, never its value.
+
+    An empty fragment is no fragment: a link `href="#"` leaves the address ending in `#`, which
+    names no part of the page (and an older recorder wrote the address without it). A fragment
+    that is not empty (`#/orders`, `#section`) is part of the address and still compared."""
+    url = _SESSION_IN_PATH.sub(r"\1*", url)
+    return url[:-1] if url.endswith("#") else url
+
+
+def _keep_empty_fragment(original: str, rebuilt: str) -> str:
+    """`urlunsplit` drops an empty fragment (`/#` becomes `/`): put it back, so a replayed
+    address is the recorded one."""
+    if original.endswith("#") and not rebuilt.endswith("#") and "#" not in rebuilt:
+        return rebuilt + "#"
+    return rebuilt
 
 
 def _wait_address(page, url: str, timeout_ms: int = 5000) -> None:

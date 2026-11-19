@@ -146,9 +146,12 @@ def _settled(raw: list[dict], st: dict) -> list[dict]:
     return out
 
 
-def acceptance_cases(part, records: list[dict]) -> list[dict]:
+def acceptance_cases(part, records: list[dict], number=None) -> list[dict]:
     """Cases from what the recording visibly showed (see the module's doc); `part` is a
-    `labctl.seedplan.Part`, `records` its record bindings (`seedplan.record_bindings`)."""
+    `labctl.seedplan.Part`, `records` its record bindings (`seedplan.record_bindings`).
+    `number(seq)` is the step number ids and notes use (the whole recording's, when the cases
+    are for it): the same numbering `after:` ends up in. By default the part's own."""
+    num = (lambda seq: number(seq) or seq) if number else (lambda seq: seq)
     out: list[dict] = []
     seen: set[str] = set()
     by_seq = {s["seq"]: s for s in part.raw}
@@ -168,17 +171,17 @@ def acceptance_cases(part, records: list[dict]) -> list[dict]:
         earlier = [s["seq"] for s in part.raw if s["seq"] < st["seq"] and s.get("dom")]
         n = len(select(before, rows)) if before else 0
         if n and earlier:
-            add({"id": f"rows-before-{st['seq']}", "after": earlier[-1], "check": "count",
+            add({"id": f"rows-before-{num(st['seq'])}", "after": earlier[-1], "check": "count",
                  "locator": rows, "equals": n, "basis": "evidence", "required": False,
-                 "note": f"the list showed {n} row(s) when step {st['seq']} acted on one"})  # fmt: skip
+                 "note": f"the list showed {n} row(s) when step {num(st['seq'])} acted on one"})  # fmt: skip
         later = _settled(part.raw, st)
         if later:
             after_html = part.doms.get(later[-1]["seq"]) or ""
             m = len(select(after_html, rows))
             if m and m != n:
-                add({"id": f"rows-after-{st['seq']}", "after": later[-1]["seq"], "check": "count",
+                add({"id": f"rows-after-{num(st['seq'])}", "after": later[-1]["seq"], "check": "count",
                      "locator": rows, "equals": m, "basis": "evidence", "required": False,
-                     "note": f"step {st['seq']} changed the list from {n} to {m} row(s)"})  # fmt: skip
+                     "note": f"step {num(st['seq'])} changed the list from {n} to {m} row(s)"})  # fmt: skip
     for r in records:
         title = r.get("record")
         if not title:
@@ -194,9 +197,9 @@ def acceptance_cases(part, records: list[dict]) -> list[dict]:
         inner = [x for x in nodes if not any(c in nodes for c in domlib._walk(x))]
         loc = next((sel for x in inner if (sel := _locator_of(x, html))), None)
         if loc and target["seq"] != r["n"]:
-            add({"id": f"record-shown-{r['n']}", "after": target["seq"], "check": "text",
+            add({"id": f"record-shown-{num(r['n'])}", "after": target["seq"], "check": "text",
                  "locator": loc, "equals": {"record": r["n"]}, "basis": "evidence", "required": False,
-                 "note": f"the page step {r['n']} opened showed the record it acted on"})  # fmt: skip
+                 "note": f"the page step {num(r['n'])} opened showed the record it acted on"})  # fmt: skip
     return out
 
 
@@ -241,16 +244,23 @@ def visual_draft(rec, fonts_carried: bool) -> str:
 
     text = visual.template(rec)
     data = yaml.safe_load(text) or {}
+    moving = [ln for ln in text.splitlines() if ln.startswith("#   ")]
     for st in data.get("states") or []:
         st["mode"], st["max_ratio"], st["tolerance"] = "threshold", VISUAL_RATIO, VISUAL_TOLERANCE
-        if not fonts_carried:
-            st["exclude"] = [dict(TEXT_REGIONS)]
+        if not fonts_carried:  # with the regions that change by themselves (the template's)
+            st["exclude"] = [dict(TEXT_REGIONS), *(st.get("exclude") or [])]
     head = ("# DRAFT, unapproved: one state per recorder picture. threshold mode: up to "
             f"{VISUAL_RATIO:.0%} of the\n# compared pixels may differ (tolerance {VISUAL_TOLERANCE}"
             " per channel), so anti-aliasing and\n# sub-pixel layout do not fail a state.")  # fmt: skip
     head += ("\n# The package carries no font (by design): the text regions are left out\n"
              "# (exclude), since a fallback font never draws the original's pixels.\n"
              if not fonts_carried else "\n")  # fmt: skip
+    if moving:
+        head += ("# Regions that change by themselves are excluded in every state (delete an entry\n"
+                 "# to compare it):\n" + "\n".join(moving) + "\n")  # fmt: skip
+    if any(st.get("required") is False for st in data.get("states") or []):
+        head += ("# A state whose recorder picture is not settled (the next action had begun when it\n"
+                 "# was taken) is optional: its note says why.\n")  # fmt: skip
     head += "# For a strict comparison set mode: exact, max_ratio: 0.0, tolerance: 0.\n"
     return head + yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 

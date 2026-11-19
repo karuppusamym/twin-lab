@@ -144,6 +144,27 @@ def file_needs(rec: Recording) -> list[Need]:
             for s in rec.steps if s.action == "upload"]  # fmt: skip
 
 
+def where_to_check(rec: Recording, seq: int) -> str | None:
+    """The files that show the record a step acted on: the page as the action met it
+    (`dom/<seq>.before.html`) and the first recorder picture from that step on. A click gets
+    no picture of its own (it is observed where its page settled), so that picture is usually
+    the next step's: `screens/<seq>.png` of the click itself does not exist."""
+    from labctl.behaviour.visual import pictures_of
+
+    step = next((s for s in rec.steps if s.seq == seq), None)
+    if step is None or not rec.path:
+        return None
+    parts = []
+    if step.dom_before and (Path(rec.path) / step.dom_before).is_file():
+        parts.append(f"{step.dom_before} (the page as the step met it)")
+    pictures = pictures_of(Path(rec.path))
+    later = sorted(p for p in pictures if p >= seq)
+    if later:
+        whose = "this step's picture" if later[0] == seq else f"the picture after step {later[0]}"
+        parts.append(f"{pictures[later[0]]} ({whose})")
+    return "; ".join(parts) or None
+
+
 def template(rec: Recording, existing: Bindings | None = None) -> str:
     """The bindings file for a recording: every step that needs a value, with its shape."""
     existing = existing or Bindings()
@@ -171,13 +192,17 @@ def template(rec: Recording, existing: Bindings | None = None) -> str:
             if n.seq in existing.generated_records and entry["record"] is not None:
                 entry["generated"] = entry["record"]
                 n.note = "read from the evidence: the clicked element holds this seed row's title"
+            seen = where_to_check(rec, n.seq)
+            if seen:
+                entry["check_against"] = seen
         if n.note:
             entry["note"] = n.note
     head = (
         "# Synthetic values for replaying this recording, one per step. Never a real value.\n"
         "# value: what the step types or selects (or index: the option's position). record: the\n"
         "# title of the record the step acts on. file: a synthetic file to upload. shape is what\n"
-        "# was recorded (letters A, digits 9), for reference only.\n"
+        "# was recorded (letters A, digits 9), for reference only. check_against: the files that\n"
+        "# show the record a step acted on (a click has no picture of its own).\n"
     )
     body: dict = {"version": 1, "recording": rec.id, "steps": steps}
     if existing.outside:
