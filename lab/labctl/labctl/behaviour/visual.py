@@ -409,15 +409,108 @@ def check_state(page, st: State, spec: Spec, rec_path: Path, pictures: dict[int,
     return res
 
 
+CAROUSEL_REASON = ("a carousel that advances by itself ({how}): which slide shows depends on when "
+                   "the picture is taken, not on the application")  # fmt: skip
+VIDEO_REASON = "a video: the frame shown depends on when the picture is taken"
+ANIMATION_REASON = "a CSS animation runs here: what it draws depends on when the picture is taken"
+CHANGED_REASON = ("changed by itself between the snapshots after step {a} and step {b} of the same "
+                  "screen, with no action between")  # fmt: skip
+_USER = ("click", "dblclick", "type", "select", "check", "uncheck", "keypress", "submit", "upload",
+         "goto", "drag")  # fmt: skip
+
+
+def _region_of(node) -> str | None:
+    if node.id:
+        return f"#{node.id}"
+    if node.classes:
+        return node.tag + "".join(f".{c}" for c in node.classes[:2])
+    return None
+
+
+def self_changing(rec) -> list[dict]:
+    """Regions of the recorded pages that change by themselves, so a picture compare would
+    judge the moment it was taken: Bootstrap carousels that ride (`data-ride="carousel"`,
+    `data-bs-ride`), video elements, CSS animations written on an element, and elements whose
+    content changed between two snapshots of the same screen with no action between (a dialog
+    holds the page; nothing the person did). Each is `{css, reason}`, for `exclude:`."""
+    import re
+    from collections import Counter
+    from urllib.parse import urlsplit
+
+    from labctl.behaviour import dom as domlib
+
+    found: dict[str, str] = {}
+    snaps: list[tuple[object, object]] = []  # (step, parsed snapshot)
+    steps = list(getattr(rec, "steps", None) or [])
+    for step in steps:
+        html = rec.dom(step)
+        if not html:
+            continue
+        root = domlib.parse_html(html)
+        snaps.append((step, root))
+        for node in domlib._walk(root):
+            classes = set(node.classes)
+            ride = node.attrs.get("data-ride") == "carousel" or "data-bs-ride" in node.attrs
+            if "carousel" in classes and ride:
+                how = ("data-ride=carousel" if node.attrs.get("data-ride") == "carousel"
+                       else "data-bs-ride")  # fmt: skip
+                inner = any("carousel-inner" in c.classes for c in node.children)
+                base = f"#{node.id}" if node.id else ".carousel"
+                found.setdefault(f"{base} .carousel-inner" if inner else base,
+                                 CAROUSEL_REASON.format(how=how))  # fmt: skip
+            elif node.tag == "video":
+                found.setdefault("video", VIDEO_REASON)
+            elif node.tag == "marquee" or re.search(
+                r"(?:^|;)\s*animation(?:-name)?\s*:\s*(?!none\b)[^;]+",
+                node.attrs.get("style") or "",
+            ):
+                region = _region_of(node) or node.tag
+                found.setdefault(region, ANIMATION_REASON)
+    for (a, ra), (b, rb) in zip(snaps, snaps[1:], strict=False):
+        between = [s for s in steps if a.seq < s.seq <= b.seq]
+        if any(s.action in _USER for s in between):
+            continue
+        ua, ub = urlsplit(a.url or ""), urlsplit(b.url or "")
+        if (ua.path, ua.query) != (ub.path, ub.query):
+            continue
+        # an id the page uses twice (or a masked one, `item-999`, that many records share) names
+        # no one element: such elements are not paired
+        ids_a = Counter(n.id for n in domlib._walk(ra) if n.id)
+        ids_b = Counter(n.id for n in domlib._walk(rb) if n.id)
+        before = {n.id: n for n in domlib._walk(ra)
+                  if n.id and ids_a[n.id] == 1 and ids_b[n.id] == 1
+                  and not re.search(r"999", n.id)}  # fmt: skip
+        for n in domlib._walk(rb):
+            o = before.get(n.id) if n.id else None
+            if o is None or n.tag in ("html", "body"):
+                continue
+            own = [c for c in n.children if not c.id]
+            olds = [c for c in o.children if not c.id]
+            changed = (set(n.classes) != set(o.classes) or domlib._text(n) != domlib._text(o)
+                       or [(c.tag, c.classes) for c in own] != [(c.tag, c.classes) for c in olds])  # fmt: skip
+            if changed and not any(d.id and d.id in before and _changed(d, before[d.id])
+                                   for d in domlib._walk(n)):  # fmt: skip
+                found.setdefault(f"#{n.id}", CHANGED_REASON.format(a=a.seq, b=b.seq))
+    return [{"css": css, "reason": why} for css, why in found.items()]
+
+
+def _changed(n, o) -> bool:
+    from labctl.behaviour import dom as domlib
+
+    return set(n.classes) != set(o.classes) or domlib._text(n) != domlib._text(o)
+
+
 def template(rec) -> str:
     pictures = pictures_of(rec.path)
     unsettled = unsettled_pictures(rec.path)
+    moving = self_changing(rec) if pictures else []
     states = []
     for seq in sorted(pictures):
         # threshold by default: a replica drawn with another font or a sub-pixel shift fails
         # exact at once; a person who wants zero differing pixels sets mode: exact
         st = {"id": f"after-step-{seq}", "after": seq, "required": True,
-              "mode": "threshold", "max_ratio": 0.02, "tolerance": 16, "exclude": []}  # fmt: skip
+              "mode": "threshold", "max_ratio": 0.02, "tolerance": 16,
+              "exclude": [dict(m) for m in moving]}  # fmt: skip
         if seq in unsettled:
             # the picture may show the next step's effect: reported, never deciding the result
             st["required"] = False
@@ -435,6 +528,10 @@ def template(rec) -> str:
         + (f"# The recorder's pictures are {size[0]}x{size[1]}.\n" if size else
            "# This recording has no pictures: every state needs an approved image.\n")
     )  # fmt: skip
+    if moving:
+        head += ("# Excluded in every state by default: regions that change by themselves (delete an\n"
+                 "# entry to compare it):\n"
+                 + "".join(f"#   {m['css']}: {m['reason']}\n" for m in moving))  # fmt: skip
     body = {"version": 1, "recording": rec.id, "viewport": "desktop", "fonts": [],
             "states": states}  # fmt: skip
     return head + yaml.safe_dump(body, sort_keys=False, allow_unicode=True)

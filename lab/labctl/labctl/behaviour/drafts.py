@@ -241,16 +241,23 @@ def visual_draft(rec, fonts_carried: bool) -> str:
 
     text = visual.template(rec)
     data = yaml.safe_load(text) or {}
+    moving = [ln for ln in text.splitlines() if ln.startswith("#   ")]
     for st in data.get("states") or []:
         st["mode"], st["max_ratio"], st["tolerance"] = "threshold", VISUAL_RATIO, VISUAL_TOLERANCE
-        if not fonts_carried:
-            st["exclude"] = [dict(TEXT_REGIONS)]
+        if not fonts_carried:  # with the regions that change by themselves (the template's)
+            st["exclude"] = [dict(TEXT_REGIONS), *(st.get("exclude") or [])]
     head = ("# DRAFT, unapproved: one state per recorder picture. threshold mode: up to "
             f"{VISUAL_RATIO:.0%} of the\n# compared pixels may differ (tolerance {VISUAL_TOLERANCE}"
             " per channel), so anti-aliasing and\n# sub-pixel layout do not fail a state.")  # fmt: skip
     head += ("\n# The package carries no font (by design): the text regions are left out\n"
              "# (exclude), since a fallback font never draws the original's pixels.\n"
              if not fonts_carried else "\n")  # fmt: skip
+    if moving:
+        head += ("# Regions that change by themselves are excluded in every state (delete an entry\n"
+                 "# to compare it):\n" + "\n".join(moving) + "\n")  # fmt: skip
+    if any(st.get("required") is False for st in data.get("states") or []):
+        head += ("# A state whose recorder picture is not settled (the next action had begun when it\n"
+                 "# was taken) is optional: its note says why.\n")  # fmt: skip
     head += "# For a strict comparison set mode: exact, max_ratio: 0.0, tolerance: 0.\n"
     return head + yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 
