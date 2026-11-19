@@ -3,9 +3,9 @@
   "technology": "WinForms",
   "version": ".NET 6",
   "surface": "desktop",
-  "result": "CAPTURE VERIFIED",
-  "reason": "rebuild not run: no rebuild replay report is named in the entry",
-  "date": "2026-11-18",
+  "result": "CERTIFIED",
+  "reason": "all four gates passed",
+  "date": "2026-11-19",
   "gates": {
     "detect": {
       "status": "PASS",
@@ -54,14 +54,19 @@
       }
     },
     "rebuild": {
-      "status": "NOT RUN",
-      "detail": "no rebuild replay report is named in the entry",
-      "facts": {}
+      "status": "PASS",
+      "detail": "certification/rebuilds/winforms-casedesk-blind2.json: VERIFIED COMPLETE",
+      "facts": {
+        "report": "certification/rebuilds/winforms-casedesk-blind2.json",
+        "status": "pass",
+        "verdict": "PASS WITHIN DECLARED SCOPE",
+        "assurance": "VERIFIED COMPLETE"
+      }
     }
   },
   "not_covered": [
     ".NET Framework 4.x builds",
     "third-party grids and custom-drawn controls",
-    "a rebuild by a coding agent"
+    "a rebuild judged on another machine or DPI than the recording's"
   ]
 }

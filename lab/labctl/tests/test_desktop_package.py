@@ -206,3 +206,26 @@ def test_geometry_rows_and_picture_comparison() -> None:
     w, h, rgb = pictures.read_png(png)
     other = pictures.write_png(w, h, bytes(255 - b for b in rgb))
     assert verify.picture_difference(png, other) > 50
+
+
+def test_a_late_tree_is_not_used_for_rows_pictures_or_the_look(tmp_path: Path) -> None:
+    """A step whose window tree was read only after later steps (`tree_late`, set by the
+    recorder) gives no rows, no picture and no window picture; its order and typed shape stay."""
+    root = _lab(tmp_path)
+    rec = root / "evidence" / "casedesk" / "flow-1"
+    lines = (rec / "steps.jsonl").read_text(encoding="utf-8").splitlines()
+    steps = [json.loads(line) for line in lines]
+    for s in steps:
+        if s["seq"] in (11, 14):  # the main window as it opens, and after Enter
+            s["tree_late"] = True
+    (rec / "steps.jsonl").write_text("\n".join(json.dumps(s) for s in steps) + "\n",
+                                     encoding="utf-8")  # fmt: skip
+    factory.generate(root, "casedesk", "CaseDesk")
+    app = root / "apps" / "casedesk"
+    doc = json.loads((app / "steps" / "flow-1.json").read_text(encoding="utf-8"))
+    by_n = {s["n"]: s for s in doc["steps"]}
+    assert by_n[14]["tree_late"] is True and "rows_after" not in by_n[14]
+    assert "picture" not in by_n[14] and by_n[14]["action"] == "key"
+    assert not (app / "steps" / "flow-1" / "0014.png").exists()
+    windows = json.loads((app / "look" / "windows.json").read_text(encoding="utf-8"))
+    assert windows["MainForm"]["from"] != "flow-1 step 11"

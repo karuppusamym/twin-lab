@@ -312,6 +312,11 @@ class _Hooks(threading.Thread):
 # --- the recorder ----------------------------------------------------------------------------------
 
 
+# Actions a person takes (the recorder's own events: window opened, closed, focus, menu shown).
+USER_INPUT = {"click", "double_click", "right_click", "type", "select", "toggle", "expand",
+              "collapse", "menu", "key"}  # fmt: skip
+
+
 class Recorder:
     """Records the windows of a set of processes until they exit, `stop()` says so, Ctrl+C, or
     `max_seconds`."""
@@ -893,6 +898,15 @@ class Recorder:
             hwnd = self._window_of(a)
             if a.get("snap") is not None and after.get(hwnd) is None and a["kind"] == "window_open":
                 after[hwnd] = a["snap"]
+        # One snapshot per window and batch: a step followed in the same batch by another user
+        # action in its window gets a tree (and picture) of a later state. Say so on the step.
+        for i, a in enumerate(batch):
+            w = self._window_of(a)
+            if any(self._window_of(b) == w and b["kind"] in USER_INPUT for b in batch[i + 1 :]):
+                if a["kind"] == "window_open" and a.get("snap") is not None:
+                    a["own_snap"] = True  # read when it opened: exact
+                else:
+                    a["tree_late"] = True
         for a in batch:
             if a["kind"] == "type" and self._unchanged(a, after):
                 continue
@@ -1080,10 +1094,14 @@ class Recorder:
                 step["invoked"] = self._locate(a["invoked_desc"], [before, snap])["selector"]
         elif kind == "menu" and desc:
             step["menu_path"] = self._menu_path(desc, [before, snap])
+        if a.get("tree_late"):
+            step["tree_late"] = True  # its tree and picture show a later state (see _finish)
         if a.get("effects"):
             # What the application did by itself because of this step: seen, not a user step.
             step["effects"] = [self._effect(e, after) for e in a["effects"]]
         tree_snap = snap if kind != "window_close" else None
+        if a.get("own_snap"):
+            tree_snap = a["snap"]
         if kind == "menu_open":
             tree_snap = a.get("snap") or self._snapshot(a["hwnd"])
             step["window"] = {k: self._window_info(a["owner"], self.trees.get(a["owner"])).get(k)

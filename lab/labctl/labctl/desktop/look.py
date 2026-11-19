@@ -174,7 +174,7 @@ def collect(recs: list[dmodel.Recording]) -> dict[str, _Window]:
                 if tree is not None:
                     win.menus.append((rec.id, s["seq"], tree, pic, last_menu.get(key, "menu")))
                 continue
-            if tree is not None and s.get("action") != "window_close":
+            if tree is not None and s.get("action") != "window_close" and not s.get("tree_late"):
                 win.snaps.append((rec.id, s["seq"], tree, pic))
     return wins
 

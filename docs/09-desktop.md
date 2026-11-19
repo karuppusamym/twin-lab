@@ -213,6 +213,33 @@ recordings of the three reference apps against a web package (Demoblaze, blind r
   the recorded shapes can match pixel for pixel.
 
 
+### Blind rebuild of CaseDesk (WinForms), 2026-11-19
+
+Method as the web trial's: record the reference flow, build the package, give only the unpacked
+package to a fresh coding agent (told not to read the repository, the reference application or
+anything else) to rebuild in .NET 6 WinForms with no NuGet, then replay the original
+recording against the rebuild with the package's own replay values and
+`--geometry --rows --pictures`, compare windows by eye, classify every failure. Trial files are
+outside the repository (`desktop-trial\`).
+
+| | Round 1 | Round 2 |
+|---|---|---|
+| Steps replayed / implied | 22 / 6 (8 failed) | 29 / 7 |
+| Structure (ids, names, types, classes, paths, states, items) | 0 differences | 0 |
+| Geometry (client areas, bounds within 2 px) and fonts | 0 | 0 |
+| Grid rows after each step | 0 | 0 |
+| Pictures above 1 % | main window 3.65–4.98 % (6 steps), case window 1.27 % (2 steps) | none (largest 0.84 %; 7 of 16 identical; the original app itself: largest 0.76 %) |
+| Verdict | FAIL | **PASS WITHIN DECLARED SCOPE, VERIFIED COMPLETE** |
+| Package gaps found | grid header (UI Automation height, not the property); label access keys; why `txtCaseNo` is named "Customer"; SQLite offline | none failing; reported: icon of a message box not listed, a combo box's inner parts, default buttons per window, the search rule |
+| Builder mistakes | none found (menu underlines under the replay, cause not found) | none |
+| Lab tooling | recorder snapshot lag (two steps; the original fails one of them too) | fixed (`tree_late`) |
+
+Round 2's report is `certification/rebuilds/winforms-casedesk-blind2.json`; the WinForms entry
+of the certification matrix is **CERTIFIED** on it. Both builders kept the data in a JSON file
+(SQLite needs a NuGet package) and built framework-dependent (a self-contained publish needs
+runtime packs from NuGet): stated in their notes, accepted by the task. Not done: a rebuild of
+the WPF or Swing application, and a judge run on another machine or DPI.
+
 ## Recording and verifying
 
 ```powershell
@@ -320,10 +347,12 @@ handles that error itself and pytest's fault handler reports it. The lookups suc
   picture: on CaseDeskSwing 14 of 21 pictures were deleted (the main window's table), so a Swing
   package has fewer pictures. OCR does not look for values shorter than four letters or
   digits; the masks still cover every place the tree shows.
-- **Snapshot timing**: a step's tree and picture are read after a batch of actions; after an
-  action that opens a modal message box, the owner's tree may be read only after the box
-  closed (CaseDesk step 25 shows the summary typed at step 30). `verify --pictures` reports
-  about 1 % there against the original application itself.
+- **Snapshot timing**: a window's tree and picture are read once per batch of actions (after
+  0.4 s of quiet). When a person or script keeps acting, a step followed in the same batch by
+  another action in its window gets a later state (CaseDesk: the Save click's tree showed the
+  summary typed four steps later). The recorder marks such a step `tree_late`; a window that
+  opened keeps the tree read when it opened. `verify` compares a late step's structure but not
+  its rows or picture; the package takes no picture, rows or field state from it.
 - WPF captions: the TextBlock a WPF button, header or label draws its text with is now kept as
   structure when its text is the control's own (`_Search` in `Search`); recordings made before
   hold it as a shape, so verify them against a fresh recording.

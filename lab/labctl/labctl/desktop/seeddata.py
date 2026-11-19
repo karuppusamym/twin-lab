@@ -90,7 +90,9 @@ def steps_doc(rec, root: Path, app_id: str) -> dict:
             if s.get(k) not in (None, "", []):
                 item[k] = s[k]
         tree = rec.tree(s.get("tree"))
-        if tree is not None:
+        if s.get("tree_late"):
+            item["tree_late"] = True
+        if tree is not None and not s.get("tree_late"):
             g = {sel: v["rows"] for sel, v in _grids(tree).items()}
             if g:
                 item["rows_after"] = g
@@ -98,7 +100,7 @@ def steps_doc(rec, root: Path, app_id: str) -> dict:
                 item["message"] = " ".join(n["name"] for n, _a, _i in locator.walk(tree)
                                            if n.get("type") == "Text"
                                            and n.get("name_is") == "message")  # fmt: skip
-        pic = s.get("picture")
+        pic = None if s.get("tree_late") else s.get("picture")
         if pic and (rec.path / pic).is_file():
             out_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(rec.path / pic, out_dir / f"{s['seq']:04d}.png")

@@ -517,11 +517,16 @@ def verify(exe: str, recording: Path, *, values: dict[str, str | list[str]] | No
                     tree = next((t for h, t in live.windows() if h == after), None)
                 if tree is not None:
                     diffs += compare_trees(recorded, tree, seq, supplied)
-                    if rows:
+                    late = bool(step.get("tree_late"))
+                    if late:
+                        note = "; ".join(x for x in (note, "the recording read this window only "
+                                         "after later steps: rows and picture not compared")
+                                         if x)  # fmt: skip
+                    if rows and not late:
                         diffs += compare_rows(recorded, tree, seq)
                     if geometry:
                         diffs += compare_geometry(recorded, tree, seq)
-                    if pictures_dir is not None:
+                    if pictures_dir is not None and not late:
                         pic_note, pic_diff = _compare_picture(live, after, rec, step, pictures_dir,
                                                               picture_threshold)  # fmt: skip
                         note = "; ".join(x for x in (note, pic_note) if x) or None

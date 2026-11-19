@@ -165,7 +165,7 @@ def build(recs, model) -> dict:
                             for c in by_key[key]["controls"]:
                                 if (c.get("label") or "").lower() == label:
                                     c["required"] = True
-            t = rec.tree(s.get("tree"))
+            t = None if s.get("tree_late") else rec.tree(s.get("tree"))
             if t is not None and key and s.get("action") not in ("window_close", "menu_open"):
                 last_tree[key] = t
     return {"format": "twinlab-desktop-rules/1", "windows": windows,
