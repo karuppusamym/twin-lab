@@ -877,6 +877,33 @@ class _Run:
     def act(self, step: RecStep) -> tuple[str | None, bool]:
         """Perform one step. (what found the target or how it was done, whether it was implied
         by an earlier step rather than performed)."""
+        how, implied = self._perform(step)
+        if step.opens_outside:
+            how = "; ".join(x for x in (how, self._window_outside(step)) if x)
+        return how, implied
+
+    def _window_outside(self, step: RecStep) -> str:
+        """The step opened another application's window in the source (a part of a split
+        recording): the replica must open one too. That window is the other application's, so
+        it is closed and not followed; the whole recording's replay follows it."""
+        import time
+
+        app = step.opens_outside.get("app") or "another application"
+        deadline = time.monotonic() + self.timeout_ms / 1000
+        while not self.popups and time.monotonic() < deadline:
+            (self.tabs.get(self.current) or next(iter(self.tabs.values()))).wait_for_timeout(50)
+        if not self.popups:
+            raise _NoWindow(f"the source opened a window of {app} here "
+                            f"({step.opens_outside.get('url') or 'address not recorded'}); the "
+                            "replica opened none")  # fmt: skip
+        page = self.popups.pop(0)
+        try:
+            page.close()
+        except Exception:  # noqa: BLE001 - a window that closed itself
+            pass
+        return f"opened a window of {app} (another application: closed, not followed)"
+
+    def _perform(self, step: RecStep) -> tuple[str | None, bool]:
         from labctl.locate import Unresolved, resolve, typed_values
 
         if step.action == "tab-open":
@@ -1041,6 +1068,10 @@ class _Run:
         else:
             page = self.new_page()
             how = "a new tab opened by the replay"
+            if step.opened_by_outside:
+                o = step.opened_by_outside
+                how += (f" (supplied from outside: opened by step {o.get('step')} of "
+                        f"{o.get('app')})")  # fmt: skip
         self.tabs[tab] = page
         self.current = tab
         return how, bool(step.opener)
@@ -1084,6 +1115,10 @@ class _Run:
 
 class _TabMissing(AssertionError):
     pass
+
+
+class _NoWindow(AssertionError):
+    """The source opened another application's window at this step; the replica opened none."""
 
 
 class _NoTab(AssertionError):
@@ -1227,16 +1262,30 @@ def replay(
             options.update(vis_mod.context_options(vspec))
             options["viewport"] = size
 
+        holder: dict = {"run": None}
+
         def guard(ctx):
             """Nothing of the replay goes to a source, or anywhere the map gives no replica."""
             if omap.as_recorded:
                 return
             allowed = omap.allowed()
             sources = set(omap.mapping) - allowed
+            # Another application's window, opened by a step of this part (`opens_outside`): its
+            # page load is answered with nothing, so the replay never reaches that application.
+            outside = {_origin(s.opens_outside.get("url") or "") for s in rec.steps
+                       if s.opens_outside} - allowed - {""}  # fmt: skip
 
             def route(r):
                 url = r.request.url
                 o = _origin(url)
+                if o in outside and holder["run"] is not None:
+                    try:
+                        own = r.request.frame.page in holder["run"].tabs.values()
+                    except Exception:  # noqa: BLE001 - a request with no frame yet
+                        own = True
+                    if not own:  # the window the replica opened, not a tab of the replay
+                        r.fulfill(status=200, content_type="text/html", body="")
+                        return
                 if not o or o in allowed or (not omap.strict and o not in sources):
                     r.continue_()
                     return
@@ -1277,6 +1326,7 @@ def replay(
             if setup is not None:
                 setup(context)
             run = _Run(context, rec, omap, vals, bnd, resolve_timeout_ms, settle_ms)
+            holder["run"] = run
             page = run.new_page()
             first_tab = next((s.tab for s in rec.steps if s.tab), None)
             run.adopt(first_tab, page)
