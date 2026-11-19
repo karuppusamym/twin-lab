@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -69,10 +70,47 @@ def recorded(tmp_path_factory):
     return out, steps
 
 
-def _colour(path):
-    from PIL import Image
+def _colour(path, x=390, y=290):
+    """The RGB colour of one pixel of a PNG the browser wrote (8-bit RGB or RGBA, not
+    interlaced), read with the standard library: CI has no imaging package."""
+    import struct
+    import zlib
 
-    return Image.open(path).convert("RGB").getpixel((390, 290))
+    data = Path(path).read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    pos, chunks, width = 8, [], 0
+    while pos < len(data):
+        (length,) = struct.unpack(">I", data[pos : pos + 4])
+        kind, body = data[pos + 4 : pos + 8], data[pos + 8 : pos + 8 + length]
+        if kind == b"IHDR":
+            width, _height, depth, colour, _c, _f, interlace = struct.unpack(">IIBBBBB", body)
+            assert depth == 8 and colour in (2, 6) and interlace == 0
+            bpp = 3 if colour == 2 else 4
+        elif kind == b"IDAT":
+            chunks.append(body)
+        pos += 12 + length
+    raw = zlib.decompress(b"".join(chunks))
+    stride = width * bpp
+    prev = bytearray(stride)
+    for row in range(y + 1):
+        start = row * (stride + 1)
+        kind, line = raw[start], bytearray(raw[start + 1 : start + 1 + stride])
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            b = prev[i]
+            c = prev[i - bpp] if i >= bpp else 0
+            if kind == 1:
+                line[i] = (line[i] + a) & 0xFF
+            elif kind == 2:
+                line[i] = (line[i] + b) & 0xFF
+            elif kind == 3:
+                line[i] = (line[i] + (a + b) // 2) & 0xFF
+            elif kind == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                pred = a if pa <= pb and pa <= pc else b if pb <= pc else c
+                line[i] = (line[i] + pred) & 0xFF
+        prev = line
+    return tuple(prev[x * bpp : x * bpp + 3])
 
 
 def test_the_typing_steps_picture_is_taken_before_the_click(recorded):
