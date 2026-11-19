@@ -2,6 +2,64 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Demoblaze package, second trial: what the builder and the judge could not use
+A package built from the public Demoblaze recording (with the approved public-data declaration),
+a blind rebuild from it and a judge's replay found these; each is fixed in `labctl` with a test
+(`tests/test_package_trial_fixes.py`, `test_package_trial_fixes2.py`,
+`test_recorder_record_rows.py`):
+- **Front end**: static HTML filled in the browser from an API is no longer a guessed
+  "server-rendered": `har.client_rendering` reads it from the recording (containers empty in the
+  served HTML and filled in the snapshots, answer values in the snapshots and not in the served
+  HTML) and says "static pages rendered in the browser from the API" with that evidence (likely).
+  Page addresses stay routes (the server sends the files).
+- **Origins**: state-changing requests are counted per origin (the pages' own, or the API origin
+  of the same site); the network note says the API origin's endpoints are in the endpoint files.
+- **Media origin**: a host of the pages' site that the application's configuration or code
+  names (`HLS_URL` in `/config.json`) is the application's media origin
+  (`network.json` `media_origins`: what it serves, an HLS playlist and segments): serve a
+  stand-in or leave the video out with a reason. Real third parties are unchanged.
+- **Static JSON configuration** (`/config.json`): a file, not a table; carried as
+  `apps/<app>/static/config.json` with its keys and local addresses (`http://localhost:18080`,
+  `.../hls`), never the real hosts. `static/` is a generated folder for the guard.
+- **Public data, consistently**: a declared value in an element with an id (`p#article`) is
+  carried in snapshots, `texts.json` and pictures; a number in an element of its own (`#totalp`)
+  and cart rows stay masked; capitalised parts of declared values (`Mac` of `MacBook`) pass the
+  look's check. Every record any answer returned reaches the seed (`/bycat`'s laptops and
+  monitors: 15 rows, one per id) and their declared photos are carried.
+- **Record bindings** from the evidence: the clicked row or card whose text has the recorded
+  shape holds exactly one seed title (rows of one shape: the page the click opened decides);
+  written to `steps/*.values.yaml` `records`, `steps/*.json` `record`, `navigation.json` `record`
+  and `bindings.yaml` (`generated:`); `TO DO` with candidates only when ambiguous. The replay
+  accepts a title that a row's text holds as a whole phrase, once.
+- **Drafts to judge with**, all unapproved: acceptance cases the recording showed (row counts,
+  the count after a delete, the record's title on the page a click opened), `visual.yaml`
+  (threshold mode, 2 %, tolerance 16; text regions left out when no font is carried; the
+  `labctl behaviour visual` template defaults to threshold too), `expected-actions.draft.yaml`
+  and a `scope.yaml` excluding the media player.
+- **Aliases**: `/index.html` beside `/` with the same document is one screen
+  (`sanitize.screen_aliases`); the brief says to serve both addresses, `navigation.json` lists
+  `aliases`. Relative links resolve against their page, so in-scope screens are no longer
+  "links that leave the scope".
+- **Look**: pictures are exactly the recorded viewport (1280 x 720; full-page screenshots were
+  1295 wide from a horizontal overflow); a video's `poster` (`/imgs/front.jpg`, drawn by video.js as
+  a background) is an interface image and carried; style text stays raw (`a>b`, not `a&gt;b`).
+- **Masking**: Bootstrap's behaviour attributes that point at elements (`data-target="#id"`,
+  `data-slide-to`), utility classes (`h-100`), `sizes` and declared query values
+  (`prod.html?idp_=1`) are kept; a row's own control (`Delete`) keeps its label.
+- **Replay and recorder**: a dialog after a hash navigation is armed for the click that caused
+  it; a record locator is checked against the page it was recorded on (the list itself may be
+  the identified element); a screen's snapshot is one with no dialog left closed by script.
+- **Smaller ones**: code-only endpoints (`/login`, `/signup`, `/check`, ...) get a stub API file
+  with the fields the code sends; each list states its observed order; `LastEvaluatedKey` keeps
+  its paging value; a dialog whose text the recording lost takes the code's, saying so; library
+  versions seen twice are not "certain"; template values say how many are left out.
+- **BUILD_TASK**: a builder with the package alone gets checks it can run without the repository,
+  labctl or Docker (start, open each screen at each address, compare with the pictures at the
+  viewport, run the replay values, navigation, API); section 4 is for builders in the repository.
+- Left open: without a declaration a record binding needs seed titles in the page (synthetic
+  rows never are), so it stays TO DO; G2 (carrying the application's scripts) stays an owner
+  opt-in; duplicate dialog texts in `codemap.json` are the code-map work's.
+
 ## 2026-11-18 — Desktop recorder: the four faults the certification runs found
 - WPF and Java Swing are now CAPTURE VERIFIED, as WinForms: all three pass detect, capture (20
   expected actions each) and self-replay (WinForms and WPF 29 of 36 steps verified, 7 covered by
