@@ -760,16 +760,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        self.wfile.write(b"retry: 3600000\n\n")
+        # A finite stream sent whole, with its length: the browser has the complete answer before
+        # the page closes the stream on `end`, so every browser version keeps its body in the HAR
+        # (a stream still open when the page closes it is aborted and keeps none).
+        parts = ["retry: 3600000\n\n"]
         for n in range(3):
             price = (p["price"] if p else 10) + n * 0.5
-            self.wfile.write(
-                f"id: {n + 1}\nevent: price\ndata: {json.dumps({'sku': sku, 'price': price})}\n\n".encode()
+            parts.append(
+                f"id: {n + 1}\nevent: price\ndata: {json.dumps({'sku': sku, 'price': price})}\n\n"
             )
-            self.wfile.flush()
-            time.sleep(0.05)
-        self.wfile.write(b"event: end\ndata: {}\n\n")
+        parts.append("event: end\ndata: {}\n\n")
+        body = "".join(parts).encode()
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
         self.wfile.flush()
         self.close_connection = True
 
