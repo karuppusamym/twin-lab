@@ -184,6 +184,15 @@ What a judge checks against, and how the replay compares:
 - **Regions that change by themselves** (a carousel that rides, a video, a CSS animation, an
   element that changed between two snapshots with no action between) are excluded in every
   drafted visual state, each with its reason.
+- **Text in the pictures.** Whether the visual draft leaves the text regions out is an explicit
+  option: `TWINLAB_DRAFT_TEXT=exclude` or `compare` (`drafts.write_all(..., text_regions=)`);
+  by default text is excluded when the package carries no font and compared when it carries
+  the fonts (then text matches pixel for pixel). Either way, an element showing data the
+  package masks (`data` or `mixed` in `look/texts.json`) that the page itself carries (its text
+  is in the served HTML of the HAR, not filled in from the API: a footer's address, phone and
+  e-mail) is excluded in each state that shows it, with the reason: the build shows its own
+  synthetic values there. Interface text, and data the page fills in from the seed (a cart's
+  rows, a total), stay compared.
 - **Settling.** After each step the replay waits at least as long as the recorder did for a
   quiet page (`recording.json`) and until the page's CSS transitions have ended (at most 3 s).
 - **Addresses.** An empty fragment (`/#`, left by a link `href="#"`) is the same address as none;

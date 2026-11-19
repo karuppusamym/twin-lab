@@ -6,9 +6,14 @@ person reviews it and approves it (or deletes what should not count). Nothing he
 - `expected-actions.draft.yaml`: the recording's semantic actions in order (what `--expect`
   takes), each a person checks against the flow before passing it.
 - `visual.draft.yaml` (the replay reads `visual.yaml` by itself, so the draft has another
-  name): one state per recorder picture, in threshold mode with a small ratio, and the
-  text regions left out when the package carries no font (a fallback font never matches the
-  original's pixels exactly). The person may still choose `mode: exact`.
+  name): one state per recorder picture, in threshold mode with a small ratio. The text
+  regions are left out by an explicit option (`text_regions`, or `TWINLAB_DRAFT_TEXT=exclude`
+  / `compare`): on by default when the package carries no font (a fallback font never matches
+  the original's pixels exactly), off when it carries the fonts (then text matches pixel for
+  pixel). In every state, text included or not, a region showing data the package masks and
+  the page itself carries (the footer's contact lines: in the served HTML, not from the seed)
+  is left out with the reason: the build shows its own synthetic values there. The person may
+  still choose `mode: exact`.
 - `scope.yaml`: exclusions for what the package tells the builder not to replicate (the player of
   a media origin the builder may leave out), unapproved.
 - acceptance cases the recording visibly established (`acceptance_cases`, used by
@@ -18,8 +23,9 @@ person reviews it and approves it (or deletes what should not count). Nothing he
   and the titles of a list that holds only records the flow acted on (a cart after two adds),
   `unordered: true` unless its order is shown to be stable (`labctl.listorder`: two or more
   page views agree on an order that follows a sortable key that is not random, or a sort
-  control the recording used; a UUID, a token or a hash is random). They are `required: false` until a person sets `required: true`: an unapproved case never
-  decides a replay's result.
+  control the recording used; a UUID, a token or a hash is random). They are
+  `required: false` until a person sets `required: true`: an unapproved case never decides a
+  replay's result.
 """
 
 from __future__ import annotations
@@ -84,7 +90,8 @@ def _fits(node, c) -> bool:
         return False
     if nth is not None:
         sibs = [n for n in (node.parent.children if node.parent else []) if n.tag]
-        if node not in sibs or sibs.index(node) + 1 != nth:
+        at = next((i for i, x in enumerate(sibs, 1) if x is node), None)  # by identity
+        if at != nth:
             return False
     return True
 
@@ -222,6 +229,12 @@ def _text_of(node) -> str:
     return " ".join(" ".join(node.text).split())
 
 
+def _position(sibs: list, node) -> int:
+    """The 1-based position of a node among its siblings, by identity (nodes compare by value,
+    and a node's value holds its parent: `==` would walk the whole tree)."""
+    return next(i for i, x in enumerate(sibs, 1) if x is node)
+
+
 def _list_selector(node) -> tuple[str, object] | None:
     """`#container > row > cell:nth-child(n)...` for a title in a list: the nearest ancestor
     with an id is the container, the level under it the row (by tag and classes), each level
@@ -239,7 +252,7 @@ def _list_selector(node) -> tuple[str, object] | None:
     parts = [f"#{container.id}", row.tag + "".join(f".{c}" for c in row.classes[:3])]
     for n in reversed(path[:-1]):
         sibs = [x for x in n.parent.children if x.tag]
-        parts.append(f"{n.tag}:nth-child({sibs.index(n) + 1})")
+        parts.append(f"{n.tag}:nth-child({_position(sibs, n)})")
     return " > ".join(parts), row
 
 
@@ -297,7 +310,8 @@ def list_cases(part, records: list[dict], num=lambda seq: seq) -> list[dict]:
             continue
         root = domlib.parse_html(html)
         hits = [x for x in domlib._walk(root) if _norm(_text_of(x)) in acted]
-        inner = [x for x in hits if not any(c in hits for c in domlib._walk(x))]
+        held = {id(x) for x in hits}
+        inner = [x for x in hits if not any(id(c) in held for c in domlib._walk(x))]
         sels = {}
         for x in inner:
             got = _list_selector(x)
@@ -381,22 +395,189 @@ def expected_draft(rec) -> str:
     return head + yaml.safe_dump(acts, sort_keys=False, allow_unicode=True)
 
 
-def visual_draft(rec, fonts_carried: bool) -> str:
+TEXT_OPTION = "TWINLAB_DRAFT_TEXT"  # exclude | compare: the text regions in the visual draft
+
+
+def text_regions_default(fonts_carried: bool) -> bool:
+    """Whether the visual draft leaves the text regions out: `TWINLAB_DRAFT_TEXT` (`exclude` or
+    `compare`) when set, else on exactly when the package carries no font."""
+    import os
+
+    said = (os.environ.get(TEXT_OPTION) or "").strip().lower()
+    if said in ("exclude", "compare"):
+        return said == "exclude"
+    return not fonts_carried
+
+
+def _token_rx(token: str) -> str:
+    """A masked token as a pattern: digits `9` any digits, letters `x`/`X` any letters."""
+    out = ""
+    for run in re.finditer(r"9+|[xX]+|.", token):
+        r = run.group(0)
+        out += r"\d+" if r[0] == "9" else r"[^\W\d_]+" if r[0] in "xX" else re.escape(r)
+    return out
+
+
+def _fits_masked(masked: str, real: str) -> bool:
+    """Whether a recorded text is what the package's masked text stands for: literal words the
+    same, each placeholder (`9999`, `Xxxxxx`) a value of that kind."""
+    from labctl.lookfeel import _MASKED_TOKEN
+
+    mt, rt = masked.split(), real.split()
+    if len(mt) != len(rt) or not mt:
+        return False
+    some = False
+    for m, r in zip(mt, rt, strict=True):
+        if m.lower() == r.lower() and not _MASKED_TOKEN.fullmatch(m.strip(".,;:!?()")):
+            continue
+        if not re.fullmatch(_token_rx(m), r):
+            return False
+        some = True
+    return some
+
+
+def served_texts(rec_path: Path) -> str:
+    """The text of every HTML page the HAR holds as the server sent it, whitespace collapsed,
+    in memory only: what the page itself carries, not what its scripts filled in."""
+    import base64
+    import json
+
+    har = Path(rec_path) / "recording.har"
+    if not har.is_file():
+        return ""
+    try:
+        data = json.loads(har.read_text(encoding="utf-8-sig", errors="replace"))
+    except ValueError:
+        return ""
+    out = []
+    for e in (data.get("log") or {}).get("entries") or []:
+        content = (e.get("response") or {}).get("content") or {}
+        if "html" not in str(content.get("mimeType") or "") or not content.get("text"):
+            continue
+        text = content["text"]
+        if content.get("encoding") == "base64":
+            try:
+                text = base64.b64decode(text).decode("utf-8", errors="replace")
+            except ValueError:
+                continue
+        out.append(" ".join(re.sub(r"\s*(<[^>]*>)\s*", r"\1", text).split()))
+    return "\n".join(out)
+
+
+def _css_path(node) -> str:
+    """`#id > tag:nth-child(n) > ...` from the nearest ancestor with an id (else `body`)."""
+    parts = []
+    cur = node
+    while cur.parent is not None and cur.tag not in ("#document", "body", "html"):
+        if cur.id and not re.search(r"999", cur.id):
+            parts.append(f"#{cur.id}")
+            break
+        sibs = [x for x in cur.parent.children if x.tag]
+        parts.append(f"{cur.tag}:nth-child({_position(sibs, cur)})")
+        cur = cur.parent
+    else:
+        parts.append("body")
+    return " > ".join(reversed(parts))
+
+
+MASKED_REASON = ("data the package masks ({how} text `{text}` in look/texts.json) that the page "
+                 "itself carries (in the served HTML, not from the seed): the build shows its own "
+                 "synthetic values here, so these pixels never match the recording's")  # fmt: skip
+
+
+def masked_regions(rec, masked: list[str]) -> dict[int, list[dict]]:
+    """Per recorded snapshot, the elements that show data the package masks (`masked`: the
+    `data` and `mixed` texts of look/texts.json) and that the served page itself carries (the
+    footer's address, phone and e-mail), so the build fills them with its own synthetic values.
+    Each is `{css, reason}`, for `exclude:`. Data the page's scripts fill in from the API (a
+    cart's rows, a total) comes from the seed and stays compared."""
+    literal = {_norm(m["text"]) for m in masked if m.get("is") == "literal"}
+    masked = [m for m in masked if m.get("is") in ("data", "mixed")
+              # one word of letters (`Xxxx`) would fit any interface word: too vague
+              and not re.fullmatch(r"[xX]+", m["text"].strip())]  # fmt: skip
+    served = served_texts(rec.path) if masked else ""
+    if not served:
+        return {}
+    out: dict[int, list[dict]] = {}
+    for step in getattr(rec, "steps", None) or []:
+        html = rec.dom(step)
+        if not html:
+            continue
+        root = domlib.parse_html(html)
+        found: dict[str, dict] = {}
+        for node in domlib._walk(root):
+            if node.tag in ("script", "style", "title", "head"):
+                continue
+            real = _text_of(node)
+            if not real or any(_text_of(c) == real for c in node.children):
+                continue  # not the innermost element holding the text
+            if _norm(real) in literal:
+                continue  # interface text the package gives as written: compared
+            hit = next((m for m in masked if _fits_masked(m["text"], real)), None)
+            if hit is None or f">{real}<" not in served:
+                continue
+            css = _css_path(node)
+            found.setdefault(css, {"css": css, "reason": MASKED_REASON.format(
+                how=hit["is"], text=hit["text"])})  # fmt: skip
+        if found:
+            out[step.seq] = list(found.values())
+    return out
+
+
+def masked_texts(root: Path, apps: list[str]) -> list[dict]:
+    """The texts of the apps' look/texts.json (`text` and `is`: data, mixed or literal; the
+    literal ones say which texts are interface text, never excluded)."""
+    import json
+
+    out, seen = [], set()
+    for a in apps:
+        f = Path(root) / "apps" / a / "look" / "texts.json"
+        try:
+            doc = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+        except ValueError:
+            continue
+        for items in (doc.get("screens") or {}).values():
+            for it in items or []:
+                key = (it.get("text"), it.get("is"))
+                if it.get("is") in ("data", "mixed", "literal") and it.get("text") and (
+                        key not in seen):  # fmt: skip
+                    seen.add(key)
+                    out.append({"text": it["text"], "is": it["is"]})
+    return out
+
+
+def visual_draft(rec, fonts_carried: bool, *, text_regions: bool | None = None,
+                 masked: list[dict] | None = None) -> str:  # fmt: skip
+    """The visual draft. `text_regions`: leave the text regions out (default:
+    `text_regions_default`). `masked`: the package's masked texts (`masked_texts`), whose
+    regions are left out in every state when the page itself carries them."""
     from labctl.behaviour import visual
 
+    if text_regions is None:
+        text_regions = text_regions_default(fonts_carried)
     text = visual.template(rec)
     data = yaml.safe_load(text) or {}
     moving = [ln for ln in text.splitlines() if ln.startswith("#   ")]
+    regions = masked_regions(rec, masked or [])
     for st in data.get("states") or []:
         st["mode"], st["max_ratio"], st["tolerance"] = "threshold", VISUAL_RATIO, VISUAL_TOLERANCE
-        if not fonts_carried:  # with the regions that change by themselves (the template's)
-            st["exclude"] = [dict(TEXT_REGIONS), *(st.get("exclude") or [])]
+        extra = [dict(x) for x in regions.get(st.get("after"), [])]
+        if text_regions:  # with the regions that change by themselves (the template's)
+            st["exclude"] = [dict(TEXT_REGIONS), *(st.get("exclude") or []), *extra]
+        else:
+            st["exclude"] = [*(st.get("exclude") or []), *extra]
     head = ("# DRAFT, unapproved: one state per recorder picture. threshold mode: up to "
             f"{VISUAL_RATIO:.0%} of the\n# compared pixels may differ (tolerance {VISUAL_TOLERANCE}"
             " per channel), so anti-aliasing and\n# sub-pixel layout do not fail a state.")  # fmt: skip
-    head += ("\n# The package carries no font (by design): the text regions are left out\n"
-             "# (exclude), since a fallback font never draws the original's pixels.\n"
-             if not fonts_carried else "\n")  # fmt: skip
+    how = "the package carries no font" if not fonts_carried else "the package carries the fonts"
+    head += (f"\n# Text regions: {'excluded' if text_regions else 'compared'} ({how}; "
+             f"{TEXT_OPTION}=exclude|compare sets it).\n")  # fmt: skip
+    if text_regions and not fonts_carried:
+        head += "# A fallback font never draws the original's pixels, so text is left out.\n"
+    if regions:
+        head += ("# Data the package masks and the page itself carries (the build shows its own\n"
+                 "# synthetic values there) is excluded in the states that show it, text\n"
+                 "# included or not: its entry says why.\n")  # fmt: skip
     if moving:
         head += ("# Regions that change by themselves are excluded in every state (delete an entry\n"
                  "# to compare it):\n" + "\n".join(moving) + "\n")  # fmt: skip
@@ -428,8 +609,10 @@ def scope_draft(rec_id: str, network: dict | None, pages: list[str]) -> str | No
     return head + body.replace("approved_by: null", "approved_by: null  # TODO: who approved")
 
 
-def write_all(root: Path, recording: Path, apps: list[str]) -> list[Path]:
-    """The drafts beside the whole recording; a file that exists is never replaced."""
+def write_all(root: Path, recording: Path, apps: list[str],
+              text_regions: bool | None = None) -> list[Path]:  # fmt: skip
+    """The drafts beside the whole recording; a file that exists is never replaced.
+    `text_regions`: see `visual_draft`."""
     import json
 
     from labctl.botlog.recording import load as load_rec
@@ -442,7 +625,9 @@ def write_all(root: Path, recording: Path, apps: list[str]) -> list[Path]:
     written = []
     fonts = any((root / "apps" / a / "look" / "fonts").is_dir()
                 and any((root / "apps" / a / "look" / "fonts").iterdir()) for a in apps)  # fmt: skip
-    texts = {EXPECTED: expected_draft(rec), VISUAL: visual_draft(rec, fonts)}
+    texts = {EXPECTED: expected_draft(rec),
+             VISUAL: visual_draft(rec, fonts, text_regions=text_regions,
+                                  masked=masked_texts(root, apps))}  # fmt: skip
     for a in apps:
         net_file = root / "apps" / a / "api" / "network.json"
         try:
