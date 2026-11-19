@@ -379,6 +379,9 @@ class ListDesign:
     # record's own GET): read only for code values, booleans and empty fields, never copied as data.
     seen: dict[int, dict] = field(default_factory=dict)
     first_items: list[dict] = field(default_factory=list)  # the first full answer (in memory)
+    # Every record any recorded answer of the same fields returned (a GET list, a POST that
+    # answers by category), one per identifier, with the call that returned it (in memory).
+    all_items: list[tuple[str, str, dict]] = field(default_factory=list)
 
 
 @dataclass
@@ -494,9 +497,12 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
     loaded = [load_part(app, p) for p in paths]
     shapes = _shapes(loaded)
     lists: dict[str, ListDesign] = {}
+    answers: list[tuple[str, str, list[dict]]] = []  # every list answer, whatever its method
     for p in loaded:
         wrote = False
         for e in p.exchanges:
+            if 200 <= e.status < 300 and _items(e.data):
+                answers.append((e.method, e.route, _items(e.data)))
             if e.method != "GET" and not re.search(r"log_?in|sign_?in|auth|session", e.path, re.I):
                 wrote = True
             items = _items(e.data) if e.method == "GET" and 200 <= e.status < 300 else None
@@ -530,6 +536,7 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
             (name, g["after"], g["element"])
         )
     for d in lists.values():
+        _union(d, answers)
         best = None
         for k, vals in d.values.items():
             pats = {}
@@ -543,7 +550,7 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
                 if best is None or len(nums) > len(best[2]):
                     best = (k, pat, nums)
         if best is None:  # no identifier: as many rows as were listed before anything changed
-            d.rows = max([s.total for s in d.searches] + [d.before_writes])
+            d.rows = max([s.total for s in d.searches] + [d.before_writes, len(d.all_items)])
             continue
         d.id_key, d.pattern, nums = best
         d.lowest, d.highest = min(nums), max(nums)
@@ -573,6 +580,29 @@ def core(root: Path, app: str, parts: list[Path] | None = None) -> Core:
     c = Core(app, loaded, lists, created, words)
     _terms(c)
     return c
+
+
+def _union(d: ListDesign, answers: list[tuple[str, str, list[dict]]]) -> None:
+    """`d.all_items`: the list's first answer, then every record another answer with the same
+    fields returned (`POST /bycat` answering the laptops `GET /entries` did not list), one per
+    `id`. Only lists whose records carry an `id` are joined."""
+    if not d.first_items:
+        return
+    keys = set(d.first_items[0])
+    idk = next((k for k in keys if str(k).lower() == "id"), None)
+    if idk is None:
+        return
+    seen: set[str] = set()
+    out = []
+    for method, route, items in [("GET", d.route, d.first_items), *answers]:
+        for item in items:
+            if set(item) != keys or isinstance(item.get(idk), (dict, list)):
+                continue
+            rid = str(item.get(idk))
+            if rid not in seen:
+                seen.add(rid)
+                out.append((method, route, item))
+    d.all_items = out
 
 
 def _api_made(parts: list[Part], d: ListDesign) -> list[int]:
@@ -709,12 +739,15 @@ def _public_cells(row: dict, d: ListDesign, i: int) -> None:
     from labctl import publicdata
 
     pub = publicdata.current()
-    if pub is None or i >= len(d.first_items) or pub.endpoint("GET", d.route) is None:
+    items = d.all_items or [("GET", d.route, x) for x in d.first_items]
+    if pub is None or i >= len(items):
         return
-    item = d.first_items[i]
+    method, route, item = items[i]
+    if pub.endpoint(method, route) is None:
+        return
     for name in row:
         key = next((k for k in item if _key(k) == _key(name)), None)
-        if key is not None and pub.field_public("GET", d.route, key, item[key]):
+        if key is not None and pub.field_public(method, route, key, item[key]):
             row[name] = item[key]
 
 
@@ -1523,6 +1556,184 @@ def values_doc(p: Plan, app: str) -> dict:
     }
 
 
+def _row_texts(html: str, want: str, cut: bool) -> list[str]:
+    """The texts (spaces collapsed, in memory only) of the innermost elements of a page whose
+    text has the shape `want`: the whole shape, or its first 64 characters when the recorder
+    cut it (`cut`). An element holding a matching one (the list around a card) is not one."""
+    from labctl.behaviour import dom as domlib
+
+    try:
+        root = domlib.parse_html(html)
+    except Exception:  # noqa: BLE001 - a broken page offers no row
+        return []
+
+    def text(n) -> str:  # text nodes joined by a space, as `locate.ROW_TITLE_FN` does
+        return " ".join(" ".join(n.text).split())
+
+    def fits(n) -> bool:
+        got = domlib.shape(text(n)) or ""
+        return got[: len(want)] == want if cut else got == want
+
+    hit = [n for n in domlib._walk(root) if fits(n)]
+    inner = [n for n in hit if not any(fits(d) for d in domlib._walk(n))]
+    return [text(n) for n in inner]
+
+
+TITLE_KEYS = ("title", "name", "label", "subject", "summary")
+
+
+def record_bindings(part: Part, rows: dict) -> list[dict]:
+    """For each click on a repeated element (a list row, a product card: a `record` locator the
+    recording could not tie to a typed title), the seed row it acted on, read from the evidence:
+    an element whose whole text has the recorded shape holds exactly one seed row's title. Then
+    `record` is that title (a seed value: synthetic, or declared public); otherwise `record` is
+    None and `candidates` lists the seed titles it could be. Never a recorded value."""
+
+    titles: list[str] = []
+    for table_rows in rows.values():
+        for row in table_rows:
+            for k, v in row.items():
+                if (isinstance(v, str) and re.search(r"[^\W\d_]{2}", v) and len(v) <= 120
+                        and _key(k) in TITLE_KEYS):  # fmt: skip
+                    titles.append(v)
+    titles = list(dict.fromkeys(titles))
+    out = []
+    for st in part.raw:
+        locs = [c for c in st.get("locators") or [] if c.get("kind") not in ("id", "testid")]
+        cand = locs[0] if locs and locs[0].get("kind") == "record" else None
+        if cand is None or cand.get("text_from") is not None or cand.get("text_from_outside"):
+            continue
+        want = " ".join(str(cand.get("title_shape") or "").split())
+        html = part.befores.get(st["seq"]) or part.html_at(st["seq"]) or ""
+        hits: dict[str, None] = {}
+        cut = len(str(cand.get("title_shape") or "")) >= 64  # the recorder keeps 64 characters
+        for text in _row_texts(html, want, cut) if want else []:
+            low = text.lower()
+            for t in titles:
+                if re.search(r"(?<!\w)" + re.escape(t.lower()) + r"(?!\w)", low):
+                    hits[t] = None
+        # a title inside another (`Galaxy s6` in `Galaxy s6 edge`) is not a second candidate
+        found = [t for t in hits if not any(t != o and t.lower() in o.lower() for o in hits)]
+        entry = {"n": st["seq"], "action": st.get("action"), "field": st.get("selector")}
+        if st.get("global_seq") is not None:
+            entry["global"] = st["global_seq"]
+        basis = "the clicked element's text holds this seed row's title and no other's"
+        if len(found) > 1:  # rows of one shape: the page the click opened says which
+            after = [part.doms.get(x["seq"]) or "" for x in part.raw
+                     if x["seq"] == st["seq"] or x.get("caused_by") == st["seq"]]  # fmt: skip
+            shown = " ".join(" ".join(t.split()) for t in after).lower()
+            opened = [t for t in found
+                      if re.search(r"(?<!\w)" + re.escape(t.lower()) + r"(?!\w)", shown)]  # fmt: skip
+            if len(opened) == 1:
+                found = opened
+                basis = ("rows of the same shape: the page the click opened shows this seed "
+                         "row's title and no other candidate's")  # fmt: skip
+        if len(found) == 1:
+            entry |= {"record": found[0], "basis": basis}
+        else:
+            entry |= {"record": None, "candidates": found[:10],
+                      "basis": "ambiguous: " + (f"{len(found)} seed rows fit" if found
+                                                else "no seed row's title is in the element")}  # fmt: skip
+        out.append(entry)
+    return out
+
+
+ALERT_CALL = re.compile(r"\b(?:alert|swal|confirm)\(\s*([\"'])([^\"'\n]{1,160})\1")
+
+
+_LITERAL = re.compile(r"[\"']?([A-Za-z_]\w*)[\"']?\s*:\s*(true|false|null)\b")
+
+
+def _same_literals(code: str, bodies: list[dict]) -> bool:
+    """Whether the literal booleans a call's `JSON.stringify({...})` writes are those the
+    recorded request sent (`"flag": false`); True when the code writes none or nothing was
+    recorded."""
+    m = re.search(r"JSON\.stringify\(\s*\{([^{}]{0,300})\}", code)
+    lits = _LITERAL.findall(m.group(1)) if m else []
+    if not lits or not bodies:
+        return True
+    for body in bodies:
+        if all(k not in body or json.dumps(body[k]) == v for k, v in lits):
+            return True
+    return False
+
+
+def dialog_texts(part: Part) -> dict[int, dict]:
+    """For each dialog step whose message the recording does not hold (recorded before the
+    recorder kept them), the text the application's code shows there: the one `alert(...)` that
+    follows, in a script of the recording, the address of the call the causing step sent
+    (`'/addtocart'` ... `alert("Product added.")`). {seq: {"message", "from"}}; nothing when the
+    code does not say it once."""
+    from labctl import har
+
+    try:
+        rec = har.load(part.path)
+    except (OSError, ValueError):
+        return {}
+    scripts = [(e.path, e.resp_text) for e in har.exchanges(rec.har)
+               if e.kind == "asset" and e.resp_text and e.path.endswith(".js")]  # fmt: skip
+    out: dict[int, dict] = {}
+    last_action = None
+    for st in part.raw:
+        if st.get("action") in ("click", "submit", "type", "select", "keypress") \
+                and st.get("caused_by") is None:  # fmt: skip
+            last_action = st
+        if st.get("action") != "dialog" or (st.get("dialog") or {}).get("message"):
+            continue
+        if last_action is None:
+            continue
+        chain = [last_action["seq"]] + [x["seq"] for x in part.raw
+                                        if x.get("caused_by") == last_action["seq"]]  # fmt: skip
+        calls = [e for n in chain for e in part.owner.get(n, []) if e.method != "GET"]
+        sent = {e.path for e in calls}
+        found: dict[str, str] = {}
+        for path, text in scripts:
+            for call in sent:
+                bodies = [e.body for e in calls if e.path == call and isinstance(e.body, dict)]
+                for m in re.finditer(r"[\"']" + re.escape(call) + r"[\"']", text):
+                    if not _same_literals(text[m.end() : m.end() + 300], bodies):
+                        continue  # the other call to this address (another `flag`, say)
+                    for hit in ALERT_CALL.finditer(text, m.end(), m.end() + 900):
+                        before = text[max(m.end(), hit.start() - 90) : hit.start()]
+                        if not re.search(r"(?i)error|fail|expired|invalid", before):
+                            found.setdefault(hit.group(2).strip(), path)
+                            break
+        if len(found) == 1:
+            ((message, where),) = found.items()
+            out[st["seq"]] = {"message": message,
+                              "from": f"the application's code (`{where}`, after its call to "
+                                      + ", ".join(f"`{c}`" for c in sorted(sent))
+                                      + "): the recording did not keep the dialog's text"}  # fmt: skip
+    return out
+
+
+def _bind_steps(path: Path, records: list[dict], dialogs: dict[int, dict] | None = None) -> None:
+    """The record each click on one of many rows acted on, in `steps/<recording>.json`: with
+    the selector it is the one element the replay must use (`a.hrefch` of the card that holds
+    `record`), or `record: TO DO` with the candidates. A dialog the recording kept no text of
+    gets the code's (`dialog_texts`), saying so."""
+    dialogs = dialogs or {}
+    if not path.is_file() or not (records or dialogs):
+        return
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return
+    by = {r["n"]: r for r in records}
+    for st in doc.get("steps") or []:
+        said = dialogs.get(st.get("n"))
+        if said and st.get("action") == "dialog":
+            st["dialog"] = {**(st.get("dialog") or {}), "message": said["message"],
+                            "message_from": said["from"]}  # fmt: skip
+        r = by.get(st.get("n"))
+        if r is None:
+            continue
+        st["record"] = r.get("record") or "TO DO"
+        if not r.get("record"):
+            st["record_candidates"] = r.get("candidates") or []
+    _write(path, json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
+
+
 def write_app(root: Path, app: str, tables: list, engine: str) -> dict:
     """Write the seed and the values files of one application; returns what the brief says."""
     root = Path(root)
@@ -1541,13 +1752,6 @@ def write_app(root: Path, app: str, tables: list, engine: str) -> dict:
         p = plan(root, part.name, app)
         doc = values_doc(p, app)
         docs.append(doc)
-        steps_dir.mkdir(parents=True, exist_ok=True)
-        head = ("# Replay values and recorded outcomes (generated by labctl brief with db/seed.sql)."
-                "\n# Synthetic only: never a value a person typed.\n")  # fmt: skip
-        _write(
-            steps_dir / f"{part.name}{VALUES}",
-            head + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, width=100),
-        )
     scales = {}
     for doc in docs:
         for d in doc["display"]:
@@ -1555,6 +1759,19 @@ def write_app(root: Path, app: str, tables: list, engine: str) -> dict:
             if m and "two decimals" in d.get("format", ""):
                 scales[re.sub(r"[^a-z0-9]+", "_", m.group(1).lower()).strip("_")] = 2
     rows, notes = seed_rows(c, tables, scales)
+    by_name = {pt.name: pt for pt in c.parts}
+    for part, doc in zip(parts, docs, strict=True):
+        loaded = by_name.get(part.name)
+        doc["records"] = record_bindings(loaded, rows) if loaded is not None else []
+        steps_dir.mkdir(parents=True, exist_ok=True)
+        head = ("# Replay values and recorded outcomes (generated by labctl brief with db/seed.sql)."
+                "\n# Synthetic only: never a value a person typed.\n")  # fmt: skip
+        _write(
+            steps_dir / f"{part.name}{VALUES}",
+            head + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, width=100),
+        )
+        _bind_steps(steps_dir / f"{part.name}.json", doc["records"],
+                    dialog_texts(loaded) if loaded is not None else {})  # fmt: skip
     (out / "db").mkdir(parents=True, exist_ok=True)
     _write(out / "db" / SEED_SQL, seed_sql(app, rows, tables, engine, notes))
     _write(
@@ -1590,8 +1807,24 @@ def apply_bindings(root: Path, app: str) -> int:
             have.values[seq] = str(row["value"])
             have.generated.add(seq)
             given += 1
+        given += _give_records(have, doc.get("records") or [], "n")
         rec = load_rec(part)
         (part / bnd.FILE).write_text(bnd.template(rec, have), encoding="utf-8")
+    return given
+
+
+def _give_records(have, records: list[dict], key: str) -> int:
+    """Record bindings read from the evidence into `have` (a person's record is kept)."""
+    given = 0
+    for r in records:
+        seq = r.get(key)
+        if seq is None or not r.get("record"):
+            continue
+        if seq in have.records and seq not in have.generated_records:
+            continue
+        have.records[seq] = str(r["record"])
+        have.generated_records.add(seq)
+        given += 1
     return given
 
 
@@ -1613,6 +1846,7 @@ def apply_whole(root: Path, recording: Path) -> int:
             have.values[seq] = str(row["value"])
             have.generated.add(seq)
             given += 1
+        given += _give_records(have, doc.get("records") or [], "global")
     if given:
         (recording / bnd.FILE).write_text(bnd.template(load_rec(recording), have), encoding="utf-8")
     return given
@@ -1643,8 +1877,20 @@ def acceptance(root: Path, app: str, rec_name: str) -> dict | None:
             cases.append({"id": f"refused-{v['step']}", "after": v.get("shown_at", v["step"]),
                           "check": "texts", "locator": v["element"], "contains": v["message"],
                           "note": f"the replay types {', '.join(r['value'] for r in v['refused'])}"})  # fmt: skip
-    return {"version": 1, "recording": rec_name,
-            "scope": [f"{app}: values the package states (steps/{rec_name}{VALUES})"],
+    scope = [f"{app}: values the package states (steps/{rec_name}{VALUES})"]
+    part = Path(root) / "evidence" / app / rec_name
+    if (part / "steps.jsonl").is_file():  # what the recording visibly established
+        from labctl.behaviour import drafts
+
+        try:
+            loaded = load_part(app, part)
+        except (OSError, ValueError):
+            loaded = None
+        if loaded is not None:
+            cases += drafts.acceptance_cases(loaded, doc.get("records") or [])
+            said = dialog_texts(loaded)
+            scope += [f"{app}: {line}" for line in drafts.dialog_lines(loaded, said)]
+    return {"version": 1, "recording": rec_name, "approved_by": None, "scope": scope,
             "excluded": excluded, "cases": cases}  # fmt: skip
 
 
@@ -1666,18 +1912,20 @@ def acceptance_whole(root: Path, recording: Path) -> dict | None:
                     continue
                 c["after"] = glob[c["after"]]
             ref = c.get("equals")
-            if isinstance(ref, dict) and isinstance(ref.get("binding"), int):
-                if glob.get(ref["binding"]) is None:
+            key = next((k for k in ("binding", "record") if isinstance(ref, dict)
+                        and isinstance(ref.get(k), int)), None)  # fmt: skip
+            if key is not None:
+                if glob.get(ref[key]) is None:
                     continue
-                c["equals"] = {"binding": glob[ref["binding"]]}
+                c["equals"] = {key: glob[ref[key]]}
             c["id"] = f"{app}-{c['id']}"
             cases.append(c)
         excluded += [f"{app}: {x}" for x in draft.get("excluded") or []]
         scope += draft.get("scope") or []
     if not cases and not excluded:
         return None
-    return {"version": 1, "recording": recording.name, "scope": scope, "excluded": excluded,
-            "cases": cases}  # fmt: skip
+    return {"version": 1, "recording": recording.name, "approved_by": None, "scope": scope,
+            "excluded": excluded, "cases": cases}  # fmt: skip
 
 
 def _slug(text: str) -> str:

@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from labctl import jsfviews, sanitize, stepfacts
 
@@ -387,6 +387,12 @@ def _uses(ctx, pages: Pages, screen: str, views: dict[str, dict]) -> dict[str, l
         rec_id = _record_of(ctx, s)
         if rec_id:
             use["record"] = rec_id
+        bound = getattr(ctx, "records", {}).get(s["n"])
+        if bound is not None and not rec_id:  # a click on one of many rows or cards
+            use["record"] = bound.get("record") or "TO DO"
+            if not bound.get("record"):
+                use["record_candidates"] = bound.get("candidates") or []
+            use["record_basis"] = bound.get("basis")
         eff = effects.get(s["n"])
         if eff:
             if eff.get("requests"):
@@ -575,6 +581,14 @@ def redirects(ctxs: list) -> list[dict]:
 # --- the whole map -------------------------------------------------------------------------------
 
 
+def resolve_target(target: str, base: str = "/") -> str:
+    """A link's address as a screen's: `index.html` on `/cart.html` is `/index.html` (a relative
+    `href` resolved against the page it is on); an absolute path stays as it is."""
+    if target.startswith("/"):
+        return target
+    return sanitize.route_pattern(urlsplit(urljoin(base or "/", target)).path or "/")
+
+
 def build(root: Path, app: str, brief, ctxs: list) -> dict:
     from labctl import multiapp
 
@@ -605,13 +619,14 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
     checked = linkcheck.for_app(root, ctxs)
     signin = next((x for s in (checked.summary if checked else []) for x in s["sign_in"]), None)
 
-    def answer(target: str | None) -> tuple[str, str]:
+    def answer(target: str | None, base: str = "/") -> tuple[str, str]:
         if target is None:
             return "none", "the element has no address"
         if target.startswith(("http://", "https://")):
             return "external", "another site: keep the link as it is; nothing is built for it"
         if target.endswith(":") or target.startswith("#"):
             return "in page", "stays on the page"
+        target = resolve_target(target, base)
         if target in in_scope:
             return "in scope", f"the screen `{target}` of this brief"
         if target in others:
@@ -647,6 +662,9 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
             if a.get("recorded_as"):
                 kinds[path][a["recorded_as"]] = a
         row: dict = {"path": path, "in_scope": sc is not None}
+        also = sorted(a for a, to in sanitize.aliases().items() if to == path)
+        if also:  # the same document at another address (`/index.html` of `/`): serve both
+            row["aliases"] = also
         if sc is not None:
             row["name"] = sc.screen.name
             if sc.screen.files:
@@ -669,7 +687,7 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
                 "in_scope": inner is not None,
                 "build": ("a stand-in page this application serves at the same path (the brief "
                           "says how)" if emb else f"the screen `{target}` of this brief, loaded "
-                          "in the frame" if inner is not None else answer(target)[1])})  # fmt: skip
+                          "in the frame" if inner is not None else answer(target, path)[1])})  # fmt: skip
         framed_in = [(p, f.get("selector")) for p, other in in_scope.items()
                      for f in other.screen.frames
                      if sanitize.route_pattern(urlsplit(str(f.get("src") or "")).path or "/") == path]  # fmt: skip
@@ -686,7 +704,7 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
         for a in acts:
             if a.get("type") != "link" or isinstance(a.get("used"), list):
                 continue
-            status, text = answer(a.get("target"))
+            status, text = answer(a.get("target"), path)
             found = checked.lookup(a.get("target")) if checked else None
             if found is not None and status in ("out of scope", "undefined"):
                 said, why = linkcheck.answer(found, a["target"], first, signin)

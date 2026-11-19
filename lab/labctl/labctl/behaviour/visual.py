@@ -372,8 +372,10 @@ def template(rec) -> str:
     pictures = pictures_of(rec.path)
     states = []
     for seq in sorted(pictures):
-        states.append({"id": f"after-step-{seq}", "after": seq, "required": True, "mode": "exact",
-                       "tolerance": 0, "exclude": []})  # fmt: skip
+        # threshold by default: a replica drawn with another font or a sub-pixel shift fails
+        # exact at once; a person who wants zero differing pixels sets mode: exact
+        states.append({"id": f"after-step-{seq}", "after": seq, "required": True,
+                       "mode": "threshold", "max_ratio": 0.02, "tolerance": 16, "exclude": []})  # fmt: skip
     size = None
     if pictures:
         size = picture_size(rec.path / pictures[max(pictures)])
@@ -381,6 +383,8 @@ def template(rec) -> str:
         "# Visual baselines: the recorder's pictures (or approved images), compared with the\n"
         "# replica's at the pinned setup. Set exclude: (regions by locator) and the mode before\n"
         "# comparing; delete states that are not required. Masked pixels are always excluded.\n"
+        "# threshold mode: up to max_ratio (2 %) of the compared pixels may differ by more than\n"
+        "# tolerance per channel; mode: exact (max_ratio 0.0, tolerance 0) is the strict choice.\n"
         + (f"# The recorder's pictures are {size[0]}x{size[1]}.\n" if size else
            "# This recording has no pictures: every state needs an approved image.\n")
     )  # fmt: skip
