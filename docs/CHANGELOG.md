@@ -148,6 +148,35 @@ checked; rate limited; stops on 429/503; no session unless the saved browser sta
 `<recording>/code/`. Proven on the Angular reference build, the JSF reference application and a
 hand-written fixture (`tests/fixtures/codespa`), whose admin chunk is found, fetched and mapped.
 
+## 2026-11-18 — Field rules and page behaviour: what each page checks, from its HTML and its JavaScript
+Until now a package knew a rule only when the recording triggered it. `labctl.pagerules`
+writes `apps/<app>/rules.json` and the brief's *Field rules and page behaviour*, per screen and
+field, from three sources:
+- **The HTML** of every snapshot (`declared`): `required`, `minlength`, `maxlength`, `min`,
+  `max`, `step`, `pattern`, the input type, `readonly`, `disabled`, `autocomplete`,
+  `inputmode`, placeholder, tooltip, label, help text, counter, options, ASP.NET `data-val-*`,
+  jQuery Validate `data-rule-*` / `data-msg-*`, PrimeFaces `data-p-*`, messages the page holds
+  hidden, and JSF / PrimeFaces partial updates in event attributes.
+- **The application's own scripts** in the HAR (`in code, not triggered` or `in code, not tied
+  to a field`): tokenised (strings, regex literals against division, template literals,
+  comments), never run. Angular `Validators.*` on form controls, jQuery Validate `rules` and
+  `messages`, `setCustomValidity`, plain checks with their messages, cross-field rules (equal,
+  not before, one of two), masks, fields shown, enabled or made required by another, dependent
+  drop-downs, a submit button enabled when the form is valid, session timers with their delay.
+  Third-party scripts and library files (by name or banner) are named, not analysed.
+- **The recording** (`seen`): messages that appeared, and what changed after a step that typed,
+  chose or ticked (a field shown, a drop-down filled by an API call, linked to the catalogue).
+- Messages go through `sanitize.mask_message` and the look's data check. Scripts are not
+  carried; `TWINLAB_PAGE_SCRIPTS=carry` carries the application's own script files under
+  `apps/<app>/scripts/` (source maps stripped, never a library), refused, by the brief and by
+  `labctl build package`, when one holds something shaped like a secret, a host other than the
+  application's own, or a value the recording shows as data.
+- Proven on a new fixture (`tests/fixtures/formdesk`), on the Angular reference (both
+  `Validators.required` of its source found from the minified build, the owner's never
+  triggered; no wrong rule) and on the JSF reference (its three triggered messages and the
+  partial update; its validators that were never triggered cannot be recovered: JSF checks on
+  the server). The task text, the reading order, the index, the completeness check, the guard
+  and `factory.GENERATED` name the new files.
 ## 2026-11-18 — The build package carries the API, the navigation, every action and the sign-in
 What a coding agent gets was measured on two recordings (the two-application fixture, and a new
 help-desk fixture whose pages are filled by a JSON API), then the gaps were closed.
@@ -232,6 +261,29 @@ help-desk fixture whose pages are filled by a JSON API), then the gaps were clos
   unless the tier is `VERIFIED COMPLETE`. The portal report shows the tier under the verdict.
 - `tools/audit_replication_gates.py` is the audit's probe; it exits 0 now. Tests:
   `test_audit_gates.py`.
+
+## 2026-11-18 — Link check: where the links nobody clicked really lead
+- `labctl evidence check-links <recording> [--yes] [--max N] [--delay-ms M] [--storage-state F]`
+  (`labctl/linkcheck.py`) collects every link target the snapshots hold and the recording never
+  visited (`<a>`, `<area>`, GET `<form action>`, `<iframe src>`, `window.open`/`location.href`
+  in inline handlers), one per address pattern, and asks the real application with HEAD (GET
+  when HEAD is refused, and to read an HTML page's title). Opt-in: without `--yes` it only lists
+  the plan; nothing else in the lab runs it.
+- Never asked: an address that looks like it changes something (logout, delete, cancel, approve,
+  pay, ...), a query carrying an action, a token or session id, `mailto:`/`tel:`/`javascript:`/
+  `data:`, downloads, POST forms, any origin the recording did not use. Each skip has its reason.
+  One request a second by default, at most 50 links, a timeout per request, stop on 429 or 503.
+  Anonymous unless the recording's saved browser state is passed; no cookie value, token or
+  body is written.
+- `<recording>/link-check.json` says per link where it was seen, the final status and redirect
+  chain (as patterns), sign-in, content type, masked title and heading, and whether it has the
+  structure of a recorded screen. An unvisited HTML page is kept as a sanitised snapshot
+  (`link-check/pages/`) after the look's data checks; a failed check keeps only title and heading.
+- The navigation map uses it: "leads to a page *Order history* not recorded", "leads to the
+  sign-in page", "missing (404) in the real application: keep the link, answer 404". The brief
+  lists pages that exist but were not recorded; their snapshots travel as
+  `apps/<app>/unrecorded/*.html`, never mixed with recorded screens. Without the file nothing
+  changes. Tests: `test_linkcheck.py`.
 
 ## 2026-11-18 — The build package carries the look of the application
 - A rebuilt application did not look like the original: a builder got value-free page snapshots

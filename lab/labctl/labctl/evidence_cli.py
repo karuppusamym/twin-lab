@@ -327,3 +327,38 @@ def build_all(
         return
     if any(a.errors for a in done.apps):
         raise typer.Exit(1)
+
+
+@app.command("check-links")
+def check_links(
+    recording: Path = typer.Argument(..., help="A recording folder."),
+    yes: bool = typer.Option(
+        False, "--yes", help="Ask the real application. Without it: list what would be asked."
+    ),
+    max_links: int = typer.Option(50, "--max", help="At most this many links are asked for."),
+    delay_ms: int = typer.Option(1000, "--delay-ms", help="Time between two requests."),
+    timeout: float = typer.Option(10.0, "--timeout", help="Seconds per request."),
+    storage_state: Path | None = typer.Option(
+        None,
+        "--storage-state",
+        help="The browser state the recording started from (Playwright storage state): its "
+        "cookies are sent. Without it every request is anonymous.",
+    ),
+) -> None:
+    """Where the links the recording saw but never followed lead, asked of the real application
+    with HEAD or GET only, own origins only, rate limited; state-changing addresses are skipped.
+    Writes <recording>/link-check.json; the next brief uses it. Opt-in: needs --yes."""
+    from labctl import linkcheck
+
+    if not recording.is_dir():
+        typer.echo(f"{recording} is not a recording folder", err=True)
+        raise typer.Exit(2)
+    if storage_state is not None and not storage_state.is_file():
+        typer.echo(f"{storage_state} not found", err=True)
+        raise typer.Exit(2)
+    try:
+        linkcheck.check(recording, yes=yes, max_links=max_links, delay_ms=delay_ms,
+                        timeout=timeout, storage_state=storage_state, say=typer.echo)  # fmt: skip
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc

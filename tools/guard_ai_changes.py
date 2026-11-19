@@ -8,8 +8,9 @@ Rules (AGENTS.md states them; this makes CI enforce them):
 2. Inputs stay as generated, on AI-built pull requests (branch `devin/...` or `build/...`, or label `ai-built`).
    The builder may not edit what the factory generated from the evidence: `BRIEF.md`,
    `model.yaml`, `db/schema.sql`, `db/seed.sql` (and `db/seed.json`: the seed the acceptance
-   replay depends on), `behaviours.json`, `pages/`, `look/`, or anything in `app.yaml` outside
-   its `run:` section.
+   replay depends on), `behaviours.json`, `rules.json` (the field rules), `pages/`, `look/`,
+   `scripts/` (the application's scripts, carried on the owner's request), or anything in
+   `app.yaml` outside its `run:` section.
 3. Independent oracle, on AI-built pull requests. The checks that judge the app (`automations/`,
    `flows/`, `lab/`, `conditions/`) may not change in the same pull request as an app. Otherwise
    the same author can make both wrong in the same way and every check still passes. Override with
@@ -31,7 +32,8 @@ import yaml
 
 APPROVED = {"owner_approved", "reference_verified"}
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
-             "behaviours.json", "codemap.json")  # fmt: skip
+             "behaviours.json", "codemap.json", "rules.json")  # fmt: skip
+GENERATED_DIRS = ("pages/", "look/", "scripts/")
 ORACLES = ("automations/", "flows/", "lab/", "conditions/")
 APP_FILE = re.compile(r"^apps/([^/]+)/(.+)$")
 
@@ -98,7 +100,7 @@ def check(changed: list[str], read_old, read_new, labels: set[str], ai_built: bo
     if ai_built:
         for path in changed:
             m = APP_FILE.match(path)
-            if m and (m.group(2) in GENERATED or m.group(2).startswith(("pages/", "look/"))):
+            if m and (m.group(2) in GENERATED or m.group(2).startswith(GENERATED_DIRS)):
                 problems.append(
                     f"{path}: generated from the evidence; the builder may not edit it. If it is "
                     "wrong, say so in BUILD-NOTES.md."
