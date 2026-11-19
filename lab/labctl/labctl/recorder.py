@@ -60,7 +60,10 @@ class: never the file), `download` ({name_shape, ext}) and `service_worker`.
 
 The DOM is captured inside the page, after each navigation (full load or history change) and after
 each click, change or submit, once the page has been quiet for `settle_ms` with no fetch or XHR
-in flight (up to 15 s; `recording.json` says so under `settle`). Values typed are never
+in flight (up to 15 s; `recording.json` says so under `settle`). A recording script's next action
+does not wait for that: just before it, the page writes and snapshots what it has not yet
+(`__tlBeforeAction`) and the step's picture is taken, so it shows the page before the action's
+events; a picture still taken later says `picture_settled: false`. Values typed are never
 written: the recorder holds them in memory only, to take them out of snapshots, the HAR, pictures
 (masked) and locator texts where they are a value, never inside an id, class or name (the rule:
 labctl.typedvalues; an id that is a whole typed value becomes a placeholder, `tl-typed-a`, and
@@ -461,6 +464,7 @@ LISTENER_JS = r"""
   // nothing is sent while the document is being torn down: no step depends on such a call.
   let eidSeq = 0;
   let loadStep = false;  // this document's load step was written (or it has none: a blank page)
+  let lastStep = Promise.resolve();  // the last snapshot sent (`__tlBeforeAction` waits for it)
   function flush(leaving, settled) {
     clearTimeout(timer); timer = null;
     if (!TOP || !pending.length) return Promise.resolve();
@@ -483,7 +487,7 @@ LISTENER_JS = r"""
     });
     if (leaving) return Promise.resolve();
     try {
-      return window.__tlStep({eids, left, doc: FRAME_ID, url: location.href, ts: new Date().toISOString(),
+      return lastStep = window.__tlStep({eids, left, doc: FRAME_ID, url: location.href, ts: new Date().toISOString(),
                               html: snapshot(), storage: storageInfo(), sw: !!window.__tlSW});
     } catch (e) { return Promise.resolve(); }
   }
@@ -909,6 +913,37 @@ LISTENER_JS = r"""
   for (const el of document.querySelectorAll("*")) if (el.shadowRoot) watchRoot(el.shadowRoot);
 
   window.__tlFlush = () => { emitAllTyped(); releaseHeld(); return flush(); };
+  // Called by the recorder just before a recording script's next action, so the step before it
+  // settles and gets its picture before that action's events come (a `fill`, then a `click` a few
+  // ms later). `mode` says where the action goes: "leave" (another element than the field being
+  // typed into: the field is left now, as the action's own focus change would), "stay" (the
+  // same field) or "unknown". Typing still in the focused field is left alone unless "leave".
+  // The batch then settles by the usual rule (at most BEFORE_WAIT ms; then it is snapshotted as
+  // the action's first event would). A batch ending in a click, key press or submit is not
+  // waited for: the navigation or dialog it causes may still join it.
+  const BEFORE_WAIT = 3000;
+  window.__tlBeforeAction = (mode) => {
+    if (!TOP) return Promise.resolve(false);
+    const el = document.activeElement;
+    if (el && dirty.has(el)) {
+      if (mode !== "leave") return Promise.resolve(false);
+      try { el.blur(); } catch (e) {}
+    }
+    const last = pending[pending.length - 1];
+    if (!dirty.size && (!last || ["click", "dblclick", "keypress", "submit"].includes(last.action))) {
+      return Promise.resolve(false);
+    }
+    emitAllTyped();
+    const until = Date.now() + BEFORE_WAIT;
+    return new Promise((done) => {
+      const check = () => {
+        if (!pending.length) { lastStep.then(() => done(true), () => done(true)); return; }
+        if (Date.now() > until) { Promise.resolve(flush()).then(() => done(true), () => done(true)); return; }
+        setTimeout(check, 20);
+      };
+      check();
+    });
+  };
   // Before the document goes (beforeunload comes while it is still whole): typing not yet written
   // and a click held for a possible double click are sent now, not while it is torn down.
   window.addEventListener("beforeunload", () => { if (live()) { emitAllTyped(); releaseHeld(); } }, true);
@@ -1481,6 +1516,22 @@ class _Steps:
             self.written.append(step)
             self.file.write(json.dumps(_public(step)) + "\n")
         self.file.flush()
+
+    BEFORE_ACTION_JS = "m => window.__tlBeforeAction ? window.__tlBeforeAction(m) : false"
+
+    def before_action(self, target=None, mode: str = "unknown") -> None:
+        """Just before a recording script's next action: each open page lets what it has not
+        snapshotted yet settle and snapshots it (typing, a batch still settling;
+        `__tlBeforeAction`; `mode` is where the action goes on `target`, the page it is made
+        on), so `drain` takes those steps' pictures before the action's events come. Without
+        this, a `fill` followed a few ms later by a `click` had its picture taken once the
+        click had begun."""
+        for page in list(self.pages.values()):
+            try:
+                if not page.is_closed():
+                    page.evaluate(self.BEFORE_ACTION_JS, mode if page is target else "unknown")
+            except Exception:  # noqa: BLE001 - a page navigating or closing: nothing to take
+                continue
 
     INSTALLED_JS = "() => location.protocol === 'about:' || window.__tlInstalledFor === document"
 
@@ -2077,16 +2128,49 @@ class _Draining:
         """Another tab (a popup the script waited for), handed out the same way."""
         return page if isinstance(page, _Draining) else _Draining(page, self._steps)
 
+    # Calls that send the page input (or name the element the next input goes to): before them,
+    # what the page has not snapshotted yet is snapshotted and pictured (`__tlBeforeAction`).
+    INPUT = frozenset({
+        "click", "dblclick", "fill", "type", "press", "press_sequentially", "check", "uncheck",
+        "set_checked", "select_option", "set_input_files", "tap", "drag_and_drop", "hover",
+        "focus", "dispatch_event", "locator", "get_by_role", "get_by_text", "get_by_label",
+        "get_by_placeholder", "get_by_alt_text", "get_by_title", "get_by_test_id",
+        "frame_locator",
+    })  # fmt: skip
+
     def __getattr__(self, name):
         attr = getattr(self._page, name)
         if not callable(attr):
             return attr
 
         def call(*args, **kwargs):
+            if name in self.INPUT:
+                self._steps.before_action(self._page, self._mode(name, args))
             self._steps.drain()
             return attr(*args, **kwargs)
 
         return call
+
+    # Actions on an element that move the focus to it (a click presses on it, a fill focuses it).
+    FOCUSING = frozenset({
+        "click", "dblclick", "fill", "type", "press", "press_sequentially", "check", "uncheck",
+        "set_checked", "select_option", "set_input_files", "tap", "focus", "drag_and_drop",
+    })  # fmt: skip
+
+    def _mode(self, name: str, args) -> str:
+        """Where the action goes, for `__tlBeforeAction`: `leave` (an element other than the
+        focused one), `stay` (the focused one) or `unknown` (a locator made for later)."""
+        if name not in self.FOCUSING or not args or not isinstance(args[0], str):
+            return "unknown"
+        try:
+            handle = self._page.query_selector(args[0])  # no waiting: as the page is now
+            if handle is None:
+                return "leave"
+            same = handle.evaluate("el => el === document.activeElement || el.contains("
+                                   "document.activeElement)")  # fmt: skip
+            return "stay" if same else "leave"
+        except Exception:  # noqa: BLE001 - a selector only the action understands
+            return "unknown"
 
 
 PDF_TYPES = ("application/pdf", "application/x-pdf")
