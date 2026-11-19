@@ -226,14 +226,8 @@ def load_part(app: str, part: Path) -> Part:
     exs = sorted(_exchanges(doc, hosts), key=lambda e: e.started)
     timed = [(s["seq"], har._time(s.get("ts"))) for s in raw]
     owner: dict[int, list[Ex]] = {}
-    # The recorder logs a typing step, the key press and the submit it causes a few ms after the
-    # request they send has started: a step logged within LAG after a request still owns it.
-    lag = timedelta(milliseconds=150)
     for e in exs:
-        at = None
-        for seq, ts in timed:
-            if ts is not None and ts <= e.started + lag:
-                at = seq
+        at = stepfacts.step_at(timed, e.started)  # the one rule: a step logged just after owns it
         if at is not None:
             owner.setdefault(at, []).append(e)
 

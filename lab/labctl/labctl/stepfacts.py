@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -39,6 +40,23 @@ ID_VALUE = re.compile(r"^([A-Z]{1,8})([-_/.]?)(\d{2,12})$")
 ID_FIELD = re.compile(r"(^|_)(id|no|number|num|ref|reference|code|key)$", re.I)
 ID_WORDS = {"id", "no", "nr", "number", "num", "ref", "reference", "key", "ident"}
 COUNT_FIELDS = ("total", "count", "total_count", "totalCount", "pages", "page_count")
+# The recorder logs a click, a typing step, the key press and the submit it causes a few ms after
+# the request they send has started (the page's listener runs first): a step logged within LAG
+# after a request still owns it.
+LAG = timedelta(milliseconds=150)
+
+
+def step_at(timed, started: datetime | None):
+    """The step a request belongs to: the last of `timed` (`(key, logged at)` in step order)
+    logged at or before the request started, or less than `LAG` after. The one rule for every
+    module that matches steps to requests (step facts, seed plan, navigation, API catalogue)."""
+    if started is None:
+        return None
+    at = None
+    for key, ts in timed:
+        if ts is not None and ts <= started + LAG:
+            at = key
+    return at
 
 
 def _steps(part: Path) -> list[dict]:
@@ -103,17 +121,14 @@ def facts(part: Path) -> Facts:
         info = sanitize.page(html, known, vocab)
         return {(m["selector"], m["text"]) for m in info.messages if not m["hidden"]}
 
-    # Each request goes to the last step at or before it; a page's own document to the page
+    # Each request goes to its step (`step_at`); a page's own document to the page
     # load it became, when one followed within a few seconds (a back or forward is its own step).
     timed = [(i, har._time(s.get("ts"))) for i, s in enumerate(raw)]
     owner: dict[int, list] = {}
     for e in entries:
         if e.kind == "asset" or e.started is None:
             continue
-        at = None
-        for i, ts in timed:
-            if ts is not None and ts <= e.started:
-                at = i
+        at = step_at(timed, e.started)
         if e.kind == "document":
             load = next((i for i, ts in timed if ts is not None and ts >= e.started
                          and (ts - e.started).total_seconds() < 3 and raw[i].get("action") == "goto"
