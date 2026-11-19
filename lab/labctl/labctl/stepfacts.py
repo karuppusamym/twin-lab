@@ -46,28 +46,24 @@ COUNT_FIELDS = ("total", "count", "total_count", "totalCount", "pages", "page_co
 LAG = timedelta(milliseconds=150)
 
 
-# Actions that send a request and may be logged just after it; a dialog shows what a request
-# answered and a page load (a hash change) is what an action caused: neither sent it.
-CAUSES = tuple(a for a in USER_ACTIONS if a != "dialog")
+NO_CAUSE = ("dialog",)  # a dialog shows what a request answered: it never sends one
 
 
 def step_at(timed, started: datetime | None):
-    """The step a request belongs to. `timed` is `(key, logged at, action)` in step order.
-    The first action of a person logged after the request started, less than `LAG` after (the
-    action that sent it, logged late: never a dialog or a page load); else the last step logged
-    at or before it. The
-    one rule for every module that matches steps to requests (step facts, seed plan, and through
-    them navigation, API catalogue and page rules)."""
+    """The step a request belongs to. `timed` is `(key, logged at[, action])` in step order: the
+    last step logged at or before the request started, or less than `LAG` after it (the action
+    that sent it, or the page change that action caused, logged late), but never a dialog (the
+    "Product added" alert logged 148 ms after the call whose answer brought it). The one rule
+    for every module that matches steps to requests (step facts, seed plan, and through them
+    navigation, API catalogue and page rules)."""
     if started is None:
         return None
     at = None
     for key, ts, *rest in timed:
         if ts is None:
             continue
-        if ts <= started:
+        if ts <= started or (ts <= started + LAG and (not rest or rest[0] not in NO_CAUSE)):
             at = key
-        elif ts <= started + LAG and (not rest or rest[0] in CAUSES):
-            return key
     return at
 
 
