@@ -1,0 +1,171 @@
+{
+ "format": "twinlab-desktop-recording/1",
+ "surface": "desktop",
+ "recorder": "labctl.desktop.recorder",
+ "started": "2026-11-19T16:22:37.819Z",
+ "ended": "2026-11-19T16:22:59.353Z",
+ "steps": 36,
+ "processes": [
+  {
+   "process": "CaseDesk.exe",
+   "pid": 34800,
+   "technology": {
+    "surface": "desktop",
+    "toolkit": "WinForms",
+    "marker": "FrameworkId WinForm",
+    "confidence": "certain",
+    "support": "full",
+    "runtime": {
+     "name": ".NET",
+     "version": "6.0.3",
+     "marker": "shared runtime folder of loaded modules: Microsoft.NETCore.App 6.0.3, Microsoft.WindowsDesktop.App 6.0.3",
+     "confidence": "certain"
+    },
+    "executable": {
+     "file": "CaseDesk.exe",
+     "description": "CaseDesk case management (reference)",
+     "product": "CaseDesk",
+     "product_version": "1.2.0",
+     "file_version": "1.2.0.0"
+    },
+    "supported": true,
+    "evidence": [
+     {
+      "kind": "desktop",
+      "name": "WinForms",
+      "marker": "FrameworkId WinForm",
+      "confidence": "certain"
+     },
+     {
+      "kind": "desktop",
+      "name": "WinForms",
+      "marker": "window class WindowsForms10.*",
+      "confidence": "certain"
+     },
+     {
+      "kind": "desktop",
+      "name": "WinForms",
+      "marker": "System.Windows.Forms.dll loaded",
+      "confidence": "certain"
+     },
+     {
+      "kind": "desktop",
+      "name": "Win32",
+      "marker": "FrameworkId Win32 (also every toolkit's plain windows)",
+      "confidence": "guess"
+     },
+     {
+      "kind": "desktop",
+      "name": "Win32",
+      "marker": "dialog class #32770 (also message boxes of any toolkit)",
+      "confidence": "guess"
+     },
+     {
+      "kind": "runtime",
+      "name": ".NET",
+      "marker": "shared runtime folder of loaded modules: Microsoft.NETCore.App 6.0.3, Microsoft.WindowsDesktop.App 6.0.3",
+      "confidence": "certain",
+      "version": "6.0.3"
+     }
+    ]
+   },
+   "signals": {
+    "process": "CaseDesk.exe",
+    "modules": [
+     "System.Windows.Forms.dll",
+     "coreclr.dll",
+     "hostfxr.dll"
+    ],
+    "runtimes": [
+     "Microsoft.NETCore.App 6.0.3",
+     "Microsoft.WindowsDesktop.App 6.0.3"
+    ],
+    "exe": {
+     "file": "CaseDesk.exe",
+     "description": "CaseDesk case management (reference)",
+     "product": "CaseDesk",
+     "product_version": "1.2.0",
+     "file_version": "1.2.0.0",
+     "original_file": "CaseDesk.dll"
+    },
+    "files": [],
+    "framework_ids": [
+     "Win32",
+     "WinForm"
+    ],
+    "classes": [
+     "#32770",
+     "Button",
+     "Static",
+     "WindowsForms10.Button.app.0.*",
+     "WindowsForms10.ComboBox.app.0.*",
+     "WindowsForms10.Edit.app.0.*",
+     "WindowsForms10.Static.app.0.*",
+     "WindowsForms10.Window.20808.app.0.*",
+     "WindowsForms10.Window.8.app.0.*"
+    ]
+   }
+  }
+ ],
+ "capture": {
+  "uia_events": [
+   "Invoke_Invoked",
+   "SelectionItem_ElementSelected",
+   "ValueProperty changed",
+   "ToggleState changed",
+   "ExpandCollapseState changed",
+   "FocusChanged"
+  ],
+  "hooks": [
+   "WH_MOUSE_LL",
+   "WH_KEYBOARD_LL"
+  ],
+  "polled": [
+   "top-level windows of the recorded processes (open, close, menus)",
+   "foreground window",
+   "edit value when focus leaves it"
+  ],
+  "screenshots": true,
+  "pictures": "without data, checked (pictures.json)"
+ },
+ "system": {
+  "dpi": 144,
+  "fonts": {
+   "message": {
+    "face": "Segoe UI",
+    "px": 18,
+    "pt": 9.0,
+    "weight": 400
+   },
+   "caption": {
+    "face": "Segoe UI",
+    "px": 18,
+    "pt": 9.0,
+    "weight": 400
+   },
+   "menu": {
+    "face": "Segoe UI",
+    "px": 18,
+    "pt": 9.0,
+    "weight": 400
+   },
+   "status": {
+    "face": "Segoe UI",
+    "px": 18,
+    "pt": 9.0,
+    "weight": 400
+   },
+   "default_gui": {
+    "face": "MS Shell Dlg",
+    "px": 16,
+    "pt": 12.0,
+    "weight": 400
+   }
+  },
+  "high_contrast": false,
+  "apps_light_theme": true,
+  "text_scale_percent": 100
+ },
+ "privacy": "names and values that may be data are kept as their shape only (labctl.desktop.privacy); typed values are never stored",
+ "notes": []
+}

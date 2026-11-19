@@ -648,6 +648,15 @@ page file as a gap. What the documents cannot say is what the package cannot: th
 screen beyond its title and heading, the body of an answer the page never read, what an unused
 control does, a version nothing in the evidence shows.
 
+A **desktop** application gets the same set from its recordings (`labctl.desktop.kit`, written
+by `labctl brief` into `apps/<app>/spec/`): the constitution, architecture and build plan, and
+one `WINDOWS/<window>.md` per window, with the look (`look/windows.json`: frame, DPI, bounds,
+fonts, colours; `look/screens/`: pictures without data, checked with OCR), the texts, the
+navigation map, the field rules, the recorded steps with their pictures, and a seed made with
+the replay values. What the desktop package holds, how its pictures are made safe, how a
+rebuild is judged (`labctl desktop verify --geometry --rows --pictures`) and what is not
+capturable (the data the application reads and writes) are in `09-desktop.md`.
+
 ## Privacy
 
 A HAR or a database export from a real system holds customer data, cookies and tokens. So:

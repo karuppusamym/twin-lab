@@ -168,6 +168,11 @@ def _structure_words(raw: dict, labels: set[str]) -> set[str]:
     return out
 
 
+def _plain(text: str | None) -> str:
+    """A caption without its access-key marker (`_Search`, `&Search` -> `search`)."""
+    return re.sub(r"[_&]", "", str(text or "")).strip().lower()
+
+
 def _is_header(n: dict) -> bool:
     kids = n.get("children") or []
     return n.get("type") in ("Header", "HeaderItem") or any(
@@ -189,7 +194,7 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
         struct = structure
     message_box = (raw.get("cls") or "") == "#32770" or bool(raw.get("message_box"))
 
-    def walk(n: dict, data: bool, combo: bool) -> dict:
+    def walk(n: dict, data: bool, combo: bool, caption: str | None = None) -> dict:
         t = n.get("type") or "Custom"
         name = n.get("name")
         aid = n.get("aid") or ""
@@ -209,7 +214,10 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
             elif t in STRUCTURE:
                 keep = True
             elif t == "Text":
-                keep = name.strip() in labels or message_box
+                # A caption drawn inside a kept control (WPF: the TextBlock of a Button, a
+                # column header or a Label, `_` marking the access key) is that control's text.
+                keep = (name.strip() in labels or message_box
+                        or (caption is not None and _plain(name) == _plain(caption)))  # fmt: skip
             elif t in LABELLED:
                 keep = name.strip() in labels or name == aid
             if name is not None:
@@ -229,7 +237,9 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
         for key in ("enabled", "visible", "focusable", "readonly", "selected"):
             if key in n and n[key] is not None:
                 out[key] = bool(n[key])
-        for key in ("toggle", "expand", "rect", "patterns", "rows", "columns"):
+        # How it looks and what it accepts (labctl.desktop.winlook): fonts, frame, limits.
+        for key in ("toggle", "expand", "rect", "patterns", "rows", "columns", "win32", "frame",
+                    "text_attrs"):  # fmt: skip
             if n.get(key) is not None:
                 out[key] = n[key]
         if n.get("password"):
@@ -255,11 +265,13 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
                 kids.append(walk(c, not kept, kept))
             out["children"] = kids
             return out
+        kept_caption = n.get("name") if out.get("name_is") in ("structure", "message") else None
         if children and t in ("Table", "DataGrid") and not data:
             # A grid's cells are data; its column headers (and a header row) are structure.
             out["children"] = [walk(c, not _is_header(c), False) for c in children]
         elif children:
-            out["children"] = [walk(c, inside and not combo, combo) for c in children]
+            out["children"] = [walk(c, inside and not combo, combo, kept_caption)
+                               for c in children]  # fmt: skip
         if n.get("truncated"):
             out["truncated"] = n["truncated"]
         return out

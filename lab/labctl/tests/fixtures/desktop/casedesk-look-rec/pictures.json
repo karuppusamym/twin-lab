@@ -1,0 +1,17 @@
+{
+ "format": "twinlab-desktop-pictures/1",
+ "how": "window printed (PrintWindow); every place the control tree shows data painted over in its own background and its shape drawn there",
+ "checked_with": "windows",
+ "values_looked_for": 20,
+ "kept": [
+  "0001.png",
+  "0005.png",
+  "0011.png",
+  "0014.png",
+  "0016.png",
+  "0019.png",
+  "0026.png"
+ ],
+ "dropped": [],
+ "note": "test fixture: a subset of the pictures"
+}

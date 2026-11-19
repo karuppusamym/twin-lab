@@ -89,6 +89,79 @@ def _rows(node: dict) -> int:
     return n
 
 
+def _client_origin(tree: dict) -> tuple[int, int]:
+    c = (tree.get("frame") or {}).get("client")
+    return (c[0], c[1]) if c and len(c) == 4 else (0, 0)
+
+
+def compare_geometry(recorded: dict, live: dict, step: int = 0, tol: int = 2) -> list[Difference]:
+    """The client area's size and each control's bounds in it (recorded vs live), within `tol`
+    pixels, and a control's font where both trees say it (labctl.desktop.winlook)."""
+    diffs: list[Difference] = []
+    rc, lc = (recorded.get("frame") or {}).get("client"), (live.get("frame") or {}).get("client")
+    if rc and lc and (abs(rc[2] - lc[2]) > tol or abs(rc[3] - lc[3]) > tol):
+        diffs.append(Difference(step=step, element="(client area)", check="geometry",
+                                expected=f"{rc[2]}x{rc[3]}", actual=f"{lc[2]}x{lc[3]}"))  # fmt: skip
+    ro, lo = _client_origin(recorded), _client_origin(live)
+    for node, ancestors, idx in _controls(recorded):
+        if node.get("type") == "MenuItem" or not node.get("rect") or node.get("visible") is False:
+            continue
+        loc = locator.build(recorded, node, ancestors, idx)
+        if loc.get("ambiguous"):
+            continue
+        scoped = loc["path"] if "Index=" in loc["selector"] else None
+        hits = locator.find(live, loc["selector"], scoped)
+        if len(hits) != 1 or not hits[0][0].get("rect"):
+            continue
+        a, b = node["rect"], hits[0][0]["rect"]
+        ra = [a[0] - ro[0], a[1] - ro[1], a[2], a[3]]
+        rb = [b[0] - lo[0], b[1] - lo[1], b[2], b[3]]
+        if any(abs(x - y) > tol for x, y in zip(ra, rb, strict=True)):
+            diffs.append(Difference(step=step, element=loc["selector"], check="geometry",
+                                    expected=ra, actual=rb))  # fmt: skip
+        fa = (node.get("win32") or {}).get("font")
+        fb = (hits[0][0].get("win32") or {}).get("font")
+        if fa and fb and (fa.get("face"), fa.get("px"), fa.get("weight")) != (
+                fb.get("face"), fb.get("px"), fb.get("weight")):  # fmt: skip
+            diffs.append(Difference(step=step, element=loc["selector"], check="font",
+                                    expected=f"{fa.get('face')} {fa.get('px')}px {fa.get('weight')}",
+                                    actual=f"{fb.get('face')} {fb.get('px')}px {fb.get('weight')}"))  # fmt: skip
+    return diffs
+
+
+def compare_rows(recorded: dict, live: dict, step: int = 0) -> list[Difference]:
+    """The number of rows each grid shows (an outcome: a search found three cases)."""
+    diffs: list[Difference] = []
+    for node, ancestors, idx in _controls(recorded):
+        if node.get("type") not in ("DataGrid", "Table", "List", "Tree"):
+            continue
+        loc = locator.build(recorded, node, ancestors, idx)
+        scoped = loc["path"] if "Index=" in loc["selector"] else None
+        hits = locator.find(live, loc["selector"], scoped)
+        if len(hits) == 1 and _rows(node) != _rows(hits[0][0]):
+            diffs.append(Difference(step=step, element=loc["selector"] + " (rows)", check="rows",
+                                    expected=_rows(node), actual=_rows(hits[0][0])))  # fmt: skip
+    return diffs
+
+
+def picture_difference(a_png: bytes, b_png: bytes, tolerance: int = 16) -> float:
+    """Percent of pixels whose colour differs by more than `tolerance` in a channel; 100 when
+    the sizes differ."""
+    from labctl.desktop import pictures
+
+    wa, ha, a = pictures.read_png(a_png)
+    wb, hb, b = pictures.read_png(b_png)
+    if (wa, ha) != (wb, hb):
+        return 100.0
+    n = wa * ha
+    diff = 0
+    for i in range(0, n * 3, 3):
+        if (abs(a[i] - b[i]) > tolerance or abs(a[i + 1] - b[i + 1]) > tolerance
+                or abs(a[i + 2] - b[i + 2]) > tolerance):  # fmt: skip
+            diff += 1
+    return 100.0 * diff / n if n else 0.0
+
+
 def compare_trees(recorded: dict, live: dict, step: int = 0,
                   supplied: frozenset[str] | set[str] = frozenset()) -> list[Difference]:  # fmt: skip
     """Differences between a recorded window tree and the live one, each naming the locator.
@@ -235,6 +308,19 @@ class _Live:
                 out.append((hwnd, privacy.clean(raw, self.known, self.structure)))
         return out
 
+    def picture(self, hwnd: int) -> bytes | None:
+        """The window as a picture without data, made as the recorder makes it."""
+        from labctl.desktop import pictures, winlook
+
+        raw = self.win.capture(hwnd)
+        if raw is None:
+            return None
+        pixels = winlook.grab(hwnd)
+        clean = privacy.clean(raw, self.known, self.structure)
+        got = winlook.masked_picture(hwnd, pictures.places(raw, clean), winlook.font_handle,
+                                     pixels)  # fmt: skip
+        return got[0] if got else None
+
     def window(self, selector: str, timeout: float = 8.0) -> tuple[int, dict] | tuple[None, int]:
         """The window a recorded window locator names: (hwnd, tree), or (None, matches)."""
         want = locator.parse(selector)
@@ -352,8 +438,14 @@ def _act(live: _Live, hwnd: int, step: dict, values: dict[str, list[str]]) -> st
 
 
 def verify(exe: str, recording: Path, *, values: dict[str, str | list[str]] | None = None,
-           settle: float = 0.8, wait: float = 20.0) -> FidelityReport:  # fmt: skip
-    """Start `exe`, replay `recording`, compare, close the app. Windows only."""
+           settle: float = 0.8, wait: float = 20.0, geometry: bool = False, rows: bool = False,
+           pictures_dir: Path | None = None, picture_threshold: float = 1.0) -> FidelityReport:  # fmt: skip
+    """Start `exe`, replay `recording`, compare, close the app. Windows only.
+
+    `geometry`: also compare the client area and every control's bounds and font. `rows`: also
+    compare how many rows each grid shows. `pictures_dir`: save a picture without data of the
+    window after each step there and compare it with the recorded one (percent of pixels that
+    differ; above `picture_threshold` is a difference)."""
     from labctl.desktop import require
     from labctl.desktop.drive import Ambiguous, DriveError
     from labctl.desktop.model import Recording
@@ -425,6 +517,15 @@ def verify(exe: str, recording: Path, *, values: dict[str, str | list[str]] | No
                     tree = next((t for h, t in live.windows() if h == after), None)
                 if tree is not None:
                     diffs += compare_trees(recorded, tree, seq, supplied)
+                    if rows:
+                        diffs += compare_rows(recorded, tree, seq)
+                    if geometry:
+                        diffs += compare_geometry(recorded, tree, seq)
+                    if pictures_dir is not None:
+                        pic_note, pic_diff = _compare_picture(live, after, rec, step, pictures_dir,
+                                                              picture_threshold)  # fmt: skip
+                        note = "; ".join(x for x in (note, pic_note) if x) or None
+                        diffs += pic_diff
                 elif step.get("action") != "window_open":
                     note = (note or "") + "; the window was gone when it was compared"
             if diffs and status == "pass":
@@ -439,5 +540,54 @@ def verify(exe: str, recording: Path, *, values: dict[str, str | list[str]] | No
             except subprocess.TimeoutExpired:
                 proc.kill()
     failed = any(r.status == "fail" for r in reports)
-    return FidelityReport(recording=rec.id, base_url=f"exe:{Path(exe).name}",
-                          status="fail" if failed else "pass", steps=reports)  # fmt: skip
+    report = FidelityReport(recording=rec.id, base_url=f"exe:{Path(exe).name}",
+                            status="fail" if failed else "pass", steps=reports)  # fmt: skip
+    judged(report, geometry=geometry, rows=rows, pictures=pictures_dir is not None)
+    return report
+
+
+def judged(report: FidelityReport, *, geometry: bool, rows: bool, pictures: bool) -> None:
+    """The verdict and assurance of a desktop replay, in the web report's terms: VERIFIED
+    COMPLETE only when every step passed with the structure, geometry, rows and pictures all
+    compared, and no step was skipped except those the steps around them cover."""
+    from labctl.behaviour import judging
+
+    if report.status != "pass":
+        report.verdict = "FAIL"
+        report.verdict_reasons = [f"step {s.seq}: {d.text()}" for s in report.steps
+                                  for d in s.differences][:20] or ["a step failed"]  # fmt: skip
+        return
+    report.verdict = "PASS WITHIN DECLARED SCOPE"
+    missing = [n for n, on in (("geometry", geometry), ("rows", rows), ("pictures", pictures))
+               if not on]  # fmt: skip
+    skipped = [s.seq for s in report.steps
+               if s.status == "skipped" and s.note != "covered by the steps around it"]  # fmt: skip
+    if not missing and not skipped:
+        report.assurance = judging.VERIFIED
+        report.assurance_reasons = ["every step replayed; structure, geometry, fonts, grid rows "
+                                    "and pictures compared"]  # fmt: skip
+    else:
+        report.assurance = judging.DECLARED_ONLY
+        report.assurance_reasons = ([f"not compared: {', '.join(missing)}"] if missing else []) + (
+            [f"skipped: steps {skipped}"] if skipped else [])  # fmt: skip
+
+
+def _compare_picture(live: _Live, hwnd: int, rec, step: dict, folder: Path,
+                     threshold: float) -> tuple[str | None, list[Difference]]:  # fmt: skip
+    """Save the live window's picture (without data) and compare it with the recorded one."""
+    png = live.picture(hwnd)
+    if png is None:
+        return "no picture of the live window", []
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    seq = step.get("seq")
+    (folder / f"{seq:04d}.png").write_bytes(png)
+    want = rec.path / step["picture"] if step.get("picture") else None
+    if want is None or not want.is_file():
+        return None, []
+    pct = picture_difference(want.read_bytes(), png)
+    note = f"picture differs {pct:.2f} %"
+    if pct > threshold:
+        return note, [Difference(step=seq, element="(picture)", check="picture",
+                                 expected=f"<= {threshold} %", actual=f"{pct:.2f} %")]  # fmt: skip
+    return note, []

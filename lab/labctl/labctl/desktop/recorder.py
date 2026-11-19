@@ -321,7 +321,7 @@ class Recorder:
 
     def __init__(self, out_dir: Path, pids: set[int], *, screenshots: bool = False,
                  settle_ms: int = 400, max_seconds: float = 1800, hooks: bool = True,
-                 stop: Callable[[], bool] | None = None) -> None:  # fmt: skip
+                 stop: Callable[[], bool] | None = None, pictures: bool = True) -> None:  # fmt: skip
         require()
         from labctl.desktop import win
 
@@ -330,6 +330,11 @@ class Recorder:
         (self.out / "trees").mkdir(parents=True, exist_ok=True)
         self.pids = set(pids)
         self.screenshots = screenshots
+        # Pictures without data (labctl.desktop.pictures); what data was seen stays in memory.
+        self.pictures = pictures
+        self.secrets: set[str] = set()
+        self.kept_texts: set[str] = set()
+        self.pending_pictures: list[tuple] = []
         self.settle = settle_ms / 1000.0
         self.max_seconds = max_seconds
         self.use_hooks = hooks
@@ -515,6 +520,31 @@ class Recorder:
             self.file.close()
             self._write_session()
         return self.out
+
+    @staticmethod
+    def _system() -> dict:
+        """The machine settings that change how windows look (labctl.desktop.winlook)."""
+        from labctl.desktop import winlook
+
+        try:
+            return winlook.system_facts()
+        except (OSError, ValueError, AttributeError):
+            return {}
+
+    def _check_pictures(self) -> None:
+        """OCR every picture while the data values seen are in memory; drop any that shows
+        one, or that could not be checked (labctl.desktop.pictures.check). Then forget them."""
+        from labctl.desktop import pictures
+
+        if not (self.out / pictures.DIR).is_dir():
+            return
+        try:
+            doc = pictures.check(self.out, self.secrets, self.kept_texts)
+        finally:
+            self.secrets, self.kept_texts = set(), set()
+        if doc["dropped"]:
+            self.notes.append(f"{len(doc['dropped'])} picture(s) dropped by the data check "
+                              f"({doc['checked_with']})")  # fmt: skip
 
     def _process(self, pid: int) -> None:
         if pid in self.processes:
@@ -910,6 +940,13 @@ class Recorder:
             # Gone while it was read: a window that is closing gives a tree without its
             # content (WPF takes the content away before the window itself goes).
             return None
+        if getattr(self, "pictures", False):  # the pixels of this moment, for its picture
+            from labctl.desktop import winlook
+
+            try:
+                raw["_pixels"] = winlook.grab(hwnd)
+            except (OSError, ValueError):
+                pass
         clean = privacy.clean(raw, self.known, self.structure)
         return raw, clean
 
@@ -1062,8 +1099,51 @@ class Recorder:
                 shot = f"screens/{seq:04d}.png"
                 if win.screenshot(hwnd if kind != "menu_open" else a["hwnd"], self.out / shot):
                     step["screenshot"] = shot
+            if getattr(self, "pictures", False) and kind != "window_close":
+                pic = self._picture(hwnd if kind != "menu_open" else a["hwnd"], tree_snap, seq)
+                if pic:
+                    step["picture"] = pic
         self.file.write(json.dumps(step, ensure_ascii=False) + "\n")
         self.file.flush()
+
+    def _picture(self, hwnd: int, snap: tuple[dict, dict], seq: int) -> str | None:
+        """A picture of the window without data (labctl.desktop.pictures), or None."""
+        from labctl.desktop import pictures, winlook
+
+        try:
+            raw, clean = snap
+            found = pictures.places(raw, clean)
+            fonts: dict[int, bytes | None] = {}
+            for p in found:  # the fonts now, while the controls exist; the drawing comes later
+                h = p.get("hwnd") or 0
+                if h not in fonts:
+                    fonts[h] = winlook.logfont_bytes(h)
+                p["lf"] = fonts[h]
+            pixels = raw.get("_pixels") or winlook.grab(hwnd)
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if pixels is None:
+            return None
+        rel = f"{pictures.DIR}/{seq:04d}.png"
+        # Drawn when the recording ends (`_render_pictures`): drawing here would delay the next
+        # snapshot. The pixels stay in memory only.
+        self.pending_pictures.append((rel, hwnd, found, pixels))
+        self.secrets |= pictures.secrets_of(found)
+        self.kept_texts |= pictures.kept_texts(clean)
+        return rel
+
+    def _render_pictures(self) -> None:
+        from labctl.desktop import winlook
+
+        pending, self.pending_pictures = getattr(self, "pending_pictures", []), []
+        for rel, hwnd, found, pixels in pending:
+            try:
+                got = winlook.masked_picture(hwnd, found, None, pixels)
+            except (OSError, ValueError, KeyError, TypeError):
+                got = None
+            if got is not None:
+                (self.out / rel).parent.mkdir(exist_ok=True)
+                (self.out / rel).write_bytes(got[0])
 
     def _effect(self, e: dict, after: dict) -> dict:
         """A selection the application made because of a step: where, never what (a row holds
@@ -1123,6 +1203,8 @@ class Recorder:
         return " > ".join(names)
 
     def _write_session(self) -> None:
+        self._render_pictures()
+        self._check_pictures()
         procs = []
         for p in self.processes.values():
             sig = dict(p["signals"])
@@ -1153,7 +1235,9 @@ class Recorder:
                 "polled": ["top-level windows of the recorded processes (open, close, menus)",
                            "foreground window", "edit value when focus leaves it"],
                 "screenshots": self.screenshots,
+                "pictures": "without data, checked (pictures.json)" if self.pictures else False,
             },
+            "system": self._system(),
             "privacy": "names and values that may be data are kept as their shape only "
             "(labctl.desktop.privacy); typed values are never stored",
             "notes": self.notes,
