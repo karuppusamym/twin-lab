@@ -1520,12 +1520,20 @@ def client_rendering(
     calls: dict[str, None] = {}
     values: set[str] = set()
     screens: dict[str, None] = {}
+    # Every document the server sent for a screen counts: a server-rendered list page is served
+    # again after a search, with the results in it, and those are not filled by the browser.
+    served_by: dict[str, list[str]] = defaultdict(list)
     for pattern, html in served:
+        served_by[pattern].append(html)
+    for pattern, docs in served_by.items():
         later = shots.get(pattern) or []
         if not later:
             continue
-        before = _filled_ids(html)
-        served_text = sanitize.phrase(html)
+        before: dict[str, int] = {}
+        for html in docs:
+            for i, n in _filled_ids(html).items():
+                before[i] = max(before.get(i, 0), n)
+        served_text = " ".join(sanitize.phrase(html) for html in docs)
         empty = {i for i, n in before.items() if n == 0}
         for snap in later:
             after = _filled_ids(snap)
@@ -2153,7 +2161,11 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         answers = [(f"{e.method} {sanitize.route_pattern(e.path)}", e.resp_json) for e in entries
                    if e.kind == "api" and e.resp_json is not None and 200 <= e.status < 300]  # fmt: skip
         found = client_rendering(served, shots, answers)
-        if found:
+        # The whole application is static pages filled in the browser only when most of its
+        # served screens are; one screen whose table a script fills (a server-rendered app with
+        # one API-driven list) leaves the application server-rendered.
+        served_screens = {pattern for pattern, _ in served}
+        if found and 2 * len(found["screens"]) >= len(served_screens):
             tech.update(framework=STATIC_CLIENT, rendering="client", pages="static",
                         marker=found["marker"])  # fmt: skip
     frontend = {k: tech[k] for k in FRONT_KEYS if k in tech}

@@ -161,3 +161,24 @@ def test_style_text_stays_raw_in_snapshots_and_inline_css():
     page = sanitize.page("<html><head><style>.nav>.c a{color:red}.x:after{content:''}</style>"
                          "</head><body><p>Hello</p></body></html>")  # fmt: skip
     assert ".nav>.c a{color:red}" in page.html and "&gt;" not in page.html
+
+
+def test_one_script_filled_screen_leaves_a_server_rendered_app_server_rendered():
+    """Found by the certification run: the server-rendered multi-application fixture has one
+    screen (`/customers`) whose table a script fills from `GET /api/customers`. The application
+    as a whole stays server-rendered; only when most served screens are filled in the browser is
+    it static pages rendered from the API."""
+    from labctl import har
+
+    served = [("/orders", '<table id="t"><tr><td>A</td></tr></table>'),
+              ("/orders/new", "<form id=f><input name=a></form>"),
+              ("/customers", '<table><tbody id="rows"></tbody></table>')]  # fmt: skip
+    shots = [("/customers", '<table><tbody id="rows"><tr><td>ann lindqvist</td></tr>'
+                            "<tr><td>ben hartley</td></tr><tr><td>cara okafor</td></tr>"
+                            "</tbody></table>")]  # fmt: skip
+    answers = [("GET /api/customers", [{"name": "ann lindqvist"}, {"name": "ben hartley"},
+                                       {"name": "cara okafor"}])]  # fmt: skip
+    found = har.client_rendering(served, shots, answers)
+    assert found and found["screens"] == ["/customers"]
+    served_screens = {pattern for pattern, _ in served}
+    assert 2 * len(found["screens"]) < len(served_screens)  # one of three: not the whole app
