@@ -41,8 +41,8 @@ def problems(repo_root: Path, app_id: str) -> list[str]:
         out.append("navigation.json is missing: no navigation map and no actions list "
                    "(regenerate the brief)")  # fmt: skip
     for screen in (nav or {}).get("screens") or []:
-        if not screen.get("in_scope"):
-            continue
+        if not screen.get("in_scope") or screen.get("source") == "code":
+            continue  # a screen only the code has: no snapshot by nature (codemap.json)
         if not screen.get("elements") and not str(screen.get("kind") or "").startswith(
                 ("shown in a frame", "stand-in")):  # fmt: skip
             out.append(f"screen `{screen.get('path')}` has no actions list (no snapshot of it "
@@ -68,6 +68,12 @@ def problems(repo_root: Path, app_id: str) -> list[str]:
             if "json" in str(r.get("content_type") or "") and not r.get("schema"):
                 out.append(f"endpoint `{name}` answer {status}: no schema (its body was not "
                            "recorded: the page did not read it)")  # fmt: skip
+    code = _json(app / "codemap.json")
+    for m in (code or {}).get("missing_code") or []:
+        routes = ", ".join(f"`{r}`" for r in m.get("routes") or [])
+        out.append(f"code `{m.get('file')}`" + (f" (route {routes})" if routes else "")
+                   + " was never downloaded: what it shows is unknown (`labctl evidence "
+                   "fetch-code <recording> --yes`, then regenerate the brief)")  # fmt: skip
     api_dir = app / "api"
     if api_dir.is_dir() and cat is None and any(api_dir.glob("*.json")):
         out.append("api/catalogue.json is missing though endpoint files exist")
@@ -100,6 +106,10 @@ def problems(repo_root: Path, app_id: str) -> list[str]:
             out.append(f"steps/{path.name}: typing step(s) {', '.join(map(str, missing[:12]))}"
                        + (" ..." if len(missing) > 12 else "")
                        + " have no value in the values file")  # fmt: skip
+    # The build documents the package will carry (labctl.builder.docs): a page file per screen.
+    from labctl.builder import docs
+
+    out += docs.gaps(app_id, docs.inputs(Path(repo_root), app_id))
     return out
 
 
@@ -114,8 +124,21 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
                          "completeness check.",
         "AGENTS.md": "The lab's rules for coding agents.",
         "docs/factory-playbook.md": "How a demo application is built and run in the lab.",
-        app + "BRIEF.md": "The specification: scope, screens, API, sign-in, navigation, actions, "
-                          "data, seed, checks. Read it whole.",
+        app + "BRIEF.md": "The full specification: scope, screens, API, sign-in, navigation, "
+                          "actions, data, seed, checks. The reference behind every document "
+                          "under spec/.",
+        app + "session.json": "Sign-in and session as recorded: the call, each attempt, every "
+                              "cookie by name with its attributes and who sets and clears it "
+                              "(never a value or a credential).",
+        app + "spec/CONSTITUTION.md": "The rules of this build that are not negotiable (the same "
+                                      "text as the task's) and what \"done\" means. Read second.",
+        app + "spec/ARCHITECTURE.md": "Stack, layers, route table, API surface, data model, "
+                                      "sign-in, session and cookies, how the app runs. Read "
+                                      "third.",
+        app + "spec/BUILD-PLAN.md": "The build in order, each step with its \"done when\" lines. "
+                                    "Read fourth.",
+        app + "spec/GLOSSARY.md": "Option lists, code lists, the statuses the application "
+                                  "answered and the package's words.",
         app + "model.yaml": "Reference: everything the evidence showed (shapes, timings), which "
                             "the brief is generated from.",
         app + "app.yaml": "The application's lab settings and rules; you change only `run:`.",
@@ -128,6 +151,10 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
         app + "navigation.json": "Every screen, how each is reached and left, dialogs, tabs, "
                                  "frames, popup windows, and every element of each screen with "
                                  "what it did.",
+        app + "codemap.json": "What the application's code defines: every route (recorded or "
+                              "only in code), guards, lazy chunks, menus, tabs, dialogs, API "
+                              "calls (called or not), interface texts, lists of values, "
+                              "third-party libraries.",
         app + "api/catalogue.json": "Index of the endpoints the pages called, the list "
                                     "parameters' effects and the field map.",
         app + "rules.json": "Per screen and field, every validation rule with its message, "
@@ -139,6 +166,13 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
                 "stripped, checked for secrets and hosts): reference for its rules.")  # fmt: skip
     if rel in fixed:
         return fixed[rel]
+    if rel.startswith(app + "spec/PAGES/"):
+        text = data.decode("utf-8", "replace") if data else ""
+        head = text.split("\n", 1)[0].lstrip("# ").strip()
+        return (
+            f"Page file {head or rel.rsplit('/', 1)[-1]}: everything one screen needs, with "
+            "the file each fact comes from. Read the page files in order, one per screen."
+        )
     if rel.startswith(app + "api/"):
         try:
             doc = json.loads(data.decode("utf-8")) if data else {}
@@ -184,5 +218,5 @@ def index_md(app_id: str, files: list[tuple[str, str]], gaps: list[str]) -> str:
     else:
         lines.append("No gap found: every screen has an actions list, every endpoint a schema, "
                      "every navigation target a definition, every table seed rows, every typing "
-                     "step a value.")  # fmt: skip
+                     "step a value, every screen a page file.")  # fmt: skip
     return "\n".join(lines) + "\n"

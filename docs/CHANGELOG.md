@@ -114,6 +114,40 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   every remaining step passes; the damage is under "Why not pass" and in `compared`, but
   whether it should lower the status is a decision for a person. The replay loop itself was
   not run in a browser for these cases.
+
+## 2026-11-18 — The application's map from its code: every route, menu, tab, dialog and call
+A recording shows the screens a person visited; the code the browser downloaded describes the
+whole application. `labctl.codemap` reads it without running it (`labctl.jstokens`, a small
+tokeniser: strings, regular expressions against division, nested template literals, comments)
+and writes `apps/<app>/codemap.json`:
+- the inventory of the application's own files (pages, scripts and which are lazy chunks, style
+  sheets, JSON configuration, translation files, manifests); third-party libraries are named
+  with their version (file name, JSF resource library, licence banner, `ng-version`, JSF's
+  `specversion`) and not analysed;
+- route tables (Angular, React Router objects and compiled `<Route>`, Vue Router, server pages
+  and their links): path, parent and children, guards and where a refused visitor goes, the lazy
+  chunk and whether it was downloaded, redirects, titles; Angular's compiled templates (attribute
+  arrays and element instructions, `@if` blocks), HTML in scripts and compiled JSX give links,
+  menus, navigation bars, tab sets, tabs, tab panels and dialogs with the component and route
+  they belong to, and who opens and closes a dialog (`showModal()`, `.modal('show')`,
+  `dialog.open(X)`, a signal set by a click handler); JSF command links and ajax updates;
+- API calls (`fetch`, `http.get/post/...`, `axios`, `$.ajax`, `XMLHttpRequest.open`, forms),
+  each marked *called in the recording* (it matches the API catalogue) or *in code, not called*;
+- translation texts, lists of values and titles, each through the data checks; one that may be
+  data is dropped and counted.
+The brief gets *What the application's code defines* (build every route at least as a reachable
+page; a screen only the code has is reconstructed and reported), `navigation.json` gets a screen
+per route only the code has and a `source` per transition (`recording`, `page`, `code`), and the
+package, its index, its reading order, `factory.GENERATED` and the guard carry `codemap.json`.
+No script is carried. `codemap.check_text` finds secrets (keys, tokens, passwords, private keys,
+connection strings, session identifiers) and host names other than the application's own; a map
+that holds one is not written and the package refuses one. `labctl evidence fetch-code
+<recording> --yes` fetches, opt-in, only the static code the recording's code names and the
+browser never loaded (`.js`, `.mjs`, `.css`, `.json`; own origin; GET; no redirect; content type
+checked; rate limited; stops on 429/503; no session unless the saved browser state is given) into
+`<recording>/code/`. Proven on the Angular reference build, the JSF reference application and a
+hand-written fixture (`tests/fixtures/codespa`), whose admin chunk is found, fetched and mapped.
+
 ## 2026-11-18 — Field rules and page behaviour: what each page checks, from its HTML and its JavaScript
 Until now a package knew a rule only when the recording triggered it. `labctl.pagerules`
 writes `apps/<app>/rules.json` and the brief's *Field rules and page behaviour*, per screen and
@@ -143,6 +177,38 @@ field, from three sources:
   partial update; its validators that were never triggered cannot be recovered: JSF checks on
   the server). The task text, the reading order, the index, the completeness check, the guard
   and `factory.GENERATED` name the new files.
+## 2026-11-18 — Build documents: a constitution, the architecture, a plan, one page file per screen
+A builder working screen by screen had to gather one screen's facts from the brief and six
+machine files. `labctl.builder.docs` now writes, into every web package and only from the
+files it already holds, `apps/<app>/spec/`:
+- **`CONSTITUTION.md`**: the numbered rules and what "done" means. The task's *Rules that are
+  not negotiable* and *done* list are written by the same functions (`docs.rules`,
+  `docs.done_items`), so the two cannot differ. New rules in both: same technology and
+  versions, same look, assumptions written down, done means every check holds.
+- **`ARCHITECTURE.md`**: stack and versions, layers, the route table (every screen, recorded,
+  in a frame or popup, found by the link check, or known only from `codemap.json`), the API
+  surface, tables with keys and relations and the field map, sign-in, session and cookies,
+  ports and environment variables, the flow across applications, a text diagram.
+- **`BUILD-PLAN.md`**: database and seed, sign-in, each screen in order from the entry along
+  the recorded ways, navigation, API, rules, look, self-check, each with "done when" lines
+  that point at the done list and the page files' checks.
+- **`PAGES/<NN>-<screen>.md`**: per screen its address, ways in and out, picture and regions,
+  literal texts, every element, what each action did, rules and behaviour, API calls linked to
+  their files, data and columns, seed rows, acceptance checks, replay steps, sub-views, open
+  questions. Pages not recorded and screens known only from code are marked so.
+- **`GLOSSARY.md`**: option lists, code lists, the statuses the application answered.
+- **Cookies.** Do cookies need capturing? Their values never: a rebuild issues its own, and no
+  value is read into the package. Their facts do: `sanitize.cookie_attributes` reads each
+  `Set-Cookie` (name, `Path` as a pattern, `Domain` relative to the host, `HttpOnly`, `Secure`,
+  `SameSite`, `Partitioned`, lifetime as a duration, cleared or not), `signin` records which
+  response set and cleared each cookie, and `apps/<app>/session.json`, the brief's *Sign-in and
+  session* and `ARCHITECTURE.md` carry them. Tests check that no cookie value from the HAR is in
+  any packaged file.
+- The task's reading order is now task, constitution, architecture, plan, page files, with the
+  brief and the machine files as references; `INDEX.md` and `MANIFEST.json` describe each new
+  file; the completeness check counts a screen without a page file as a gap; the guard and
+  `factory.GENERATED` protect `spec/` and `session.json`. The folder is `spec/` because the
+  repository ignores every `build/` folder.
 ## 2026-11-18 — The build package carries the API, the navigation, every action and the sign-in
 What a coding agent gets was measured on two recordings (the two-application fixture, and a new
 help-desk fixture whose pages are filled by a JSON API), then the gaps were closed.

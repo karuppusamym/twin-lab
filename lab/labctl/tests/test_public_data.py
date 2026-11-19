@@ -106,3 +106,37 @@ def test_the_draft_marks_nothing_public(tmp_path):
                                                              "images": []}  # fmt: skip
     assert doc["seen"]["endpoints"][0]["path"] == "/entries"
     assert "title" in doc["seen"]["endpoints"][0]["fields"]
+
+
+def _repo(tmp_path: Path, decl: dict | None) -> tuple[Path, Path]:
+    root = tmp_path / "repo"
+    rec = root / "evidence" / "shop" / "rec"
+    rec.parent.mkdir(parents=True)
+    made = _rec(tmp_path, decl)
+    made.rename(rec)
+    step = {"seq": 1, "ts": "2026-01-01T00:00:00Z", "url": "https://www.shop.example/",
+            "action": "goto"}  # fmt: skip
+    (rec / "steps.jsonl").write_text(json.dumps(step) + "\n", encoding="utf-8")
+    return root, rec
+
+
+def test_codemap_and_build_documents_carry_only_declared_values(tmp_path):
+    from labctl import codemap
+    from labctl.builder import package
+
+    root, rec = _repo(tmp_path, DECL)
+    doc = "# Page\n\nShows Samsung galaxy s6 at 360.0; seller Ann Hartley.\n"
+    entries = [("apps/shop/spec/PAGES/01-home.md", doc.encode()),
+               ("apps/shop/codemap.json", json.dumps({"texts": ["Brannigan desk"]}).encode())]  # fmt: skip
+    without = package.data_leaks(root, "shop", entries)  # no declaration in force: all data
+    assert any("01-home.md" in x for x in without)
+    with publicdata.active([rec]):
+        found = package.data_leaks(root, "shop", entries)
+        checker = codemap.Checker()
+        assert checker.ok("Samsung galaxy s6") and not checker.ok("ann.hartley@bankmail.com")
+    # the undeclared seller is still found; the declared title and price are not
+    assert found and all("01-home.md" in x for x in found)
+    clean = [("apps/shop/spec/PAGES/01-home.md", b"# Page\n\nShows Samsung galaxy s6.\n")]
+    with publicdata.active([rec]):
+        assert package.data_leaks(root, "shop", clean) == []
+    assert package.data_leaks(root, "shop", clean)  # undeclared: the title is data

@@ -12,8 +12,9 @@ sets, and sends it back in the body field `cookie`). Observed, per cookie name:
   by it;
 - the shape of its value (a UUID, a number, a token): never the value.
 
-`signin.py` may add attribute facts of its own from `Set-Cookie`; this module only reads, and
-its one entry point is `observe()`.
+`facts()` joins these with the `Set-Cookie` facts of `signin.py` (`sanitize.cookie_attributes`:
+the response that set or cleared each cookie and its attributes) into one row per cookie name,
+which the brief's *Sign-in and session*, `session.json` and `spec/ARCHITECTURE.md` all show.
 """
 
 from __future__ import annotations
@@ -127,30 +128,84 @@ def observe(hars: list[dict], scripts: list[tuple[str, str]]) -> list[dict]:
     return sorted(out.values(), key=lambda c: (-c["sent"], c["name"]))
 
 
-def brief_lines(found: list[dict]) -> list[str]:
-    """The cookies as the brief's sign-in section lists them."""
-    if not found:
-        return []
-    out = ["**Cookies** (names as the original uses them; values are never kept):\n"]
-    for c in found:
-        how = ", ".join(c["set_by"]) or "not set in the recording (it was there already)"
-        line = f"- `{c['name']}`: set by {how}"
-        if c["attributes"]:
-            line += " with " + ", ".join(f"`{a}`" for a in c["attributes"])
-        if c["sent"]:
-            line += (f"; sent with {c['sent']} recorded request(s) ("
-                     + ", ".join(f"`{t}`" for t in c["to"][:6])
-                     + (", ..." if len(c["to"]) > 6 else "") + ")")  # fmt: skip
+def facts(ctxs: list, found: dict | None = None) -> list[dict]:
+    """One row per cookie name, for the brief, `session.json` and `ARCHITECTURE.md`: the
+    responses that set and cleared it with their attributes (`signin._cookie_facts`, from
+    `Set-Cookie` through `sanitize.cookie_attributes`), and from `observe()` the scripts that set
+    it, the requests that sent it, the body fields that carry it and the shape of its value.
+    Never a value. `found`: `signin.observe()`'s answer, whose rows are reused."""
+    from labctl import har, pagerules, signin
+
+    if found and found.get("cookie_facts") is not None:
+        rows = [dict(r) for r in found["cookie_facts"]]
+    else:  # nobody signed in: the cookies the responses set all the same
+        tmp: dict = {"cookies": [], "cookie_facts": []}
+        for c in ctxs:
+            owner_of = {id(e): seq for seq, exs in c.part.owner.items() for e in exs}
+            signin._cookie_facts(tmp, c, owner_of)
+        rows = tmp["cookie_facts"]
+    hars = []
+    for c in ctxs:
+        try:
+            hars.append(har.load(c.part.path).har)
+        except (OSError, ValueError):
+            continue
+    scripts, _ = pagerules.scripts_of(ctxs)
+    seen = observe(hars, [(s.path, s.text) for s in scripts if s.own and not s.library])
+    return merge(rows, seen)
+
+
+def merge(rows: list[dict], seen: list[dict]) -> list[dict]:
+    """`Set-Cookie` rows (signin) with what `observe()` saw, one row per name."""
+    by = {r["name"]: r for r in rows}
+    for o in seen:
+        row = by.get(o["name"])
+        if row is None:
+            row = by[o["name"]] = {"name": o["name"], "set_by": [], "cleared_by": []}
+            rows.append(row)
+        for w in o["set_by"]:
+            if w.startswith("the script "):
+                item = {"script": w.removeprefix("the script ").strip("`")}
+                if item not in row["set_by"]:
+                    row["set_by"].append(item)
+        if not row.get("attributes") and o["attributes"]:
+            # a script writes the attributes in its statement: their names, no value
+            row["script_attributes"] = o["attributes"]
+        row["sent"] = o["sent"]
+        row["sent_to"] = o["to"][:12]
+        row["sent_back"] = bool(row.get("sent_back") or o["sent"])
+        if o["in_body"]:
+            row["in_body"] = o["in_body"]
+        if o["value"]:
+            row["shape"] = o["value"]
+    return sorted(rows, key=lambda r: (-int(r.get("sent") or 0), r["name"]))
+
+
+def where_set(row: dict) -> str:
+    """The setters of a cookie row as the brief and the architecture say them."""
+    parts = []
+    for w in row.get("set_by") or []:
+        if w.get("script"):
+            parts.append(f"the script `{w['script']}`")
         else:
-            line += (
-                "; never sent in the recording (set on a path it did not take, such as signing in)"
-            )
-        if c["value"]:
-            line += f"; its value is {c['value']}"
-        if c["in_body"]:
-            line += ("; the pages also send `" + c["name"] + "=<value>` in the body field "
-                     + ", ".join(c["in_body"]) + ": the server keys those records by it")  # fmt: skip
-        out.append(line + ".")
-    out.append("Set and read these cookies under the same names, at the same moments; give each "
-               "a synthetic value of the same shape.\n")  # fmt: skip
-    return out
+            parts.append(f"`{w.get('request')} {w.get('status')}`"
+                         + (f" (step {w['step']}, on `{w.get('screen')}`)" if w.get("step") else ""))  # fmt: skip
+    return "; ".join(parts) or "no recorded response or script (it was there already)"
+
+
+def use_text(row: dict) -> str:
+    """How a cookie is used, as one clause: requests that sent it, body fields, value shape."""
+    bits = []
+    if row.get("sent"):
+        to = row.get("sent_to") or []
+        bits.append(f"sent with {row['sent']} recorded request(s) ("
+                    + ", ".join(f"`{t}`" for t in to[:6]) + (", ..." if len(to) > 6 else "") + ")")  # fmt: skip
+    elif "sent" in row:
+        bits.append("never sent in the recording (set on a path it did not take, such as "
+                    "signing in)")  # fmt: skip
+    if row.get("shape"):
+        bits.append(f"its value is {row['shape']}")
+    if row.get("in_body"):
+        bits.append(f"the pages also send `{row['name']}=<value>` in the body field "
+                    + ", ".join(row["in_body"]) + ": the server keys those records by it")  # fmt: skip
+    return "; ".join(bits)

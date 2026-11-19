@@ -243,10 +243,92 @@ of the data:
 - `apps/<app>/navigation.json`: every screen, each way in and out, dialogs, in-page tabs,
   frames and popup windows, links seen and not visited, and every interactive element with
   what happened when the recording used it, or "seen, not used".
-- The brief's *Sign-in and session*: what was observed, by name only, and the tables
-  `app_users` and `app_sessions` the rebuilt application keeps users and sessions in.
+- The brief's *Sign-in and session* and `apps/<app>/session.json`: what was observed, by name
+  only, and the tables `app_users` and `app_sessions` the rebuilt application keeps users and
+  sessions in. Every cookie a response set is listed by name with the response that set it
+  (request, status, step, screen), its attributes (`Path` as an address pattern, `Domain`
+  relative to the application's host, `HttpOnly`, `Secure`, `SameSite`, `Partitioned`, the
+  lifetime as a duration: session or persistent) and the response that cleared it, read from
+  the HAR's `Set-Cookie` headers (`sanitize.cookie_attributes`). A cookie's value is never read
+  into the package and is not needed: the rebuilt application issues its own. Neither is the
+  host name a `Domain` names.
 - The brief's *Scope*: with no automation and no flow written by a person, everything the
   recording shows, in recorded order.
+
+### What the application's code defines
+
+The HAR also holds the code the browser downloaded: the pages, the scripts, the style sheets
+and the JSON files. That code names much more than the recording visited, so `labctl brief`
+reads it, without running any of it, into `apps/<app>/codemap.json` (`labctl/codemap.py`):
+
+- every route of the route table (Angular, React Router, Vue Router; for server-rendered
+  applications such as JSF, the pages and their links), with its guards, lazy chunk, redirect
+  and title, and whether the recording visited it;
+- the menus, links, tabs and dialogs of the templates, with the route each belongs to and the
+  element that opens or closes a dialog where the code says so;
+- every API call the code can make, *called in the recording* or *in code, not called*;
+- the interface texts (translation files), lists of values and titles, each through the same
+  data checks as the snapshots: a text that may be data is dropped;
+- the third-party libraries, named with their version, not analysed.
+
+The brief's *What the application's code defines* tells the builder to build every route at
+least as a reachable page, wired as the code shows, and to report a screen only the code has as
+reconstructed. `navigation.json` lists those screens too, and says of each transition whether
+the recording, a link on a recorded page or the code shows it.
+
+A lazy chunk of a route nobody opened was never downloaded. `labctl evidence fetch-code
+<recording>` lists such files; with `--yes` it fetches them: only `.js`, `.mjs`, `.css` and
+`.json` files of the application's own origin, with GET, never a page or an API address,
+never a redirect, the answer's content type checked, at most one request a second by default
+(`--delay`, at least 0.2 s), stopping at a 429 or 503, and without a session unless the person
+passes the recorder's saved browser state (`--storage-state`). The files stay beside the
+recording (`<recording>/code/`), never in a package; regenerate the brief to use them.
+
+No script is carried in a package, only the map. A value that looks like a secret (a key, a
+token, a password, a private key, a connection string, a session identifier) or a host name
+other than the application's own is never kept: a map that holds one is not written, and
+`labctl build package` refuses one.
+
+What the code cannot tell: what a handler or a service computes beyond its calls and
+navigations; server-side rules and where a server page's command button leads (JSF outcomes are
+in the server's code); names the build minified (a component is then named by its selector);
+addresses and texts built at run time (their variable parts are `{name}`).
+
+### Field rules and page behaviour
+
+A recording shows only the rules a person happened to trigger. The rest is in the page's HTML
+and in the application's JavaScript, which the HAR holds. `apps/<app>/rules.json` and the
+brief's *Field rules and page behaviour* (`labctl.pagerules`) list, per screen and field, every
+rule with its message, its evidence and its level:
+
+| Level | Meaning |
+|---|---|
+| `seen` | The recording triggered it: its message appeared |
+| `declared` | The HTML declares it (`required`, `maxlength`, `pattern`, `data-val-*`, `data-p-*`, ...) |
+| `in code, not triggered` | The application's own script has it; the recording never set it off |
+| `in code, not tied to a field` | In the script; which field it belongs to could not be told |
+
+From the scripts: Angular `Validators.*`, jQuery Validate `rules` and `messages`,
+`setCustomValidity`, plain checks (`if (!x.value)`, `.length < n`, `/re/.test(x.value)`) with
+the message beside them, cross-field rules, masks, fields shown, enabled or made required by
+another, dependent drop-downs (with the API call and the step), a submit button disabled until
+the form is valid, and session timers with their delay. From the recording: messages that
+appeared, and what changed after a step that typed, chose or ticked. Each script is tokenised
+and matched against these shapes, never run. Minified code keeps strings, property names and
+call shapes, so a rule tied to an id, a name, a form-control key or a message survives it.
+Third-party scripts and library files are named, not analysed.
+
+Scripts are not carried, only the rules and messages taken from them (messages masked like
+the API's). An owner with the right to share them sets `TWINLAB_PAGE_SCRIPTS=carry`: the
+application's own script files then go to `apps/<app>/scripts/`, source maps stripped and never a
+library, after a check that refuses all of them (and later the package) when one holds
+something shaped like a secret (a private key, a token, a literal assigned to a credential-like
+name), an address of another host, or a value the recording shows as data.
+
+What it cannot recover: rules checked only on the server and never triggered (a JSF
+validator: no attribute and no script states it), the logic of a custom validator function
+(its message is listed when it reads as one), limits read from data at run time, and the
+label words a sanitiser masks in a message (then the message stays the form's, not a field's).
 
 ### Where the links nobody clicked lead: `labctl evidence check-links`
 
@@ -306,42 +388,6 @@ as candidates for a further recording (`unrecorded_pages`), and their snapshots 
 changes. `labctl.linkcheck.SafeFetcher` is the HTTP part on its own (GET or HEAD only, given
 origins only, rate limited, stops on 429 or 503) for other opt-in fetches.
 
-### Field rules and page behaviour
-
-A recording shows only the rules a person happened to trigger. The rest is in the page's HTML
-and in the application's JavaScript, which the HAR holds. `apps/<app>/rules.json` and the
-brief's *Field rules and page behaviour* (`labctl.pagerules`) list, per screen and field, every
-rule with its message, its evidence and its level:
-
-| Level | Meaning |
-|---|---|
-| `seen` | The recording triggered it: its message appeared |
-| `declared` | The HTML declares it (`required`, `maxlength`, `pattern`, `data-val-*`, `data-p-*`, ...) |
-| `in code, not triggered` | The application's own script has it; the recording never set it off |
-| `in code, not tied to a field` | In the script; which field it belongs to could not be told |
-
-From the scripts: Angular `Validators.*`, jQuery Validate `rules` and `messages`,
-`setCustomValidity`, plain checks (`if (!x.value)`, `.length < n`, `/re/.test(x.value)`) with
-the message beside them, cross-field rules, masks, fields shown, enabled or made required by
-another, dependent drop-downs (with the API call and the step), a submit button disabled until
-the form is valid, and session timers with their delay. From the recording: messages that
-appeared, and what changed after a step that typed, chose or ticked. Each script is tokenised
-and matched against these shapes, never run. Minified code keeps strings, property names and
-call shapes, so a rule tied to an id, a name, a form-control key or a message survives it.
-Third-party scripts and library files are named, not analysed.
-
-Scripts are not carried, only the rules and messages taken from them (messages masked like
-the API's). An owner with the right to share them sets `TWINLAB_PAGE_SCRIPTS=carry`: the
-application's own script files then go to `apps/<app>/scripts/`, source maps stripped and never a
-library, after a check that refuses all of them (and later the package) when one holds
-something shaped like a secret (a private key, a token, a literal assigned to a credential-like
-name), an address of another host, or a value the recording shows as data.
-
-What it cannot recover: rules checked only on the server and never triggered (a JSF
-validator: no attribute and no script states it), the logic of a custom validator function
-(its message is listed when it reads as one), limits read from data at run time, and the
-label words a sanitiser masks in a message (then the message stays the form's, not a field's).
-
 What a package still cannot say, found by the blind rebuild of the help-desk fixture:
 
 - The body of an answer the page never read (a 401 the page only tested the status of).
@@ -352,9 +398,31 @@ What a package still cannot say, found by the blind rebuild of the help-desk fix
   have no column for their parent in the inferred schema; the endpoint file says so.
 - Rules beyond what was recorded and what the HTML and scripts state (see *Field rules and
   page behaviour*): server-side validation never triggered, paging at the edges, what an
-  unknown identifier answers, cookie attributes.
+  unknown identifier answers.
 - Which row a click on a repeated element took is given (`record` in `navigation.json`), but
   the replay's own `bindings.yaml` still needs that record named by a person.
+
+### The build documents: one file per screen
+
+The brief is one long document; a builder who works screen by screen would collect one screen's
+facts from the brief, `navigation.json`, `rules.json`, `api/`, `look/` and `steps/`. So the
+packaging step (`labctl.builder.docs`) writes, under `apps/<app>/spec/` and only from the files
+the package already holds:
+
+| File | What it holds |
+|---|---|
+| `CONSTITUTION.md` | The rules that are not negotiable, numbered, and what "done" means: the same text as the task's (one function writes both) |
+| `ARCHITECTURE.md` | The stack and versions, the layers, the route table (every screen, recorded or not), the API surface, the data model (tables, keys, relations, field map), sign-in, session and every cookie's attributes, ports and environment variables, the flow across applications, a text diagram |
+| `BUILD-PLAN.md` | The build in order (database and seed, sign-in, each screen from the entry along the recorded ways, navigation, API, rules, look, self-check), each step with its "done when" lines |
+| `PAGES/<NN>-<screen>.md` | One per screen, recorded screens first in recorded order, then pages the link check found (marked: not built) and screens known only from the code map (`codemap.json`, marked: reconstructed). Each holds the address, the ways in and out, the picture and regions to match, every element with selector, text and type, what each action did, the screen's rules and behaviour, its API calls with links to their files, the data and the table and column it maps to, the seed rows the recorded flow needs, the acceptance checks, the replay steps, its dialogs, tabs, frames and popup windows, and its open questions |
+| `GLOSSARY.md` | Option lists, code lists, the statuses the application answered with its own messages, the package's words |
+
+Every statement names the file it comes from; what the package does not hold is written as
+*unknown*, with where it would come from. The folder is `spec/`, not `build/`, because the
+repository ignores every `build/` folder. The completeness check counts a screen without a
+page file as a gap. What the documents cannot say is what the package cannot: the purpose of a
+screen beyond its title and heading, the body of an answer the page never read, what an unused
+control does, a version nothing in the evidence shows.
 
 ## Privacy
 
@@ -362,7 +430,8 @@ A HAR or a database export from a real system holds customer data, cookies and t
 
 - Raw evidence lives in an evidence store outside the repository (`evidence/`, ignored by Git, or
   a shared location with access control). Analysers run where it is.
-- Parsing drops cookies, `Authorization` and other credential headers at once.
+- Parsing drops cookies, `Authorization` and other credential headers at once. Of a cookie only
+  its name and its attributes are read; its value never.
 - The model keeps shapes, not values: field names, types, lengths, code lists. Example values
   are replaced by synthetic values of the same shape.
 - Where real-shaped values are needed, they go through the keyed masking from Prod Echo first.

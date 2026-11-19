@@ -29,6 +29,7 @@ apps/<app>/BRIEF.md + the source files it names
 | `apps/<app>/db/schema.sql`, `db/seed.sql` | |
 | `apps/<app>/pages/*.html`: one snapshot per recorded screen | |
 | `apps/<app>/navigation.json`: every way from screen to screen, dialogs, tabs, frames, popup windows, and every element of each screen with what it did | |
+| `apps/<app>/codemap.json`: what the application's code defines: every route (recorded or only in code), guards, lazy chunks, menus, tabs, dialogs, API calls (called or not), interface texts, lists of values | |
 | `apps/<app>/api/catalogue.json` and `api/*.json`: every endpoint the pages called, with schemas and synthetic calls | |
 | `apps/<app>/rules.json`: per screen and field, every validation rule with its message and level, rules between fields, behaviour while typing or choosing, state on load, session timers | |
 | `apps/<app>/steps/*.json`, `*.values.yaml`: the recorded steps and the values the acceptance replay types | |
@@ -104,10 +105,17 @@ to read them in:
 | File | What it is |
 |---|---|
 | `BUILD_TASK.md`, `INDEX.md`, `MANIFEST.json` | The task, the list of files, their checksums and the result of the completeness check |
-| `apps/<app>/BRIEF.md` | The specification |
+| `apps/<app>/spec/CONSTITUTION.md` | The rules that are not negotiable (the task's own text) and what "done" means |
+| `apps/<app>/spec/ARCHITECTURE.md` | Stack, layers, route table, API surface, data model, sign-in, session and cookies, how the app runs |
+| `apps/<app>/spec/BUILD-PLAN.md` | The build in order, each step with its "done when" lines |
+| `apps/<app>/spec/PAGES/<NN>-<screen>.md` | One per screen: everything that screen needs, each fact with its file; pages not recorded and screens known only from code are marked |
+| `apps/<app>/spec/GLOSSARY.md` | Option lists, code lists, statuses, the package's words |
+| `apps/<app>/BRIEF.md` | The full specification, the reference behind `spec/` |
+| `apps/<app>/session.json` | Sign-in and session as recorded; every cookie by name with its attributes, never a value |
 | `apps/<app>/pages/` | One snapshot per screen: structure and interface text real, data masked |
 | `apps/<app>/look/` | Style sheets, theme and a picture per screen, when that step has run |
-| `apps/<app>/navigation.json` | The navigation map and the actions of each screen |
+| `apps/<app>/navigation.json` | The navigation map and the actions of each screen; each transition says its source (`recording`, `page`, `code`) |
+| `apps/<app>/codemap.json` | What the application's code defines. Build every route in it at least as a reachable page with its menus, tabs and dialogs wired as listed; a recorded screen follows its snapshot; a screen only the code has is built from its route, title, menu text and API calls, and listed in `BUILD-NOTES.md` under *Reconstructed from code* |
 | `apps/<app>/api/` | The API catalogue: one file per endpoint, synthetic examples only |
 | `apps/<app>/rules.json` | Field rules and page behaviour, each with its level and evidence |
 | `apps/<app>/scripts/` | Only with `TWINLAB_PAGE_SCRIPTS=carry`: the application's own scripts, checked |
@@ -115,10 +123,16 @@ to read them in:
 | `apps/<app>/steps/` | The recorded steps, the replay values, the order across applications |
 | `apps/<app>/model.yaml`, `behaviours.json`, `app.yaml` | Reference |
 
-The packaging step checks that every screen has an actions list, every endpoint a schema, every
-navigation target a definition, every table seed rows and every typing step a value. What it
-finds is written into the task and the index and printed as a warning; with
+The packaging step checks that every screen has an actions list and a page file, every endpoint
+a schema, every navigation target a definition, every table seed rows and every typing step a
+value. What it finds is written into the task and the index and printed as a warning; with
 `TWINLAB_PACKAGE_STRICT=1` the package is refused instead.
+
+Read the package in this order: `BUILD_TASK.md`, `spec/CONSTITUTION.md`, `spec/ARCHITECTURE.md`,
+`spec/BUILD-PLAN.md`, then the page files one by one as you build each screen. The brief and
+the machine files are the references the documents point to. The documents are generated from
+the package and never edited; a cookie value is in none of them and is not needed (set each
+cookie with its recorded name and attributes and a value of your own).
 
 ## Rules and trust
 

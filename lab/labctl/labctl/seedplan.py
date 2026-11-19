@@ -100,6 +100,9 @@ class Ex:
     auth_scheme: str = ""
     resp_empty: bool = False  # the answer had no body at all (0 bytes)
     resp_length: int | None = None  # its Content-Length, when it said one
+    # The cookies the response set, by name, with their attributes (path, domain relative to the
+    # host, flags, lifetime as a duration): sanitize.cookie_attributes. Never a value.
+    cookie_attrs: tuple = ()
 
 
 @dataclass
@@ -217,6 +220,7 @@ def _extras(entry: dict, post: dict, content: dict) -> dict:
         "resp_empty": not (content.get("text") or "")
         and (length == "0" or (not length and content.get("size") == 0)),
         "resp_length": int(length) if length.isdigit() else None,
+        "cookie_attrs": tuple(sanitize.cookie_attributes(entry)),
     }
 
 

@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from labctl.builder import complete
+from labctl.builder import complete, docs
 
 FORMAT = "twinlab-build-package/1"
 TASK_FILE = "BUILD_TASK.md"
@@ -87,6 +87,39 @@ def brief_digest(repo_root: Path, app_id: str) -> str:
     return "sha256:" + hashlib.sha256(_content(brief)).hexdigest()[:16]
 
 
+def data_leaks(repo_root: Path, app_id: str, entries: list[tuple[str, bytes]]) -> list[str]:
+    """Observed data values found in `codemap.json` and the build documents (`spec/**`) that no
+    other file of the package holds (those passed their own privacy rules: a page's option
+    text, a code). Observed: every value the recorded calls held (`apicatalog.observed_values`)
+    but codes, generated identifiers, typed shapes, the application's static JSON and what the
+    owner declared public (labctl.publicdata). A finding names the file and the value's shape,
+    never the value."""
+    from labctl import apicatalog, codemap
+    from labctl.behaviour import dom as domlib
+
+    app = f"apps/{app_id}/"
+    mine = {rel: data.decode("utf-8", "replace") for rel, data in entries
+            if rel == f"{app}codemap.json" or rel.startswith(f"{app}{docs.DIR}/")}  # fmt: skip
+    if not mine:
+        return []
+    other = "\n".join(data.decode("utf-8", "replace") for rel, data in entries if rel not in mine)
+    try:
+        # the application's own static JSON (translations, configuration) is its code, not data:
+        # the code map keeps it on the same terms (codemap._without_code)
+        ctxs = codemap._without_code(apicatalog.load(Path(repo_root), app_id))
+        values = apicatalog.observed_values(ctxs, apicatalog.kept_values(Path(repo_root), app_id,
+                                                                          ctxs))  # fmt: skip
+    except (OSError, ValueError):
+        return []
+    values -= apicatalog._seed_dates(Path(repo_root), app_id)
+    found = []
+    for rel, text in sorted(mine.items()):
+        for v in sorted(values):
+            if (v == text.strip() or (len(v) >= 8 and v in text)) and v not in other:
+                found.append(f"{rel}: an observed value of shape `{domlib.shape(v)}`")
+    return found
+
+
 def _check_inputs(repo_root: Path, app_id: str) -> None:
     if not _APP_RE.match(app_id):
         raise PackageError(f"app id must be lower-case letters, digits, - or _, got {app_id!r}")
@@ -115,6 +148,8 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         f"{app}/app.yaml",
         f"{app}/behaviours.json",
         f"{app}/navigation.json",
+        f"{app}/codemap.json",
+        f"{app}/session.json",
         "AGENTS.md",
         "docs/factory-playbook.md",
     ]
@@ -649,43 +684,16 @@ If you were given only this package and no repository (no `.git`, no `lab/` fold
 
 
 def _done_text(app: str, packaged: list[str], browser: bool, values: bool) -> str:
-    """The numbered list of what must hold for the build to be done."""
-    items = [
-        "Every screen of the brief opens at its address and has every element of its snapshot, "
-        "with the same selectors, ids and texts.",
-    ]
-    if f"{app}/navigation.json" in packaged:
-        items += [
-            f"Every way from screen to screen, and every dialog, tab, frame and popup window "
-            f"in `{app}/navigation.json`, works on the same element.",
-            "Every element the recording used does what the brief's *Actions on each screen* "
-            "says: the same request, the same message, the same next page.",
-        ]
-    if f"{app}/api/catalogue.json" in packaged:
-        items.append(f"Every endpoint in `{app}/api/` answers on the same method and path, with "
-                     "the same keys, types, codes and statuses.")  # fmt: skip
-    if browser:
-        items.append("The data is kept where the brief's *Browser storage* section says, under "
-                     "the same keys.")  # fmt: skip
-    else:
-        items += [
-            "Sign-in, the session and sign-out work as the brief's *Sign-in and session* says "
-            "(where the brief has that section).",
-            "Users, sessions and every record are stored in and read from the database. The "
-            "tables come from `db/schema.sql`; the seed is loaded at start.",
-        ]
-    if values:
-        items.append(f"The recorded steps, replayed in order with the values of "
-                     f"`{app}/steps/*.values.yaml`, give at each step the outcome the recording "
-                     "showed. This is the acceptance run.")  # fmt: skip
-    items.append(f"`{app}/BUILD-NOTES.md` says what you built, what you checked and what you "
-                 "assumed.")  # fmt: skip
-    return "\n".join(f"{n}. {text}" for n, text in enumerate(items, 1))
+    """The numbered list of what must hold for the build to be done (one source with the
+    constitution: labctl.builder.docs)."""
+    return docs.done_text(app, packaged, browser, values)
 
 
 def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
     """The exact order to read the package in: only files that are in it, plus the line kept
-    for the look of the screens (`look/`, written by another step when it has run)."""
+    for the look of the screens (`look/`, written by another step when it has run). The
+    documents of labctl.builder.docs come first (the packaging step writes them); the brief and
+    the machine files follow as the references behind them."""
     have = set(packaged)
 
     def any_under(prefix: str) -> bool:
@@ -693,13 +701,19 @@ def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
 
     rows: list[str] = [
         "`BUILD_TASK.md` (this file), then `INDEX.md`: every file and what it is for.",
-        "`AGENTS.md`, then `docs/factory-playbook.md`: the lab's rules. They apply to everything.",
-        f"`{app}/BRIEF.md`, whole, top to bottom. It is the specification. Its sections: the "
-        "scope, the stack, each screen with its elements and fields, the API, the tables, what "
-        "each recorded action did, the seed and the replay values, sign-in and session, the "
-        "navigation map, the actions of each screen, how it runs in the lab, the acceptance "
-        "checks, the open questions.",
+        *docs.reading_rows(app),
+        "`AGENTS.md`, then `docs/factory-playbook.md`: the lab's rules. They apply to everything. "
+        "From here on the files are references: look things up in them as the documents above "
+        "point to them.",
+        f"`{app}/BRIEF.md`: the full specification, the reference behind every document above. "
+        "Its sections: the scope, the stack, each screen with its elements and fields, the API, "
+        "the tables, what each recorded action did, the seed and the replay values, sign-in and "
+        "session, the navigation map, the actions of each screen, how it runs in the lab, the "
+        "acceptance checks, the open questions.",
     ]
+    if f"{app}/session.json" in have:
+        rows.append(f"`{app}/session.json`: sign-in and session as recorded, every cookie by name "
+                    "with its attributes (never a value).")  # fmt: skip
     if any_under(f"{app}/pages/"):
         rows.append(f"`{app}/pages/*.html`: one snapshot per screen. The structure, ids, classes "
                     "and interface text are real; data is masked (letters x, digits 9). Build "
@@ -714,6 +728,11 @@ def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
         rows.append(f"`{app}/navigation.json`: every screen, each way in and out, dialogs, tabs, "
                     "frames and popup windows, and every element of each screen with what "
                     "happened when the recording used it.")  # fmt: skip
+    if f"{app}/codemap.json" in have:
+        rows.append(f"`{app}/codemap.json`: what the application's code defines. Build every "
+                    "route in it at least as a reachable page with its menus, tabs and dialogs "
+                    "wired as listed; a route only the code has is reconstructed (say so in "
+                    "BUILD-NOTES.md).")  # fmt: skip
     if f"{app}/rules.json" in have:
         rows.append(f"`{app}/rules.json`: per screen and field, every validation rule with its "
                     "message, level and evidence, rules between fields, what the page does "
@@ -744,53 +763,9 @@ def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
 
 
 def _rules_text(app: str, packaged: list[str], browser: bool, seed_loaded: bool) -> str:
-    """The rules a build may never break, numbered, each one sentence first."""
-    nav = f"{app}/navigation.json" in packaged
-    api = f"{app}/api/catalogue.json" in packaged
-    rules = [
-        "**Same selectors and ids.** Keep **every recorded selector, element id, class, "
-        "`name`, iframe and shadow-DOM structure** exactly as the brief's screen tables and "
-        f"`{app}/pages/*.html` show them. Automations find elements by these, and a changed id "
-        "breaks them silently.",
-        "**Same literal texts.** Write every label, heading, button, option, link and message "
-        "exactly as the snapshots and the brief have it, letter for letter. Text shown masked "
-        "(`Xxxx`, `9999`) is data: show the record's value there.",
-        "**Same addresses and API contract.** Every screen keeps its path. Every route keeps "
-        "its method, path, parameters, field names, types, codes and statuses"
-        + (f" (`{app}/api/`)." if api else "."),
-        "**Every navigation and every action works.** "
-        + (f"Each link, button, form, key, redirect, dialog, tab, frame and popup window in "
-           f"`{app}/navigation.json` behaves as listed. " if nav else
-           "Each link, button and form of the brief leads where the brief says. ")
-        + "An element nobody used in the recording is rendered and gets no behaviour the brief "
-        "does not state.",
-    ]  # fmt: skip
-    if f"{app}/rules.json" in packaged:
-        from labctl import pagerules
-
-        rules.append(pagerules.task_rule(app))
-    if browser:
-        rules.append("**Data stays where the original keeps it.** That is the browser, as the "
-                     "brief's *Browser storage* section says. There is no server database.")  # fmt: skip
-    else:
-        rules.append("**Data lives in the backend database.** Users, sessions and every record "
-                     "are stored in and read from the database by the server. Nothing important "
-                     "is kept only in the page or in the server's memory.")  # fmt: skip
-        rules.append("**The seed is loaded at start.** Create the tables from `db/schema.sql` "
-                     + ("and load exactly the rows of `db/seed.sql`, once, when the tables are "
-                        "empty." if seed_loaded else
-                        "and fill them with synthetic rows as the brief says, once, when the "
-                        "tables are empty."))  # fmt: skip
-    rules += [
-        "**Synthetic data only.** No real name, number, address, hostname or credential in any "
-        "file. Use the values the package gives.",
-        "**Build what was recorded, nothing else.** Nothing under *Out of scope* is built or "
-        "stubbed. What the package does not state is an assumption you write down, never a "
-        "feature you invent.",
-        "**The brief and the checks are not yours to change.** A check that fails is a finding "
-        "about your app.",
-    ]
-    return "\n".join(f"{n}. {text}" for n, text in enumerate(rules, 1))
+    """The rules a build may never break, numbered, each one sentence first. One source with
+    the package's `CONSTITUTION.md` (labctl.builder.docs.rules)."""
+    return docs.rules_text(app, packaged, browser, seed_loaded)
 
 
 def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | None = None) -> str:
@@ -1126,7 +1101,7 @@ person only where section 7 says to stop.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/rules.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/codemap.json`, `{app}/session.json`, `{app}/{docs.DIR}/**`, `{app}/rules.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
@@ -1148,7 +1123,7 @@ person only where section 7 says to stop.
    `BUILD-NOTES.md`.
 2. Files go under `{app}/`: the Dockerfile, the application code and `BUILD-NOTES.md`.
    Write only under `{app}/`. Do not change any file outside it.
-3. Never edit `{app}/BRIEF.md` or `{app}/db/schema.sql` (nor `{app}/db/seed.sql`), and never edit a check (a test, an
+3. Never edit `{app}/BRIEF.md` or `{app}/db/schema.sql` (nor `{app}/db/seed.sql` or `{app}/{docs.DIR}/`), and never edit a check (a test, an
    automation, a flow or a condition) to make it pass. In `{app}/app.yaml`, change only the
    `run:` section. Every rule keeps `verification: hypothesis`.
 4. Same framework and versions as "Stack to pin", same element ids and classes as the brief's
@@ -1250,8 +1225,13 @@ def _build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None,
                       PackageWarning, stacklevel=2)  # fmt: skip
     task = prompt(repo_root, app_id, repo).encode("utf-8")
     files = _collect(repo_root, app_id)
-    from labctl import lookfeel  # refuses a look that holds data, or a picture it did not render
+    # The look refuses data or a picture it did not render; the code map a secret or a host.
+    from labctl import codemap, lookfeel
 
+    code_problems = codemap.package_check(repo_root, app_id)
+    if code_problems:
+        raise PackageError(f"cannot package {app_id}: apps/{app_id}/codemap.json failed the "
+                           "privacy check: " + "; ".join(code_problems[:10]))  # fmt: skip
     look_problems = lookfeel.package_check(repo_root, app_id)
     if look_problems:
         raise PackageError(
@@ -1266,6 +1246,12 @@ def _build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None,
                            "the check: " + "; ".join(script_problems[:10]))  # fmt: skip
     entries: list[tuple[str, bytes]] = [(TASK_FILE, task)]
     entries += [(rel, _content(path)) for rel, path in files]
+    # The build documents (labctl.builder.docs), written from these entries only.
+    entries += sorted(docs.generate(app_id, dict(entries)).items())
+    leaked = data_leaks(repo_root, app_id, entries)
+    if leaked:
+        raise PackageError(f"cannot package {app_id}: a value the recording holds as data is in "
+                           "the code map or the build documents: " + "; ".join(leaked[:10]))  # fmt: skip
     purposes = [(rel, complete.purpose(rel, app_id, data)) for rel, data in entries]
     purposes += [(complete.INDEX_FILE, complete.purpose(complete.INDEX_FILE, app_id)),
                  (MANIFEST_FILE, complete.purpose(MANIFEST_FILE, app_id))]  # fmt: skip

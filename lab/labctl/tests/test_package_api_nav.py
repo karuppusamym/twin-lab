@@ -481,7 +481,10 @@ def test_the_navigation_map_has_every_way_and_every_sub_view(desk):
         "/help/panel",
     }
     assert all(s["in_scope"] for s in screens.values())
-    moves = {(m["from"], m["selector"], m["to"]) for m in nav["transitions"]}
+    # the recorded moves; links on the pages and the code's own are there too, with their source
+    assert {m["source"] for m in nav["transitions"]} >= {"recording", "page"}
+    moves = {(m["from"], m["selector"], m["to"]) for m in nav["transitions"]
+             if m["source"] == "recording"}  # fmt: skip
     assert moves == {
         ("/login", "input#password", "/tickets"),
         ("/tickets", "a.ticket-link", "/tickets/{id}"),

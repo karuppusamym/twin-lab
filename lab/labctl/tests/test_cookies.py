@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 
-from labctl import cookies
+from labctl import cookies, signin
 
 GUID = "3f0c2b1e-8a1d-4c55-9f0e-5a7b6c1d2e3f"
 SECRET = "c2VjcmV0LXNlc3Npb24tdG9rZW4tdmFsdWU"
@@ -44,5 +44,10 @@ def test_cookies_by_name_with_their_use():
     assert sid["set_by"] == ["the answer to POST /login"]
     assert sid["attributes"] == ["Path", "HttpOnly"]
     assert token["sent"] == 0 and token["attributes"] == ["Expires"]
-    text = "\n".join(cookies.brief_lines(list(found.values())))
+    # one row per cookie with the Set-Cookie rows of signin (none here): brief and session.json
+    rows = cookies.merge([], list(found.values()))
+    assert next(r for r in rows if r["name"] == "user")["set_by"] == [{"script": "/js/index.js"}]
+    text = "\n".join(signin.cookie_lines({"cookie_facts": rows}))
+    assert "the script `/js/index.js`" in text and "body field `cookie`" in text
+    assert "a UUID" in text and "`Expires`" in text
     assert GUID not in text and SECRET not in text and "`user`" in text and "`tokenp_`" in text

@@ -164,25 +164,9 @@ def _never_pressed(text: str, nav: dict | None) -> str:
     return "\n".join(out)
 
 
-def _cookies(ctxs: list) -> str:
-    """The cookies the recordings show (labctl.cookies), as lines of the sign-in section."""
-    from labctl import cookies, har, pagerules
-
-    hars = []
-    for c in ctxs:
-        try:
-            hars.append(har.load(c.part.path).har)
-        except (OSError, ValueError):
-            continue
-    scripts, _ = pagerules.scripts_of(ctxs)
-    own = [(s.path, s.text) for s in scripts if s.own and not s.library]
-    lines = cookies.brief_lines(cookies.observe(hars, own))
-    return "\n".join(lines) + "\n" if lines else ""
-
-
 def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None) -> str:
     """After `db/schema.sql` and the seed are written: the carried files, and the brief text."""
-    from labctl import apicatalog, navmap, signin
+    from labctl import apicatalog, codemap, navmap, signin
 
     root = Path(root)
     state = state or {"taken": {}, "tables": False}
@@ -193,21 +177,42 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     ctxs = done.get("ctxs") or []
     if not ctxs:
         (out / navmap.FILE).unlink(missing_ok=True)
+        (out / signin.FILE).unlink(missing_ok=True)
         return text
     found = signin.observe(ctxs)
+    from labctl import cookies
+
+    cookie_rows = cookies.facts(ctxs, found)  # Set-Cookie attributes + scripts + use, no value
+    signin.write_facts(root, app_id, found, cookie_rows)
     wrote = None
     if found and state.get("tables"):
         wrote = signin.write(root, app_id, found, state.get("taken") or {},
                              done.get("endpoints") or {})  # fmt: skip
-    nav = navmap.write(root, app_id, brief, ctxs)
+    # What the code the browser downloaded defines (labctl.codemap): codemap.json, and the
+    # routes the recording did not visit in navigation.json.
+    code, refused = None, None
+    try:
+        code = codemap.write(root, app_id, ctxs, done, whole=recorded_scope(root, app_id))
+    except codemap.CodeMapError as exc:
+        refused = exc.places
+    nav = navmap.write(root, app_id, brief, ctxs,
+                       extend=lambda doc: codemap.extend_navigation(doc, code))  # fmt: skip
     # sign-in: one section, in place of the paragraph labctl.stepfacts writes
     text = re.sub(r"\*\*Signing in\.\*\* [^\n]*\n\n?", "", text)
     end = ("## Behaviour seen in the recordings", "## Part of a flow across applications",
            "## Running in the lab")  # fmt: skip
     text = _insert(text, apicatalog.brief_section(app_id, done), end)
-    text = _insert(text, signin.brief_section(app_id, found, wrote) + _cookies(ctxs), end)
+    text = _insert(text, signin.brief_section(app_id, found, wrote, cookie_rows), end)
     text = _insert(text, navmap.brief_sections(app_id, nav), end)
-    text = _insert(text, scope_section(root, app_id, brief, ctxs), ("## Stack to pin",))
+    text = _insert(text, codemap.brief_section(app_id, code, refused), end)
+    scope = scope_section(root, app_id, brief, ctxs)
+    if code and any(r.get("status") == "only in code" for r in code.get("routes") or [])             and recorded_scope(root, app_id):  # fmt: skip
+        scope = scope.replace(
+            "What was not recorded is not built:",
+            "Screens the application's code defines and the recording did not visit are built "
+            "too, as reconstructions (*What the application's code defines*). Otherwise, what "
+            "was not recorded is not built:", 1)  # fmt: skip
+    text = _insert(text, scope, ("## Stack to pin",))
     text = _never_pressed(text, nav)
     if wrote and wrote["rows"]:
         text = text.replace(
