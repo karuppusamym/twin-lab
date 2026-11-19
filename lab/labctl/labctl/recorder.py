@@ -1001,6 +1001,46 @@ def _public(step: dict) -> dict:
     return {k: v for k, v in step.items() if not k.startswith("_")}
 
 
+def next_action(steps: list[dict], n: int) -> dict | None:
+    """The step after `steps[n]` in the same tab that can change what its page shows: not a
+    dialog (the page is held while one is open), a download or a tab step, and not a step that
+    `steps[n]` caused itself."""
+    step = steps[n]
+    for s in steps[n + 1 :]:
+        action = str(s.get("action") or "")
+        if (s.get("tab") or "") != (step.get("tab") or "") or action.startswith("tab-"):
+            continue
+        if action in ("dialog", "download") or s.get("caused_by") == step.get("seq"):
+            continue
+        return s
+    return None
+
+
+def mark_unsettled_pictures(steps: list[dict]) -> int:
+    """A step's picture is taken when the recording loop gets control back, after its snapshot.
+    When the person's next action in the same tab had already begun by then (typing ends when
+    the person clicks on, and the click starts a dialog's fade), the picture may show what that
+    action did: it is kept, and the step says `picture_settled: false` with the reason, so a
+    visual comparison does not hold the replica to it. Returns how many were marked."""
+    from labctl.botlog.recording import _ts
+
+    marked = 0
+    for n, step in enumerate(steps):
+        shot = _ts(step.get("_shot_at"))
+        if not step.get("screenshot") or shot is None:
+            continue
+        nxt = next_action(steps, n)
+        began = _ts(nxt.get("ts")) if nxt is not None else None
+        if began is None or began >= shot:
+            continue
+        ms = int((shot - began).total_seconds() * 1000)
+        step["picture_settled"] = False
+        step["picture_note"] = (f"the picture was taken {ms} ms after step {nxt.get('seq')} "
+                                f"({nxt.get('action')}) began: it may show what that step did")  # fmt: skip
+        marked += 1
+    return marked
+
+
 def _origin(url: str) -> str:
     from urllib.parse import urlsplit
 
@@ -1429,8 +1469,10 @@ class _Steps:
                 rel = f"screens/{step['seq']:04d}.png"
                 try:
                     (self.out_dir / "screens").mkdir(exist_ok=True)
+                    shot_at = _now()  # an action that began before this may show in it
                     if self._picture(page, self.out_dir / rel):
                         step["screenshot"] = rel
+                        step["_shot_at"] = shot_at
                         if self.last_boxes:  # painted over: visual comparison leaves them out
                             step["mask_boxes"] = self.last_boxes
                 except Exception:  # noqa: BLE001 - a missing picture never loses the step
@@ -1797,6 +1839,8 @@ class _Steps:
         else:  # one tab: no tab steps (a single page's recording reads as it always did)
             steps = [s for s in steps if not str(s.get("action") or "").startswith("tab-")]
         renumbered = self._renumber(steps)
+        if mark_unsettled_pictures(steps):
+            self.rewrite = True
         if self.secrets:
             # A value typed late may have been on the page before it was typed: every snapshot
             # once more with every value typed (each step then names the placeholders they use).

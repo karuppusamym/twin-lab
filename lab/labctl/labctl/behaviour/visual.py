@@ -167,6 +167,47 @@ def pictures_of(rec_path: Path) -> dict[int, str]:
     return out
 
 
+def unsettled_pictures(rec_path: Path) -> dict[int, str]:
+    """seq -> why the recorder's picture after that step may not show the settled page: the
+    recorder says `picture_settled: false` when the next action had begun before it was taken.
+
+    An older recorder did not say so. Its snapshot was taken once the page had been quiet for its
+    quiet time (`recording.json`), or at once when the next action came first, and the picture
+    after the snapshot: a step whose next action began within the quiet time had its picture
+    taken after that action began, and is reported the same way."""
+    import json
+
+    from labctl.behaviour.acceptance import _raw_steps
+    from labctl.botlog.recording import _ts
+    from labctl.recorder import next_action
+
+    raw = [d for d in _raw_steps(rec_path) if isinstance(d.get("seq"), int)]
+    said = any("picture_settled" in d for d in raw)
+    try:
+        meta = json.loads((Path(rec_path) / "recording.json").read_text(encoding="utf-8"))
+        quiet = int((meta.get("settle") or {}).get("quiet_ms") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        quiet = 0
+    out = {}
+    for n, d in enumerate(raw):
+        if d.get("picture_settled") is False:
+            out[d["seq"]] = str(d.get("picture_note") or "the next action had begun before the "
+                                "picture was taken")  # fmt: skip
+            continue
+        if said or not quiet or not d.get("screenshot"):
+            continue
+        nxt = next_action(raw, n)
+        here, began = _ts(d.get("ts")), _ts(nxt.get("ts")) if nxt is not None else None
+        if here is None or began is None:
+            continue
+        gap = int((began - here).total_seconds() * 1000)
+        if 0 <= gap < quiet:
+            out[d["seq"]] = (f"step {nxt['seq']} ({nxt.get('action')}) began {gap} ms after this "
+                             f"step, within the recorder's quiet time ({quiet} ms): the picture "
+                             "was taken after it began and may show what it did")  # fmt: skip
+    return out
+
+
 def picture_size(path: Path) -> tuple[int, int] | None:
     try:
         from PIL import Image
@@ -370,12 +411,18 @@ def check_state(page, st: State, spec: Spec, rec_path: Path, pictures: dict[int,
 
 def template(rec) -> str:
     pictures = pictures_of(rec.path)
+    unsettled = unsettled_pictures(rec.path)
     states = []
     for seq in sorted(pictures):
         # threshold by default: a replica drawn with another font or a sub-pixel shift fails
         # exact at once; a person who wants zero differing pixels sets mode: exact
-        states.append({"id": f"after-step-{seq}", "after": seq, "required": True,
-                       "mode": "threshold", "max_ratio": 0.02, "tolerance": 16, "exclude": []})  # fmt: skip
+        st = {"id": f"after-step-{seq}", "after": seq, "required": True,
+              "mode": "threshold", "max_ratio": 0.02, "tolerance": 16, "exclude": []}  # fmt: skip
+        if seq in unsettled:
+            # the picture may show the next step's effect: reported, never deciding the result
+            st["required"] = False
+            st["note"] = f"optional: the recorder's picture is not settled ({unsettled[seq]})"
+        states.append(st)
     size = None
     if pictures:
         size = picture_size(rec.path / pictures[max(pictures)])
