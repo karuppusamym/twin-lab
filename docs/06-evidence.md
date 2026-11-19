@@ -179,16 +179,37 @@ What a judge checks against, and how the replay compares:
 - **Pictures.** A click gets no picture of its own: it is observed where its page settled. To
   see the record a click acted on, open its `dom/<seq>.before.html` and the next step's picture
   (`bindings.yaml` names both under `check_against:`); `screens/<seq>.png` of the click does not
-  exist. A picture taken after the next action had begun says `picture_settled: false`, and the
-  visual draft makes that state optional with the reason.
+  exist. In a scripted recording, before each action (a `click` a few ms after a `fill`), the
+  page writes and snapshots what it has not yet and the recorder takes that step's picture,
+  so the picture shows the page before the action's events. A picture still taken after the
+  next action had begun (a person's or an attached robot's action inside the settle window)
+  says `picture_settled: false`, and the visual draft makes that state optional with the
+  reason.
 - **Regions that change by themselves** (a carousel that rides, a video, a CSS animation, an
   element that changed between two snapshots with no action between) are excluded in every
   drafted visual state, each with its reason.
+- **Text in the pictures.** Whether the visual draft leaves the text regions out is an explicit
+  option: `TWINLAB_DRAFT_TEXT=exclude` or `compare` (`drafts.write_all(..., text_regions=)`);
+  by default text is excluded when the package carries no font and compared when it carries
+  the fonts (then text matches pixel for pixel). Either way, an element showing data the
+  package masks (`data` or `mixed` in `look/texts.json`) that the page itself carries (its text
+  is in the served HTML of the HAR, not filled in from the API: a footer's address, phone and
+  e-mail) is excluded in each state that shows it, with the reason: the build shows its own
+  synthetic values there. Interface text, and data the page fills in from the seed (a cart's
+  rows, a total), stay compared.
 - **Settling.** After each step the replay waits at least as long as the recorder did for a
   quiet page (`recording.json`) and until the page's CSS transitions have ended (at most 3 s).
 - **Addresses.** An empty fragment (`/#`, left by a link `href="#"`) is the same address as none;
   a fragment that is not empty is compared.
 - **Step numbers.** Drafts beside the whole recording use its numbers, in `after:`, ids and notes.
+- **Lists in any order.** A `texts` acceptance case with `unordered: true` compares the texts as
+  a multiset: the same items, each as often, in any order. Use it for a list whose order the
+  original does not guarantee (rows keyed by random ids, rows fetched by parallel requests).
+  The drafts write a list's case (the titles of a list that holds only records the flow acted
+  on, as `{record: <step>}`) with `unordered: true` unless the order is shown to be stable: two
+  or more page views agree on an order that follows a sortable key that is not random (a UUID,
+  a random token or a hash is random), or the page offers a sort control and the recording used
+  it (`labctl/listorder.py`). The note says which.
 
 ## The look of the application
 
@@ -305,6 +326,10 @@ of the data:
   names, code lists, identifiers the application generated, paging numbers and the
   application's own error messages are kept; every other value is replaced, and the written
   files are checked against the HAR (`labctl.apicatalog.leaks`).
+  The order of a list's rows (`api/catalogue.json` `lists`) is stated as a rule only when two
+  or more answers agree on a key that is not random; otherwise it says `not stable (one
+  answer)` or `not stable (random keys)` (a UUID, a token or a hash orders nothing), and the
+  endpoint's notes say the examples' order is one possible order, not a rule.
 - `apps/<app>/navigation.json`: every screen, each way in and out, dialogs, in-page tabs,
   frames and popup windows, links seen and not visited, and every interactive element with
   what happened when the recording used it, or "seen, not used".
