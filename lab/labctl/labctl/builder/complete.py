@@ -157,6 +157,15 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
                               "third-party libraries.",
         app + "api/catalogue.json": "Index of the endpoints the pages called, the list "
                                     "parameters' effects and the field map.",
+        app + "api/network.json": "What the network showed beyond the endpoints: the calls of "
+                                  "each page load in order, redirect chains, streams, static "
+                                  "files with sizes and caching, third parties (never called), "
+                                  "errors and retries.",
+        app + "templates.json": "Each screen as a template: instances seen, the parameters "
+                                "that vary, data fields with one synthetic seed row per "
+                                "instance, widgets (breadcrumbs, gallery, variant picker, "
+                                "facets, recommendations, lists that load more), the navigation "
+                                "hierarchy and the cart and wish-list state.",
         app + "rules.json": "Per screen and field, every validation rule with its message, "
                             "level (seen, declared, in code) and evidence, rules between fields, "
                             "behaviour while typing or choosing, state on load, session timers.",

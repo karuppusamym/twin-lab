@@ -25,6 +25,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from labctl import sanitize
 from labctl.behaviour import dom as domlib
 from labctl.botlog.recording import Recording, RecStep, path_pattern
 from labctl.botlog.recording import load as load_recording
@@ -149,7 +150,7 @@ def observe(rec: Recording) -> list[dict]:
         trig_el = sa.elements.get(trig) or sb.elements.get(trig)
         value = _code(trig_el, step.value) if step.action in ("type", "select") else None
         base = {
-            "screen": path_pattern(before.path) if before.path else None,
+            "screen": path_pattern(sanitize.slug_masked(before.path)) if before.path else None,
             "trigger": trig,
             "event": event,
             "value": value,

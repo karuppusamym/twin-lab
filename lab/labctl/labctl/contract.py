@@ -166,7 +166,7 @@ def _never_pressed(text: str, nav: dict | None) -> str:
 
 def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None) -> str:
     """After `db/schema.sql` and the seed are written: the carried files, and the brief text."""
-    from labctl import apicatalog, codemap, navmap, signin
+    from labctl import apicatalog, codemap, navmap, signin, templates
 
     root = Path(root)
     state = state or {"taken": {}, "tables": False}
@@ -178,6 +178,7 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     if not ctxs:
         (out / navmap.FILE).unlink(missing_ok=True)
         (out / signin.FILE).unlink(missing_ok=True)
+        (out / templates.FILE).unlink(missing_ok=True)
         return text
     found = signin.observe(ctxs)
     from labctl import cookies
@@ -196,7 +197,10 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     except codemap.CodeMapError as exc:
         refused = exc.places
     nav = navmap.write(root, app_id, brief, ctxs,
-                       extend=lambda doc: codemap.extend_navigation(doc, code))  # fmt: skip
+                       extend=lambda doc: templates.extend_navigation(
+                           codemap.extend_navigation(doc, code) or doc, ctxs))  # fmt: skip
+    # Screens as templates, the shared layout, the network behaviour (labctl.templates)
+    shaped = templates.write(root, app_id, ctxs, nav, done)
     # sign-in: one section, in place of the paragraph labctl.stepfacts writes
     text = re.sub(r"\*\*Signing in\.\*\* [^\n]*\n\n?", "", text)
     end = ("## Behaviour seen in the recordings", "## Part of a flow across applications",
@@ -205,6 +209,7 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     text = _insert(text, signin.brief_section(app_id, found, wrote, cookie_rows), end)
     text = _insert(text, navmap.brief_sections(app_id, nav), end)
     text = _insert(text, codemap.brief_section(app_id, code, refused), end)
+    text = _insert(text, templates.brief_section(app_id, shaped, done.get("network")), end)
     scope = scope_section(root, app_id, brief, ctxs)
     if code and any(r.get("status") == "only in code" for r in code.get("routes") or [])             and recorded_scope(root, app_id):  # fmt: skip
         scope = scope.replace(

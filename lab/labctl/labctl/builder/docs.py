@@ -260,6 +260,8 @@ class Pkg:
         self.look = self.json(f"{self.app}/look/manifest.json") or {}
         self.theme = self.json(f"{self.app}/look/theme.json") or {}
         self.texts = (self.json(f"{self.app}/look/texts.json") or {}).get("screens") or {}
+        self.templates = self.json(f"{self.app}/templates.json")  # labctl.templates
+        self.network = self.json(f"{self.app}/api/network.json")  # labctl.netfacts
         self.endpoints: dict[str, dict] = {}
         for row in self.cat.get("endpoints") or []:
             doc = self.json(f"{self.app}/{row.get('file')}") if row.get("file") else None
@@ -730,6 +732,9 @@ def page_doc(pkg: Pkg, sc: Screen) -> str:
         if nav.get("linked_from"):
             w("- Linked from " + ", ".join(f"`{x}`" for x in nav["linked_from"]) + ".")
     w("")
+    from labctl import netfacts, templates
+
+    lines += templates.page_lines(pkg.templates, sc.path, app)  # one template, many addresses
     # --- ways in and out ---------------------------------------------------------------------
     w("## How you get here and where you can go")
     w("")
@@ -812,12 +817,19 @@ def page_doc(pkg: Pkg, sc: Screen) -> str:
     # --- elements ----------------------------------------------------------------------------
     w("## Elements")
     w("")
-    if els:
+    shared = [e for e in els if e.get("layout")] if pkg.nav.get("shared_layout") else []
+    if shared:  # built once, as the shared layout (ARCHITECTURE.md *Shared layout*)
+        regions = sorted({e["layout"] for e in shared})
+        w(f"{len(shared)} element(s) of the shared layout (" + ", ".join(f"`{r}`" for r in regions)
+          + ") are not repeated here: ARCHITECTURE.md *Shared layout* (built once).")  # fmt: skip
+        w("")
+    table = [e for e in els if not e.get("layout")] if shared else els
+    if table:
         w(f"Every interactive element, in page order (`{app}/navigation.json`):")
         w("")
         w("| Selector | Text or label | Type | Inside | Accepts or options | In the recording |")
         w("|---|---|---|---|---|---|")
-        for e in els:
+        for e in table:
             acc = "; ".join(f"{k} {v}" if v is not True else k
                             for k, v in (e.get("accepts") or {}).items())  # fmt: skip
             opts = ", ".join(f"{_code(o.get('value'))} {o.get('label')}"
@@ -835,7 +847,7 @@ def page_doc(pkg: Pkg, sc: Screen) -> str:
               f"{_cell(', '.join(e.get('inside') or [])) or '-'} | {_cell(more) or '-'} | "
               f"{_cell(_used_summary(e.get('used')))} |")  # fmt: skip
         w("")
-    elif sc.kind in ("recorded", "popup", "stand-in", "frame"):
+    elif sc.kind in ("recorded", "popup", "stand-in", "frame") and not shared:
         w("No interactive element was recorded on this screen.")
         w("")
     others = [i for i in snap["ids"] if i["selector"] not in {e["selector"] for e in els}]
@@ -971,6 +983,8 @@ def page_doc(pkg: Pkg, sc: Screen) -> str:
                       + " (attributes: ARCHITECTURE.md *Sign-in, session and cookies*).")  # fmt: skip
             for n in doc.get("notes") or []:
                 w(f"- `{name}`: {n}")
+            for n in netfacts.endpoint_lines(doc.get("network")):  # api/<endpoint> `network`
+                w(f"- `{name}` {n}.")
         lists = [
             x for x in pkg.cat.get("lists") or [] if x.get("endpoint") in {n for n, _, _ in calls}
         ]
@@ -1330,6 +1344,9 @@ def architecture_doc(pkg: Pkg) -> str:
       "- Health route: not in the evidence; `GET /api/health` (the task's default, "
       "`BUILD_TASK.md`), answering 200 only when the database is reachable.")  # fmt: skip
     w("")
+    from labctl import netfacts, templates
+
+    lines += templates.architecture_lines(pkg.templates, pkg.nav, app)
     # --- API surface -------------------------------------------------------------------------
     w("## API surface")
     w("")
@@ -1349,6 +1366,7 @@ def architecture_doc(pkg: Pkg) -> str:
     else:
         w("No API call was recorded (no `api/catalogue.json`).")
     w("")
+    lines += netfacts.architecture_lines(pkg.network, app)
     # --- data model --------------------------------------------------------------------------
     w("## Data model")
     w("")

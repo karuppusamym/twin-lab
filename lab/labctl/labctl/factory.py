@@ -25,7 +25,7 @@ import yaml
 
 from labctl import brief as brief_mod
 from labctl import model_build as mb
-from labctl import repo
+from labctl import repo, sanitize
 from labctl.appmodel import Flow
 from labctl.models import Automation
 
@@ -157,11 +157,12 @@ def generate(
     from labctl import publicdata
 
     with publicdata.active_for(Path(root), app_id):
-        return _generate(root, app_id, system, source, db_engine, force, data)
+        return _with_templates(root, app_id, system, source, db_engine, force, data)
 
 
-def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
-    from labctl import contract
+def _with_templates(root, app_id, system, source, db_engine, force, data) -> Result:
+    """Refuse an app nothing needs; then generate with the learned screen templates applied."""
+    from labctl import contract, templates
 
     if (not automations(root, app_id) and not flows(root, app_id)
             and not contract.implied_flows(root, app_id)):  # fmt: skip
@@ -169,6 +170,16 @@ def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
             f"no registered automation or requested flow needs '{app_id}' and it has no "
             "recording; nothing to build"
         )
+    # Screens with one structure and many addresses (`/p/blue-linen-shirt`) are one template
+    # (labctl.templates): every address pattern written below follows the learned rules.
+    learned = templates.rules_for(root, app_id)
+    with sanitize.template_rules([t["rule"] for t in learned]):
+        return _generate(root, app_id, system, source, db_engine, force, data)
+
+
+def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
+    from labctl import contract
+
     out = root / "apps" / app_id
     model_file, brief_file = out / "model.yaml", out / "BRIEF.md"
     schema_file, app_file = out / "db" / "schema.sql", out / "app.yaml"
@@ -367,7 +378,7 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
              "behaviours.json", "pages", "steps", "look", "api",
              "navigation.json", "codemap.json", "rules.json",
-             "scripts", "session.json")  # fmt: skip
+             "scripts", "session.json", "templates.json")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:

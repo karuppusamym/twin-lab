@@ -240,6 +240,35 @@ files it already holds, `apps/<app>/spec/`:
   file; the completeness check counts a screen without a page file as a gap; the guard and
   `factory.GENERATED` protect `spec/` and `session.json`. The folder is `spec/` because the
   repository ignores every `build/` folder.
+## 2026-11-19 — Large sites: screens as templates, one shared layout, and what the network shows
+A recording of a shop with many product pages made one screen per product, and most of what
+the HAR holds beyond the endpoint contract never reached the package. Audited against a
+checklist (request, response, timing, streams, static files, third parties, errors), then
+closed, on a new fixture shop (`tests/fixtures/shop`: a mega-menu, categories with infinite
+scroll, a search with facets, 30 products from one template with a gallery and a variant
+picker, a cart, GraphQL reviews, a multipart photo upload, a server-sent price ticker, CSRF,
+caching, gzip and a third-party analytics origin):
+- **Templates** (`labctl.templates`): addresses that differ in one segment, with pages of one
+  structure or many links of one repeated element, are one screen (`/p/{slug}`), applied
+  through `sanitize.template_rules` while the brief and the package are made. New
+  `apps/<app>/templates.json`: instances, varying parameters, data fields with one synthetic
+  seed row per instance (synthetic; a field an approved `public-data.yaml` declares public
+  keeps its recorded value), and
+  each page's breadcrumbs, gallery, variant picker, recommendation blocks, facets as code
+  lists, sort, pages, lists loaded in pages, category tree; the navigation hierarchy and the
+  cart and wish-list state.
+- **Shared layout**: `navigation.json` `shared_layout` lists the header, menus (a mega-menu as
+  a tree) and footer once; elements that belong to it say `layout`, and page files leave them
+  to `ARCHITECTURE.md` *Shared layout*.
+- **Network** (`labctl.netfacts`): `network` in every endpoint file (headers by name, CSRF
+  token and its source, multipart, GraphQL, JSON-RPC and SOAP bodies, query roles, caching,
+  compression, CORS, paging envelopes and infinite scroll, response times, which earlier answer
+  gave each value sent, retries) and `api/network.json` (page-load call order, redirect chains,
+  streams, static files, third parties by purpose, errors). Page files and `ARCHITECTURE.md`
+  carry them; GraphQL examples keep the document, literals removed.
+- **Privacy**: no new value is carried; the leaks the fixture found in existing outputs are
+  closed (record names in replay locators, draft flows, "one of" column formats and code-map
+  file names; slugs in `behaviours.json`). `templates.json` is a generated file for the guard.
 ## 2026-11-18 — The build package carries the API, the navigation, every action and the sign-in
 What a coding agent gets was measured on two recordings (the two-application fixture, and a new
 help-desk fixture whose pages are filled by a JSON API), then the gaps were closed.

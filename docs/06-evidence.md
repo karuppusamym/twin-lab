@@ -254,6 +254,110 @@ of the data:
   host name a `Domain` names.
 - The brief's *Scope*: with no automation and no flow written by a person, everything the
   recording shows, in recorded order.
+- `network` in each endpoint file and `apps/<app>/api/network.json`: what the HAR shows beyond
+  the contract, and `apps/<app>/templates.json`: each screen as a template (see *Large sites:
+  templates, the shared layout and the network* below).
+
+### Large sites: templates, the shared layout and the network
+
+A shop with thousands of product pages records many pages of one structure. Before, an address
+segment without digits was a route name, so `/p/blue-linen-shirt` and `/p/red-wool-scarf` were
+two screens, each with its own snapshot and page file, and the product names travelled in the
+addresses (the API catalogue's own check then refused most endpoint files). Now
+`labctl.templates` groups the addresses a recording visited before the brief is generated:
+addresses equal but in one segment, at least three values there, a literal name in the rest of
+the address, and either two visited pages of the same structure outside the shared layout or
+five links of one repeated element. While the brief and the package are made
+(`factory.generate`, `evidence build-all`), `sanitize.route_pattern` writes that segment
+`{slug}`: `/p/{slug}`, `/{slug}/dp/{id}`. Screens, snapshots, page files, steps, the navigation
+map, the code map and the API patterns are then per template.
+
+| In the package | What it holds |
+|---|---|
+| `templates.json` | Per template: instances (different addresses) and visits, path and query parameters with their role (search, filter, sort, page) and, for a choice the page offers, the values; the data fields (an element whose text differs between instances, unless every word is the interface's) with one seed row per instance, synthetic and of the recorded shape; repeated lists; the parts found in the page: breadcrumbs, image gallery, variant picker (the API it calls and what the answer changes), recommendation or personalisation blocks, search facets as code lists, sort, page links, a list loaded in pages (cursor or page, envelope, infinite scroll or "load more"), a category tree. Per application: the navigation hierarchy (levels from the breadcrumbs, categories from the mega-menu) and the cart and wish-list state (endpoints, fields, badge, where it is kept) |
+| `navigation.json` `shared_layout` | The header, menus, mega-menu (as a tree) and footer every screen has, once; each screen's element that belongs to them says `layout` |
+| `network` in `api/<endpoint>.json` | Request headers by name (content type, accept, custom `X-` headers classified: "the same on every call, shape `A/9.9`"), the CSRF token by name and where the page took it from (a `<meta>`, a hidden field, a cookie, an answer), the body format (form fields, multipart fields with file type, extension, size class and `accept`, GraphQL operations with variables, selection tree and literals removed, JSON-RPC methods, SOAP operations), query roles, per status the caching (`Cache-Control`, ETag, Last-Modified, Vary, answers from the browser cache, conditional requests), compression, CORS and custom response headers, the paging envelope (next cursor, total, `Link` rels, `X-Total-Count`, whether a last page was seen) and what asked for more, response time (median, maximum, server wait), which earlier answer or page gave each value sent (by field name), retries after an error, a role (cart, wish list, recommendations, suggestions, variant) |
+| `api/network.json` | The calls each page load makes in order, every page request with status and time, redirect chains hop by hop, streams (server-sent events: event names and data shapes; WebSocket messages when the HAR has `_webSocketMessages`; long polling), static files by kind with sizes, caching and browser-cache hits, third parties by purpose (a known vendor by its public domain, any other host as `third-party-<n>`, never its name; never to be called or copied), an API of the application on another origin, errors and retries |
+
+The build documents use them: each page file has *Template and instances* and, per API call,
+its network facts, and leaves the shared layout's elements to `ARCHITECTURE.md`, which gains
+*Shared layout*, *Screen templates* and *Network behaviour*. The brief gains *Screen templates
+and shared layout* and *Network behaviour*.
+
+Privacy, as for the rest of `api/`: no value is read into these files. Header values, cursors
+and tokens are classified or followed by field name only; a GraphQL document is carried with
+its literals replaced; a seed row of a template is synthetic, except where an approved
+`public-data.yaml` (`labctl.publicdata`) declares the data public: a field in a declared region,
+a text that is as a whole a declared value, or a picture under a declared image prefix keeps its
+recorded value, the secret checks applied, and `templates.json` marks the column `public`. Both
+files pass `apicatalog.leaks` and `codemap.check_text` before they are written.
+Recording the fixture shop found and closed four leaks of record names elsewhere: a list's
+link named like a record in the replay locators (`stepfacts._target`) and in the draft flow,
+the values of a cart column listed as "one of" (`seedplan._format`), and a page's address in
+the code map's file names; a template's slugs are masked in `behaviours.json` too.
+
+Measured on the fixture shop (`tests/fixtures/shop`, 30 products from one template): a short
+session (54 steps, 3 products) gave 9 snapshots, 50 page files and 4 of 11 endpoint files before
+(the others and the catalogue index refused by the privacy check, product names in 13 files),
+and 5 snapshots, 12 page files, 11 endpoint files plus `network.json`, and no product name,
+after. A long session (280 steps, 24 products, a 2.5 MB HAR; `TWINLAB_SCALE_TEST=1` in
+`test_templates.py`) gives the same 5 templates, 5 snapshots, 12 page files and 5 pictures, 24
+seed rows for the product template, and a 307 KB package (the short one: 272 KB); what still
+grows is per step or per call: `steps/*.json`, the brief's step list, and each endpoint's
+`calls` up to its cap of 60.
+
+What is still not captured:
+
+- WebSocket frames in a recording made by `labctl evidence record`: Playwright's HAR has no
+  messages (a HAR exported from the browser's developer tools does, and is read).
+- CORS preflight requests and answers served from the memory cache: the browser does not put
+  them in the HAR. A `304` appears only when the browser revalidated.
+- The body of a multipart request that carried a file: the HAR has none; the fields come from
+  the form and the recorder's upload step (type and size class).
+- An API on another origin is listed in `network.json` (endpoints, CORS, times) but has no
+  endpoint files: the catalogue reads the application's own origins.
+- What a recommendation or personalisation block chooses, and server-side rules no call showed.
+- A template is learned only from what the recording visited or linked: fewer than three
+  addresses, or links of no repeated element, stay separate screens.
+
+### What the application's code defines
+
+The HAR also holds the code the browser downloaded: the pages, the scripts, the style sheets
+and the JSON files. That code names much more than the recording visited, so `labctl brief`
+reads it, without running any of it, into `apps/<app>/codemap.json` (`labctl/codemap.py`):
+
+- every route of the route table (Angular, React Router, Vue Router; for server-rendered
+  applications such as JSF, the pages and their links), with its guards, lazy chunk, redirect
+  and title, and whether the recording visited it;
+- the menus, links, tabs and dialogs of the templates, with the route each belongs to and the
+  element that opens or closes a dialog where the code says so;
+- every API call the code can make, *called in the recording* or *in code, not called*;
+- the interface texts (translation files), lists of values and titles, each through the same
+  data checks as the snapshots: a text that may be data is dropped;
+- the third-party libraries, named with their version, not analysed.
+
+The brief's *What the application's code defines* tells the builder to build every route at
+least as a reachable page, wired as the code shows, and to report a screen only the code has as
+reconstructed. `navigation.json` lists those screens too, and says of each transition whether
+the recording, a link on a recorded page or the code shows it.
+
+A lazy chunk of a route nobody opened was never downloaded. `labctl evidence fetch-code
+<recording>` lists such files; with `--yes` it fetches them: only `.js`, `.mjs`, `.css` and
+`.json` files of the application's own origin, with GET, never a page or an API address,
+never a redirect, the answer's content type checked, at most one request a second by default
+(`--delay`, at least 0.2 s), stopping at a 429 or 503, and without a session unless the person
+passes the recorder's saved browser state (`--storage-state`). The files stay beside the
+recording (`<recording>/code/`), never in a package; regenerate the brief to use them.
+
+No script is carried in a package, only the map. A value that looks like a secret (a key, a
+token, a password, a private key, a connection string, a session identifier) or a host name
+other than the application's own is never kept: a map that holds one is not written, and
+`labctl build package` refuses one.
+
+What the code cannot tell: what a handler or a service computes beyond its calls and
+navigations; server-side rules and where a server page's command button leads (JSF outcomes are
+in the server's code); names the build minified (a component is then named by its selector);
+addresses and texts built at run time (their variable parts are `{name}`).
 
 ### JSF and PrimeFaces: views, sub-pages and partial responses
 

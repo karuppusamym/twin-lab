@@ -621,7 +621,7 @@ def _strip(path: str) -> str:
 def _fp(path: str) -> str:
     """A file's path as the map writes it: no matrix parameters, record numbers (3 digits or
     more) masked; a folder name such as `i18n` stays."""
-    return sanitize.mask_identifiers(_strip(path))
+    return sanitize.mask_identifiers(_strip(sanitize.slug_masked(path, "{slug}")))
 
 
 def _resolve(base: str, ref: str) -> str:

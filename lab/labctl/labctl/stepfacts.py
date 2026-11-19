@@ -249,7 +249,8 @@ def _target(step: dict) -> str | None:
     """For a selector that is not an element's own id (`a.nav__item` may match several), the
     ranked locator the replay finds the element by: the first recorded candidate that matched
     exactly one element (a test id, role and name, label, or position in a structure). Names that
-    hold digits are left out: they may be data."""
+    hold digits are left out, and so is a list's link or cell named like a record (two Title-case
+    words): they may be data."""
     from labctl import locate
 
     sel = str(step.get("selector") or "")
@@ -270,8 +271,14 @@ def _target(step: dict) -> str | None:
         name = str(cand.get("name") or cand.get("text") or cand.get("value") or "")
         if kind in ("role", "label", "placeholder") and re.search(r"\d", name):
             continue
+        if kind == "role" and cand.get("role") in ("link", "cell", "gridcell", "row", "option",
+                                                   "listitem") and NAME_RUN.search(name):  # fmt: skip
+            continue  # a link of a list named like a record (`Cedar Cotton Coat`): data
         return locate.describe(cand)
     return None
+
+
+NAME_RUN = re.compile(r"\b[A-Z][a-z'’-]+\s+[A-Z][a-z'’-]+\b")  # two Title-case words: a name
 
 
 def _effects(steps: list[dict]) -> list[dict]:
