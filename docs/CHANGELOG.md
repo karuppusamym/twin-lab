@@ -251,6 +251,29 @@ help-desk fixture whose pages are filled by a JSON API), then the gaps were clos
   `apps/<app>/unrecorded/*.html`, never mixed with recorded screens. Without the file nothing
   changes. Tests: `test_linkcheck.py`.
 
+## 2026-11-18 — A public shop trial: an API on another origin of the same site is the app's own
+A scripted recording of a public demo shop (pages on `www.`, JSON API on `api.` of the same
+site) gave a package with no endpoint, no table and "the data lives in the browser": every API
+call was left out as another host's. Fixed, with tests (`test_har.py`, `test_seedplan.py`,
+`test_pagerules.py`):
+- `har.api_hosts`: a host of the same site as the pages (`har.site_of`, an approximation of
+  the registrable domain; never an address with a port, an IP address or a single label) that
+  the pages only called an API on is analysed as the application's own API, in the model, the
+  step facts, the seed plan and the API catalogue. The brief says so as an open question; a host
+  of another site is still left out.
+- A request to another origin carries only the page's origin as its Referer (the browsers'
+  default policy), which put every call on screen `/`. `har.referer_path` ignores such a `/`; the
+  call goes to the page open at the time.
+- A step on an id the page gives several elements (`a#itemc` on each category link) now gets
+  its `target` (the role and name that tell them apart).
+- A script under `node_modules/` or `bower_components/` is a library, named by its package, not
+  analysed as the application's code.
+- Found and left open (see the trial notes): a DynamoDB-style `Items`/`LastEvaluatedKey`
+  answer is not read as a list (a table `lastevaluatedkey`, no seed rows); synthetic examples
+  lose the shape of UUIDs, `name=value` cookies, URLs and small code lists; an asset name with
+  `512x512` is masked as a record number (the logo is not carried); product photos are carried
+  or not depending on where else they were shown; a `window.alert` text is not recorded.
+
 ## 2026-11-18 — The build package carries the look of the application
 - A rebuilt application did not look like the original: a builder got value-free page snapshots
   and nothing else. Style sheets delivered as files were not carried, no font was named, no

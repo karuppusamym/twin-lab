@@ -89,7 +89,9 @@ def facts(part: Path) -> Facts:
     rec = har.load(part)
     hosts = {urlsplit(s.get("url") or "").netloc.lower() for s in raw
              if str(s.get("url") or "").startswith("http")}  # fmt: skip
-    entries = [e for e in har.exchanges(rec.har) if not hosts or e.host in hosts]
+    every = har.exchanges(rec.har)
+    hosts |= har.api_hosts(hosts, every)  # the pages' own API on another origin of their site
+    entries = [e for e in every if not hosts or e.host in hosts]
     doms = {s["seq"]: t for s in raw if (t := _read(part, s.get("dom"))) is not None}
     befores = {s["seq"]: t for s in raw if (t := _read(part, s.get("dom_before"))) is not None}
     known, vocab = har.page_knowledge([*doms.values(), *befores.values()], entries)
@@ -218,7 +220,11 @@ def _target(step: dict) -> str | None:
     from labctl import locate
 
     sel = str(step.get("selector") or "")
-    if not sel or re.search(r"#[A-Za-z_][\w-]*$", sel.split(">>>")[-1].strip()):
+    # An id the page gives several elements (`a#itemc` on each category link) does not name one
+    # element: the ranked locator then says which.
+    shared = any(c.get("kind") == "id" and (c.get("count") or 0) > 1
+                 for c in step.get("locators") or [])  # fmt: skip
+    if not sel or (re.search(r"#[A-Za-z_][\w-]*$", sel.split(">>>")[-1].strip()) and not shared):
         return None
     for cand in step.get("locators") or []:
         kind = cand.get("kind")

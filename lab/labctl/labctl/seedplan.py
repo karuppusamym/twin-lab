@@ -176,6 +176,8 @@ def _exchanges(har_doc: dict, hosts: set[str]) -> list[Ex]:
 def _extras(entry: dict, post: dict, content: dict) -> dict:
     """The fields of `Ex` the API catalogue reads. Header values that could be a credential are
     never kept: a cookie gives its name, an Authorization header its scheme."""
+    from labctl import har
+
     req, resp = entry.get("request") or {}, entry.get("response") or {}
 
     def heads(side: dict, name: str) -> list[str]:
@@ -203,7 +205,8 @@ def _extras(entry: dict, post: dict, content: dict) -> dict:
         "body": body,
         "req_type": req_type or ("application/json" if body is not None else ""),
         "resp_type": str(content.get("mimeType") or "").split(";")[0].strip().lower(),
-        "referer": urlsplit(referer).path if referer else "",
+        # a cross-origin call's Referer is the page's origin only: it names no page
+        "referer": har.referer_path(referer, urlsplit(str(req.get("url") or "")).netloc),
         "location": urlsplit(location).path if location else "",
         "cookies_sent": tuple(sorted(n for n in sent if sanitize.COOKIE_NAME.match(n))),
         "cookies_set": tuple(sorted(n for n in made if sanitize.COOKIE_NAME.match(n))),
@@ -218,6 +221,8 @@ def load_part(app: str, part: Path) -> Part:
     hosts = {urlsplit(str(s.get("url") or "")).netloc.lower() for s in raw
              if str(s.get("url") or "").startswith("http")}  # fmt: skip
     doc = har.load(part).har
+    if hosts:  # the pages' own API on another origin of their site
+        hosts |= har.api_hosts(hosts, har.exchanges(doc))
     exs = sorted(_exchanges(doc, hosts), key=lambda e: e.started)
     timed = [(s["seq"], har._time(s.get("ts"))) for s in raw]
     owner: dict[int, list[Ex]] = {}

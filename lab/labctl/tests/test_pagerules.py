@@ -228,6 +228,14 @@ def test_libraries_are_named_not_analysed():
     assert pr.library_name("/static/app.js", "/* the page's own checks */") is None
 
 
+def test_a_script_of_a_package_folder_is_a_library():
+    # Demoblaze trial: a package under node_modules was analysed as the application's own code
+    path = "/node_modules/videojs-contrib-hls/dist/videojs-contrib-hls.min.js"
+    assert pr.library_name(path, "!function(e){...}") == "videojs-contrib-hls"
+    assert pr.library_name("/node_modules/@scope/pkg/index.js", "") == "@scope/pkg"
+    assert pr.library_name("/js/node_modules.js", "") is None
+
+
 # =================================================================================================
 # The HTML, the levels, the masking
 # =================================================================================================

@@ -112,7 +112,9 @@ def load(root: Path, app: str) -> list[Ctx]:
         rec = har.load(path)
         hosts = {urlsplit(str(s.get("url") or "")).netloc.lower() for s in part.raw
                  if str(s.get("url") or "").startswith("http")}  # fmt: skip
-        entries = [e for e in har.exchanges(rec.har) if not hosts or e.host in hosts]
+        every = har.exchanges(rec.har)
+        hosts |= har.api_hosts(hosts, every)  # the pages' own API on another origin of their site
+        entries = [e for e in every if not hosts or e.host in hosts]
         known, vocab = har.page_knowledge([*part.doms.values(), *part.befores.values()], entries)
         shapes = {str(s["typed_shape"]) for s in part.raw if s.get("typed_shape")}
         out.append(Ctx(part, values, known, vocab, shapes))

@@ -2253,6 +2253,11 @@ def library_name(path: str, text: str | None) -> str | None:
     for rx, name in LIBRARY_NAMES:
         if re.search(rx, low):
             return name
+    # A file served from a package folder is a package, not the application's own code
+    # (`/node_modules/videojs-contrib-hls/dist/...`): named by its package.
+    pkg = re.search(r"(?:^|/)(?:node_modules|bower_components)/((?:@[\w.-]+/)?[\w.-]+)/", low)
+    if pkg:
+        return pkg.group(1)
     head = (text or "")[:600]
     m = _BANNER.match(head)
     if m and not re.search(r"\bapp(lication)?\b", m.group(1), re.IGNORECASE):

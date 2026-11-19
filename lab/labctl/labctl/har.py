@@ -272,6 +272,51 @@ class Exchange:
     cookies: set[str] = field(default_factory=set)  # cookie NAMES sent or set; never a value
 
 
+# The second-level labels under a two-letter country code that are not a site of their own
+# (`example.co.uk` is the site, not `co.uk`). An approximation of the public suffix list: a host
+# it gets wrong is at worst one more host of another site, which `api_hosts` never adds.
+GENERIC_SLD = frozenset({"ac", "co", "com", "edu", "gov", "govt", "ltd", "mil", "ne", "net", "nic",
+                         "or", "org", "plc", "sch"})  # fmt: skip
+
+
+def site_of(host: str) -> str | None:
+    """The site a host belongs to (`api.shop.example` and `www.shop.example`: `shop.example`), or
+    None when it shares none: an address with a port, an IP address, a single label."""
+    host = (host or "").lower().strip().rstrip(".")
+    if not host or ":" in host or "." not in host or re.fullmatch(r"[\d.]+", host):
+        return None
+    labels = host.split(".")
+    n = 3 if len(labels[-1]) == 2 and labels[-2] in GENERIC_SLD else 2
+    return ".".join(labels[-n:]) if len(labels) >= n else None
+
+
+def api_hosts(app_hosts: set[str], entries: list[Exchange]) -> set[str]:
+    """Hosts of the same site as the application's pages that the pages only called an API on,
+    and never loaded a page from: the application's own API on a separate origin (pages on
+    `www.shop.example` calling `api.shop.example`). A host of another site is never one, nor an
+    address with a port (`localhost:8101` beside `localhost:8102` is another application)."""
+    sites = {s for h in app_hosts if (s := site_of(h))}
+    if not sites:
+        return set()
+    pages = {e.host for e in entries if e.kind in ("document", "form")}
+    return {e.host for e in entries
+            if e.kind == "api" and e.host not in app_hosts and e.host not in pages
+            and site_of(e.host) in sites}  # fmt: skip
+
+
+def referer_path(referer: str, request_host: str) -> str:
+    """The path of the page a Referer names, or "" when it does not name one. A request to
+    another origin carries only the page's origin by the browsers' default policy
+    (`strict-origin-when-cross-origin`): its `/` is not the page, so it says nothing."""
+    ref = urlsplit(referer or "")
+    if not ref.netloc:
+        return ""
+    if ref.netloc.lower() != (request_host or "").lower() and ref.path in ("", "/") \
+            and not ref.query:  # fmt: skip
+        return ""
+    return ref.path
+
+
 def _text(content: dict) -> str | None:
     text = content.get("text")
     if text is None:
@@ -1775,6 +1820,16 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
     hosts |= {urlsplit(s.url).netloc.lower() for s in rec.steps if s.url.startswith("http")}
     if not hosts:
         hosts = {e.host for e in entries}
+    siblings = api_hosts(hosts, entries)
+    hosts |= siblings
+    if siblings:
+        n = sum(1 for e in entries if e.host in siblings and e.kind == "api")
+        model.problems.append(
+            f"{ev}: {n} API request(s) went to {len(siblings)} other host(s) of the pages' own "
+            "site (a separate API origin, such as api. beside www.): analysed as this "
+            "application's API on the same paths. The pages call that origin, not their own: "
+            "say in BUILD-NOTES.md which address the rebuilt pages call and what serves it"
+        )
     others = [e for e in entries if e.host not in hosts and e.kind == "api"]
     entries = [e for e in entries if e.host in hosts]
     if others:
@@ -1787,6 +1842,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
     # own requests are not this application's routes or tables.
     step_hosts = {urlsplit(s.url).netloc.lower() for s in rec.steps if s.url.startswith("http")}
     framed = {e.host for e in entries if e.host not in step_hosts} if step_hosts else set()
+    framed -= siblings  # an API origin of the same site is the pages' own API, not a frame
     framed_calls = sorted({f"{e.method} {sanitize.route_pattern(e.path)}" for e in entries
                            if e.host in framed and e.kind not in ("document", "asset")})  # fmt: skip
     framed_docs = {sanitize.route_pattern(e.path) for e in entries
@@ -1883,8 +1939,9 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
 
     def screen_at(e: Exchange) -> str | None:
         ref = urlsplit(e.request.get("referer", ""))
-        if ref.netloc.lower() in hosts and ref.path:
-            return sanitize.route_pattern(ref.path)
+        path = referer_path(e.request.get("referer", ""), e.host)
+        if ref.netloc.lower() in hosts and path:
+            return sanitize.route_pattern(path)
         before = [p for t, p in timeline if e.started and t <= e.started]
         return before[-1] if before else None
 
