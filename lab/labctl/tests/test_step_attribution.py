@@ -16,6 +16,13 @@ def test_step_at_allows_the_recorders_lag():
     assert stepfacts.step_at(timed, t0 + timedelta(seconds=1, milliseconds=-400)) == 1
     assert stepfacts.step_at(timed, t0 + timedelta(seconds=5)) == 3
     assert stepfacts.step_at(timed, None) is None
+    # Demoblaze: POST /addtocart 1 ms before its click, the hash change 7 ms after, the alert the
+    # answer brought 148 ms after: the click sent it, never the dialog
+    ms = timedelta(milliseconds=1)
+    steps = [(5, t0, "goto"), (6, t0 + 1 * ms, "click"), (7, t0 + 7 * ms, "goto"),
+             (8, t0 + 148 * ms, "dialog")]  # fmt: skip
+    assert stepfacts.step_at(steps, t0 + 0 * ms) == 6
+    assert stepfacts.step_at([(5, t0, "goto"), (8, t0 + 148 * ms, "dialog")], t0 + ms) == 5
 
 
 def test_step_facts_and_seed_plan_agree(tmp_path):

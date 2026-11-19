@@ -46,16 +46,25 @@ COUNT_FIELDS = ("total", "count", "total_count", "totalCount", "pages", "page_co
 LAG = timedelta(milliseconds=150)
 
 
+NO_CAUSE = ("dialog",)  # a dialog shows what a request answered; it never sends one
+
+
 def step_at(timed, started: datetime | None):
-    """The step a request belongs to: the last of `timed` (`(key, logged at)` in step order)
-    logged at or before the request started, or less than `LAG` after. The one rule for every
-    module that matches steps to requests (step facts, seed plan, navigation, API catalogue)."""
+    """The step a request belongs to. `timed` is `(key, logged at, action)` in step order.
+    The first step logged after the request started, less than `LAG` after (the action that
+    sent it, logged late), but never a dialog; else the last step logged at or before it. The
+    one rule for every module that matches steps to requests (step facts, seed plan, and through
+    them navigation, API catalogue and page rules)."""
     if started is None:
         return None
     at = None
-    for key, ts in timed:
-        if ts is not None and ts <= started + LAG:
+    for key, ts, *rest in timed:
+        if ts is None:
+            continue
+        if ts <= started:
             at = key
+        elif ts <= started + LAG and (rest[0] if rest else None) not in NO_CAUSE:
+            return key
     return at
 
 
@@ -123,14 +132,14 @@ def facts(part: Path) -> Facts:
 
     # Each request goes to its step (`step_at`); a page's own document to the page
     # load it became, when one followed within a few seconds (a back or forward is its own step).
-    timed = [(i, har._time(s.get("ts"))) for i, s in enumerate(raw)]
+    timed = [(i, har._time(s.get("ts")), s.get("action")) for i, s in enumerate(raw)]
     owner: dict[int, list] = {}
     for e in entries:
         if e.kind == "asset" or e.started is None:
             continue
         at = step_at(timed, e.started)
         if e.kind == "document":
-            load = next((i for i, ts in timed if ts is not None and ts >= e.started
+            load = next((i for i, ts, _a in timed if ts is not None and ts >= e.started
                          and (ts - e.started).total_seconds() < 3 and raw[i].get("action") == "goto"
                          and _pattern(raw[i].get("url")) == sanitize.route_pattern(e.path)), None)  # fmt: skip
             at = load if load is not None else at

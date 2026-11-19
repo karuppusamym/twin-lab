@@ -224,7 +224,7 @@ def load_part(app: str, part: Path) -> Part:
     if hosts:  # the pages' own API on another origin of their site
         hosts |= har.api_hosts(hosts, har.exchanges(doc))
     exs = sorted(_exchanges(doc, hosts), key=lambda e: e.started)
-    timed = [(s["seq"], har._time(s.get("ts"))) for s in raw]
+    timed = [(s["seq"], har._time(s.get("ts")), s.get("action")) for s in raw]
     owner: dict[int, list[Ex]] = {}
     for e in exs:
         at = stepfacts.step_at(timed, e.started)  # the one rule: a step logged just after owns it
