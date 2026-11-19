@@ -833,21 +833,69 @@ def apply(
     app_of = {s.seq: router.step_app[s.index].id for s in steps
               if not s.is_tab and s.index in router.step_app}  # fmt: skip
     last_app = next((app_of[s.seq] for s in reversed(steps) if s.seq in app_of), None)
+    links = _window_links(steps, app_of)
     paths = []
     for i in ids:
         mine = [s for s in steps if router.step_app[s.index].id == i and not s.is_tab]
-        _write_part(rec, outs[i], doc, entries, ent_app, i, _with_tabs(mine, steps),
-                    app_of, last_app == i)  # fmt: skip
+        _write_part(rec, outs[i], doc, entries, ent_app, i, _with_tabs(mine, steps, links, i),
+                    app_of, last_app == i, _window_facts(links, i))  # fmt: skip
         paths.append(outs[i])
     _write_sequence(rec, root, steps, router, included, proposal, tabs, setup, len(every), damage)
     return paths
 
 
-def _with_tabs(mine: list[_Step], steps: list[_Step]) -> list[_Step]:
+def _window_links(steps: list[_Step], app_of: dict[int, str]) -> dict[int, dict]:
+    """The windows one application opened and another was shown in: the index of the tab-open
+    step -> who opened it (the last action in the opening tab before it) and what it showed
+    first. A window an application opened for itself is not here."""
+    out: dict[int, dict] = {}
+    for n, s in enumerate(steps):
+        opener = s.data.get("opener")
+        if not (s.is_tab and s.data.get("action") == "tab-open" and opener):
+            continue
+        before = [x for x in steps[:n] if not x.is_tab and x.tab == opener]
+        acted = [x for x in before if x.data.get("action") != "goto"]
+        trigger = (acted or before or [None])[-1]
+        shown = next((x for x in steps[n + 1 :] if not x.is_tab and x.tab == s.tab), None)
+        if trigger is None or shown is None:
+            continue
+        a, b = app_of.get(trigger.seq), app_of.get(shown.seq)
+        if a and b and a != b:
+            out[s.index] = {"from": a, "to": b, "trigger": trigger, "shown": shown,
+                            "tab": s.tab, "opener": opener}  # fmt: skip
+    return out
+
+
+def _opened_by(link: dict) -> dict:
+    by = {"app": link["from"], "step": link["trigger"].seq, "tab": link["opener"]}
+    if link["trigger"].data.get("selector"):
+        by["element"] = link["trigger"].data["selector"]
+    return by
+
+
+def _window_facts(links: dict[int, dict], app_id: str) -> dict[int, dict]:
+    """What a part keeps of a window opened across applications, by the whole recording's step
+    number: `opens_outside` on the action that opened another application's window, and
+    `opened_by_outside` on the first step in a window another application opened."""
+    out: dict[int, dict] = {}
+    for link in links.values():
+        if link["from"] == app_id:
+            out.setdefault(link["trigger"].seq, {})["opens_outside"] = {
+                "app": link["to"], "step": link["shown"].seq, "tab": link["tab"],
+                "url": link["shown"].url}  # fmt: skip
+        if link["to"] == app_id:
+            out.setdefault(link["shown"].seq, {})["opened_by_outside"] = _opened_by(link)
+    return out
+
+
+def _with_tabs(mine: list[_Step], steps: list[_Step], links: dict[int, dict] | None = None,
+               app_id: str | None = None) -> list[_Step]:  # fmt: skip
     """The part's steps, with the tab steps it needs to replay on its own when the application
-    was used in more than one tab: each tab opened after the first (its opener kept only when
-    that tab is the part's too), each tab closed, and a switch wherever the next step is in
-    another tab than the one before (the switches are made again for the part)."""
+    was used in more than one tab: each tab opened after the first, each tab closed, and a
+    switch wherever the next step is in another tab than the one before (the switches are made
+    again for the part). A tab keeps its `opener` only when this application opened it for
+    itself; one that another application opened, or that showed another application first, is
+    opened by the replay, and says who opened it in `opened_by_outside`."""
     used = list(dict.fromkeys(s.tab for s in mine if s.tab))
     if len(used) < 2:
         return mine
@@ -863,8 +911,13 @@ def _with_tabs(mine: list[_Step], steps: list[_Step]) -> list[_Step]:
                 if not out:  # the part starts in this tab: nothing to open
                     continue
                 data = dict(s.data)
-                if data.get("opener") not in used:
-                    data.pop("opener", None)  # opened from another application: open it here
+                link = (links or {}).get(s.index)
+                if link is not None:  # across applications: opened here, the link kept
+                    data.pop("opener", None)
+                    if link["to"] == app_id:
+                        data["opened_by_outside"] = _opened_by(link)
+                elif data.get("opener") not in used:
+                    data.pop("opener", None)
                 s = _Step(s.index, data, s.seq, s.ts, s.url, s.origin, s.path, tab=s.tab)
                 current = s.tab
             elif action == "tab-close" and current == s.tab:
@@ -887,7 +940,7 @@ def _with_tabs(mine: list[_Step], steps: list[_Step]) -> list[_Step]:
 
 def _write_part(rec: Path, out: Path, doc: dict, entries: list[_Entry], ent_app: dict[int, str],
                 app_id: str, mine: list[_Step], app_of: dict[int, str] | None = None,
-                has_end: bool = True) -> None:  # fmt: skip
+                has_end: bool = True, facts: dict[int, dict] | None = None) -> None:  # fmt: skip
     (out / "dom").mkdir()
     lines = []
     # The explicit map from the whole recording's step numbers to this part's. A reference to a
@@ -900,6 +953,7 @@ def _write_part(rec: Path, out: Path, doc: dict, entries: list[_Entry], ent_app:
         old = s.seq or None
         step["seq"] = local
         step["global_seq"] = old
+        step.update((facts or {}).get(old) or {})  # a window opened across applications
         if isinstance(step.get("caused_by"), int):
             new, outside = refs.step(step["caused_by"])
             if new is not None:

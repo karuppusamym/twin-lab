@@ -209,6 +209,40 @@ def test_file_download(site, tmp_path):
 # --- windows and dialogs ------------------------------------------------------------------------
 
 
+def test_a_window_a_script_opens_and_closes_says_how(site, tmp_path):
+    """A lookup window: opened with `window.open` (name, size), it writes into the page that
+    opened it and closes itself. The recording says how it was opened and that a script closed
+    it, and what it wrote is in the opening page's next snapshot."""
+
+    def flow(page):
+        with page.context.expect_page() as opened:
+            page.click("#pick")
+        child = page.wrap(opened.value)
+        child.wait_for_load_state()
+        child.wait_for_timeout(400)
+        child.click("#choose")
+        page.wait_for_timeout(700)
+        page.click("#after")
+        page.wait_for_timeout(500)
+
+    rec = record(site, tmp_path, "/lookup", flow)
+    steps = steps_of(rec)
+    opened = next(s for s in steps if s["action"] == "tab-open")
+    assert opened["window"] == {"how": "window.open", "name": "picker",
+                                "features": {"width": 420, "height": 300, "resizable": False}}  # fmt: skip
+    assert next(s for s in steps if s["action"] == "tab-close")["closed_by"] == "script"
+    last = steps[-1]
+    assert last["selector"].endswith("#after")
+    assert "A-1" in (rec / last["dom_before"]).read_text("utf-8")
+    report, _ = replay(rec, site)
+    assert_clean_pass(report)
+    # the build notes say it as recorded, not as a guess
+    from labctl.recorder import window_facts
+
+    assert window_facts({"name": "ORD 12/9", "features": "width=9999999,foo=1,popup"}) == {
+        "how": "window.open", "features": {"popup": True}}  # fmt: skip
+
+
 def test_popup_window(site, tmp_path):
     def flow(page):
         with page.context.expect_page() as opened:

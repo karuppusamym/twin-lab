@@ -874,6 +874,24 @@ LISTENER_JS = r"""
       return r;
     };
   }
+  // Windows: how a script opens one (its name and features, never its address: that is the new
+  // tab's own first step), and a window that a script closes.
+  const win = (data) => { try { window.__tlWindow(data); } catch (e) {} };
+  const origOpen = window.open;
+  if (typeof origOpen === "function") {
+    window.open = function (...args) {
+      if (live()) win({open: {name: String(args[1] === undefined ? "" : args[1]).slice(0, 64),
+                              features: String(args[2] === undefined ? "" : args[2]).slice(0, 300)}});
+      return origOpen.apply(this, args);
+    };
+  }
+  const origClose = window.close;
+  if (typeof origClose === "function") {
+    window.close = function (...args) {
+      if (live()) win({close: true});
+      return origClose.apply(this, args);
+    };
+  }
   // Drag and drop: recorded so the replay can say it does not perform it.
   document.addEventListener("dragstart", (e) => { const el = realTarget(e); if (el && el.nodeType === 1) note("drag", el); }, true);
   // A service worker the page registers: the replay blocks workers and says so.
@@ -1029,6 +1047,36 @@ MARK_TYPED_JS = r"""([values, check]) => {
   }
   return n;
 }"""
+
+
+WINDOW_FEATURES = ("width", "height", "left", "top", "innerwidth", "innerheight", "popup",
+                   "menubar", "toolbar", "location", "status", "resizable", "scrollbars",
+                   "noopener", "noreferrer")  # fmt: skip
+
+
+def window_facts(opened: dict) -> dict:
+    """What a `window.open` call says about the window: its target name when that is a plain
+    name, and the features this list knows with a number or yes/no; anything else is dropped."""
+    import re
+
+    out: dict = {"how": "window.open"}
+    name = str(opened.get("name") or "")
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,39}", name):
+        out["name"] = name
+    features: dict = {}
+    for part in str(opened.get("features") or "").lower().split(","):
+        key, _, value = (x.strip() for x in part.partition("="))
+        if key not in WINDOW_FEATURES:
+            continue
+        if re.fullmatch(r"[0-9]{1,5}(px)?", value):
+            features[key] = int(value.removesuffix("px"))
+        elif value in ("", "yes", "1", "true"):
+            features[key] = True
+        elif value in ("no", "0", "false"):
+            features[key] = False
+    if features:
+        out["features"] = features
+    return out
 
 
 def _public(step: dict) -> dict:
@@ -1332,6 +1380,7 @@ class _Steps:
         self.open_doc: dict[str, str] = {}
         self.batch_cause: dict[str, int] = {}
         self.rewrite = False  # a step already written was changed: close() writes them again
+        self.window_opens: list[dict] = []  # window.open calls: {tab, at, used, window}
         self.sw_seen: set[str] = set()  # tabs whose page registered a service worker
         self.nav_observed: list[tuple[str, int, int]] = []  # (tab, cause, page load) per load
         self.scripts: list[str] = []  # the init scripts, for a page that missed them
@@ -1445,6 +1494,51 @@ class _Steps:
         if url:
             step["origin"] = _origin(url)
         self.waiting.append((step, None))
+
+    def on_window(self, source, data: dict) -> None:
+        """A script opened a window (`window.open`: its name and features) or closed its own
+        (`window.close`), from the page that did it (`__tlWindow`). Kept for close(), which puts
+        it on the tab's `tab-open` and `tab-close` steps."""
+        page = source.get("page") if isinstance(source, dict) else None
+        if page is None or not isinstance(data, dict):
+            return
+        tab = self.tab_of(page)
+        info = self.tabs.get(_guid(page))
+        if data.get("close") is True and info is not None:
+            info["closed_by"] = "script"
+        opened = data.get("open")
+        if isinstance(opened, dict) and tab:
+            self.window_opens.append({"tab": tab, "at": _now(), "used": False,
+                                      "window": window_facts(opened)})  # fmt: skip
+
+    def _window_facts(self, steps: list[dict]) -> None:
+        """`window` on the `tab-open` step of a tab a script opened with `window.open` (the
+        call made in the opening tab nearest its opening, within three seconds), and
+        `closed_by: script` on the `tab-close` step of a window that a script closed."""
+        from datetime import datetime
+
+        def when(text) -> float | None:
+            try:
+                return datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return None
+
+        by_tab = {info["tab"]: info for info in self.tabs.values()}
+        for info in by_tab.values():
+            opened = when(info.get("opened"))
+            calls = [c for c in self.window_opens if c["tab"] == info.get("opener")
+                     and not c["used"] and opened is not None and when(c["at"]) is not None
+                     and abs(when(c["at"]) - opened) <= 3]  # fmt: skip
+            if calls:
+                call = min(calls, key=lambda c: abs(when(c["at"]) - opened))
+                call["used"] = True
+                info["window"] = call["window"]
+        for s in steps:
+            info = by_tab.get(s.get("tab")) or {}
+            if s.get("action") == "tab-open" and info.get("window"):
+                s["window"] = info["window"]
+            elif s.get("action") == "tab-close" and info.get("closed_by"):
+                s["closed_by"] = info["closed_by"]
 
     def on_secret(self, source, data: dict) -> None:
         """A typed value, from the frame it was typed in (`__tlSecret`)."""
@@ -1887,6 +1981,7 @@ class _Steps:
         several = len(self.tabs) > 1
         if several:
             steps = self._in_order(steps)
+            self._window_facts(steps)
         else:  # one tab: no tab steps (a single page's recording reads as it always did)
             steps = [s for s in steps if not str(s.get("action") or "").startswith("tab-")]
         renumbered = self._renumber(steps)
@@ -2281,6 +2376,7 @@ def attach(
             context.expose_binding("__tlEvent", steps.on_event)
             context.expose_binding("__tlStep", steps.on_flush)
             context.expose_binding("__tlSecret", steps.on_secret)
+            context.expose_binding("__tlWindow", steps.on_window)
             for s in scripts:
                 context.add_init_script(s)
             context.on("requestfinished", har.on_finished)
@@ -2371,6 +2467,7 @@ def record(
             context.expose_binding("__tlEvent", steps.on_event)
             context.expose_binding("__tlStep", steps.on_flush)
             context.expose_binding("__tlSecret", steps.on_secret)
+            context.expose_binding("__tlWindow", steps.on_window)
             steps.scripts = _init_scripts(settle_ms)
             for s in steps.scripts:
                 context.add_init_script(s)
