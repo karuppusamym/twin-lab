@@ -131,6 +131,11 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         for path in sorted(pages.glob("*.html")):
             if path.is_file() and not path.is_symlink():
                 found[f"{app}/pages/{path.name}"] = path
+    # Reference snapshots of pages a link check found and the recording never visited.
+    unrecorded = repo_root / app / "unrecorded"
+    for path in sorted(unrecorded.glob("*.html")) if unrecorded.is_dir() else []:
+        if path.is_file() and not path.is_symlink():
+            found[f"{app}/unrecorded/{path.name}"] = path
     # The API catalogue: one file per endpoint the pages called (labctl.apicatalog).
     api = repo_root / app / "api"
     if api.is_dir():

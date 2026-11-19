@@ -12,7 +12,9 @@ one file, `apps/<app>/navigation.json`, and in two sections of the brief:
   application's or another origin's), popup windows and new tabs (what opened them, what closed
   them).
 - **Links seen, not followed**: every link target the pages hold that the recording never
-  visited, with what the rebuilt application answers there.
+  visited, with what the rebuilt application answers there; when `labctl evidence check-links`
+  was run (`labctl.linkcheck`), with what the real application answered, and the pages that
+  exist but were not recorded.
 - **Actions per screen**: every interactive element seen on the screen (button, link, input,
   select, check box, radio, file input, tab), with its selector, literal label, type, where it
   sits (a dialog, a form, a frame), and what happened each time the recording used it (the
@@ -580,6 +582,10 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
                 tail = f" then `{sanitize.route_pattern(e.location)}`" if e.location else ""
                 recorded.setdefault(e.route, f"recorded as `GET {e.route} {e.status}`{tail}")
     first = stepfacts._first_screen(brief)
+    from labctl import linkcheck  # what `labctl evidence check-links` found, when it was run
+
+    checked = linkcheck.for_app(root, ctxs)
+    signin = next((x for s in (checked.summary if checked else []) for x in s["sign_in"]), None)
 
     def answer(target: str | None) -> tuple[str, str]:
         if target is None:
@@ -662,6 +668,10 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
             if a.get("type") != "link" or isinstance(a.get("used"), list):
                 continue
             status, text = answer(a.get("target"))
+            found = checked.lookup(a.get("target")) if checked else None
+            if found is not None and status in ("out of scope", "undefined"):
+                said, why = linkcheck.answer(found, a["target"], first, signin)
+                status, text = (said, why) if said else (status, f"{text}; {why}")
             if status == "undefined":
                 undefined.append(f"{path}: {a['selector']} -> {a.get('target')}")
             not_followed.append({"selector": a["selector"], "text": a.get("label", ""),
@@ -739,7 +749,9 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
         "redirects": redirects(ctxs),
         "windows": wins,
         "undefined_targets": sorted(set(undefined)),
-    }
+        **({"link_check": checked.summary,
+            "unrecorded_pages": linkcheck.unrecorded_pages(checked, app)} if checked else {}),
+    }  # fmt: skip
 
 
 def write(root: Path, app: str, brief, ctxs: list) -> dict | None:
@@ -748,6 +760,9 @@ def write(root: Path, app: str, brief, ctxs: list) -> dict | None:
         path.unlink(missing_ok=True)
         return None
     doc = build(root, app, brief, ctxs)
+    from labctl import linkcheck
+
+    linkcheck.copy_pages(root, app, doc.get("unrecorded_pages") or [])
     text = json.dumps(doc, indent=1, ensure_ascii=False).replace("\r\n", "\n") + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(text.encode("utf-8"))
@@ -841,6 +856,9 @@ def brief_sections(app: str, doc: dict | None) -> str:
                   else ", ".join(f"`{p}`" for p in paths))  # fmt: skip
             out.append(f"- {_el(sel, text)} on {on} -> `{target}`: {ans}.")
         out.append("")
+    from labctl import linkcheck
+
+    out += linkcheck.brief_lines(doc)
     if doc.get("undefined_targets"):
         out += ["**Targets with no definition (a gap in this package):**\n",
                 *[f"- {u}" for u in doc["undefined_targets"]], ""]  # fmt: skip
