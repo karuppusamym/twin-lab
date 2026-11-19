@@ -1537,17 +1537,30 @@ def _rec(ctx) -> Rec:
 
     out = Rec(ctx.name, ctx)
     part = ctx.part
+    previous = None
+    met_by: dict[int, str | None] = {}
     for s in part.raw:
+        # A step's address is the page after it; the page as the step met it is the previous one
+        # (for a submit a click caused, the one the click met).
         screen = stepfacts._pattern(s.get("url"))
+        met, previous = previous or screen, screen or previous
+        if s.get("caused_by") in met_by:
+            met = met_by[s["caused_by"]] or met
+        met_by[s["seq"]] = met
         if not screen:
             continue
         for when, store in (("before", part.befores), ("after", part.doms)):
             html = store.get(s["seq"])
             if html is None or (when == "before" and s.get("before_scope") == "frame"):
                 continue
+            if when == "before" and s.get("action") == "goto":
+                continue  # the page being left, or nothing yet
+            if when == "after" and s.get("action") != "goto" and screen != met:
+                continue  # caught between two pages; the page load that follows shows the new one
+            here = met if when == "before" else screen
             info = sanitize.page(html, ctx.known, ctx.vocab)
             shown = frozenset((m["selector"], m["text"]) for m in info.messages if not m["hidden"])
-            out.snaps.append(Snap(s["seq"], when, screen, raw_tree(html),
+            out.snaps.append(Snap(s["seq"], when, here, raw_tree(html),
                                   domlib.parse_html(info.html), shown))  # fmt: skip
     return out
 
@@ -1759,8 +1772,13 @@ def _declared(doc: Doc, scr: dict, fld: dict, node, safe, by_id: dict, where: st
 
 def _is_error_node(node) -> bool:
     ident = " ".join([node.attrs.get("id") or "", node.attrs.get("class") or ""])
-    return bool(re.search(r"error|invalid|valmsg|validation|feedback", ident, re.IGNORECASE)) or (
-        (node.attrs.get("role") or "").lower() == "alert"
+    if re.search(r"error|invalid|valmsg|validation|feedback", ident, re.IGNORECASE):
+        return True
+    if (node.attrs.get("role") or "").lower() == "alert":
+        return True
+    # a list of messages whose items are errors (JSF `h:messages`: `<ul><li class="error">`)
+    return node.tag in ("ul", "ol", "div") and any(
+        re.search(r"error", c.attrs.get("class") or "", re.IGNORECASE) for c in node.children
     )
 
 
@@ -1888,6 +1906,13 @@ def read_pages(doc: Doc, recs: list[Rec]) -> list[tuple[str, str, str]]:
                 if fld is None:
                     fld = scr["fields"][sel] = _new_field(node, safe, labels)
                     fld["selector"], fld["type"] = sel, "radio buttons"
+                    box = safe.parent if safe is not None else None
+                    while box is not None and box.tag not in ("fieldset", "#document"):
+                        box = box.parent
+                    legend = next((c for c in box.children if c.tag == "legend"), None) if (
+                        box is not None and box.tag == "fieldset") else None  # fmt: skip
+                    if legend is not None and _text(legend):
+                        fld["label"] = _text(legend)[:80]
                     fld["_keys"] |= {k for n, _ in group for k in field_keys(n)}
                     fld["options"] = [{"value": n.attrs.get("value", ""),
                                        "label": labels.get(n.attrs.get("id") or "", "")}
@@ -2055,7 +2080,10 @@ def read_steps(doc: Doc, recs: list[Rec], endpoints: dict[str, str]) -> None:
             # Against the page the previous step left: a message a blur shows may already be in
             # this step's own "before" snapshot (the field lost the focus as the click began).
             base = prev_after if prev_after is not None else before
-            if after is not None and row.get("action") not in ("goto", "back", "forward", "reload"):
+            loaded = row.get("action") in ("goto", "back", "forward", "reload")
+            if loaded and row.get("caused_by") in rows:  # a postback: the action's own answer
+                row, loaded = rows[row["caused_by"]], False
+            if after is not None and not loaded:
                 scr = doc.screen(after.screen)
                 new = set(after.messages) - set(base.messages if base is not None else ())
                 found = {(m.get("selector"), m.get("text")) for m in row.get("messages") or []}
@@ -2078,6 +2106,14 @@ def _seen(doc: Doc, scr: dict, after: Snap, row: dict, m: dict) -> None:
         return
     if any(f.get("help") and _norm(f["help"]) == _norm(text) for f in scr["fields"].values()):
         return  # a help text, not a message
+    from labctl import navmap
+
+    node = next((n for n in _walk(after.raw) if navmap._matches(m.get("selector") or "", n)), None)
+    if node is not None and node.tag in ("td", "th", "dd", "li") and not _is_error_node(node):
+        return  # a cell or an item of a list: data, not a message
+    errorish = node is not None and _is_error_node(node)
+    if not (errorish or FIELD_MESSAGE.search(text) or message_kind(text) != "check"):
+        return  # a status text (a page count, "Saved."): the navigation map has it, not a rule
     message = doc.msg(text)
     ev = f"recording: {_step_text(row)} showed `{m.get('selector')}`"
     kind = message_kind(text)
