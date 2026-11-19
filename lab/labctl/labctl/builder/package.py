@@ -178,6 +178,11 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         for path in sorted(api.glob("*.json")):
             if path.is_file() and not path.is_symlink():
                 found[f"{app}/api/{path.name}"] = path
+    # Static files the pages read (labctl.apicatalog.write_static): configuration, addresses local.
+    static = repo_root / app / "static"
+    for path in sorted(static.rglob("*")) if static.is_dir() else []:
+        if path.is_file() and not path.is_symlink():
+            found[f"{app}/static/{path.relative_to(static).as_posix()}"] = path
     # The recorded steps in order and the sequence across applications (structure, no value),
     # and the requested flows for this app (drafts from a recording included).
     steps = repo_root / app / "steps"
@@ -634,49 +639,86 @@ def _browser_database_text(conf: dict, app: str) -> str:
 
 
 def _package_only_text(app_id: str, app: str, engine: str, has_steps: bool, db_var: str,
-                       nav: bool = False, api: bool = False) -> str:  # fmt: skip
+                       nav: bool = False, api: bool = False, screens: list[str] = (),
+                       pictures: list[str] = (), static: list[str] = (),
+                       viewport: str = "1280 x 720") -> str:  # fmt: skip
     """What applies to a builder who has the zip and no repository: where to build, what of the
-    steps below to skip, and how to check the app without labctl."""
+    steps below to skip, and the checks it can run with the package alone (no labctl, no
+    Docker, no repository)."""
     e = (engine or "").lower()
     schema_check = (
         f"`python -c \"import sqlite3; sqlite3.connect(':memory:').executescript(open('{app}/db/"
-        "schema.sql').read())\"` (the schema loads in SQLite as it is)"
+        "schema.sql').read())\"` (the schema loads in SQLite as it is), then load "
+        f"`{app}/db/seed.sql` the same way into the file your app uses"
         if e == "sqlite"
-        else f"apply `{app}/db/schema.sql` to a throwaway database of the engine (as step 3.6 says)"
+        else f"apply `{app}/db/schema.sql` and `{app}/db/seed.sql` to a throwaway database of "
+        "the engine (as step 3.6 says)"
     )
-    steps_check = (
-        f" Walk `{app}/steps/*.json` in order against the running app on the seed (by hand or "
-        "with a short browser script of your own): perform each step's action on its selector "
-        "(or its `target`), type the value `steps/<recording>.values.yaml` gives the step (where "
-        "there is none, a synthetic value of the shape given), and check that the page that "
-        "follows (`then`), the requests, the messages and the rows are those the step lists, the "
-        "values file records and the brief's *What each recorded action did* shows."
-        if has_steps
-        else ""
-    )
-    extra_check = (
-        (f" Then walk `{app}/navigation.json`: every transition, dialog, tab, frame and popup "
-         "window opens and closes on its element, and every element marked as used does what "
-         "its `used` entries say." if nav else "")
-        + (f" Call every endpoint of `{app}/api/` with the request of each recorded call "
-           "(`calls`), in order, on a fresh seed: the status and the keys of the answer are "
-           "those of the call." if api else "")
-    )  # fmt: skip
+    shown = ", ".join(f"`{x}`" for x in screens) or "every screen of the brief"
+    pics = (f" (`{app}/look/screens/`: " + ", ".join(f"`{x}`" for x in pictures[:12]) + ")"
+            if pictures else "")  # fmt: skip
+    checks = [
+        f"**The database.** {schema_check}. The tables and the rows are exactly those files'.",
+        "**Start the app** the way you run it (directly, with `" + db_var + "` set, or in a "
+        "container if you have Docker; neither the repository nor labctl is needed). Note its "
+        "address (the example run of section 4 uses port 18080).",
+    ]
+    if static:
+        checks.append("**Static files.** " + ", ".join(f"`{x}`" for x in static) + " answer at "
+                      "their paths with the package's keys and addresses that point at your "
+                      "app (write your app's address there if it is not the one given).")  # fmt: skip
+    checks.append(f"**Open each screen** ({shown}) at its address, and at every other address "
+                  "the brief gives it (*One screen, several addresses*): each element of its "
+                  f"snapshot `{app}/pages/` is there with the same id, classes and text, and the "
+                  "browser's console shows no error.")  # fmt: skip
+    if pictures:
+        checks.append(f"**Compare with the pictures.** Look: open each screen at {viewport} "
+                      f"pixels next to its picture{pics}: layout, colours, spacing and every "
+                      "literal text. A text the picture shows as a placeholder (`Xxxx`, `9999`) "
+                      "is data: your seed's value goes there. Fonts the package does not carry "
+                      f"are drawn in the fallback `{app}/look/manifest.json` names; note that "
+                      "difference, nothing else.")  # fmt: skip
+    if has_steps:
+        checks.append(
+            f"**Run the replay values.** Walk `{app}/steps/*.json` in order against the "
+            "running app on a fresh seed, by hand or with a short browser script of your own: "
+            "perform each step's action on its selector (or its `target`; a step with `record` "
+            "acts on the one row or card whose text holds that seed title), type the value "
+            "`steps/<recording>.values.yaml` gives the step, answer each dialog as the step "
+            "says, and check that the page that follows (`then`), the requests, the dialog's "
+            "text, the messages and the rows are those the step lists, the values file records "
+            "(`recorded`, `records`) and the brief's *What each recorded action did* shows."
+        )  # fmt: skip
+    if nav:
+        checks.append(f"**Navigation.** Walk `{app}/navigation.json`: every transition, dialog, "
+                      "tab, frame and popup window opens and closes on its element, and every "
+                      "element marked as used does what its `used` entries say.")  # fmt: skip
+    if api:
+        checks.append(f"**The API.** Call every endpoint of `{app}/api/` with the request of each "
+                      "recorded call (`calls`), in order, on a fresh seed: the status and the keys "
+                      "of the answer are those of the call.")  # fmt: skip
+    listed = "\n".join(f"   {n}. {c}" for n, c in enumerate(checks, 1))
     return f"""## Working from this package alone
 
 If you were given only this package and no repository (no `.git`, no `lab/` folder):
 
 1. Unpack the zip into a new, empty folder and work there: it already has the repository's
-   layout (`AGENTS.md`, `docs/`, `{app}/`). Build under `{app}/` as below; check each file
-   against its sha256 in `MANIFEST.json` first.
-2. Skip what needs the repository: the branch and the pull request (sections 1 and 6), the
-   repository's `python -m pytest -q`, `python -m labctl validate`, `labctl conformance`,
-   `labctl lab ...` and `labctl data load-across`. Hand back the folder (or a zip of `{app}/`)
-   with `BUILD-NOTES.md`, and say there which checks you could not run.
-3. Check the app without labctl: your own tests for it; {schema_check}; `docker build` if Docker
-   is available, else run the app directly with `{db_var}` set; then open every screen in the
-   brief and check that each listed selector resolves, that each route answers on its method
-   and path, and that each message appears with its exact text where the brief says.{steps_check}{extra_check}
+   layout (`AGENTS.md`, `docs/`, `{app}/`). Build under `{app}/` (or in the folder you were
+   told to use; then read every `{app}/...` path of this task as the package's file); check
+   each file against its sha256 in `MANIFEST.json` first.
+2. Skip what needs the repository: the branch and the pull request (sections 1 and 6), and the
+   repository's checks of section 4 (`pip install -e`, `python -m pytest -q`,
+   `python -m labctl validate`, `docker build` as the lab runs it, `labctl conformance`,
+   `labctl lab ...`, `labctl data load-across`). They are for builders inside the repository.
+   Hand back the folder (or a zip of `{app}/`) with `BUILD-NOTES.md`.
+3. Instead, check the app without labctl: run these checks, each needing only the package and
+   your running app, and write
+   each with its result in `BUILD-NOTES.md`:
+
+{listed}
+
+   Your own automated tests for the app are welcome beside them. Say in `BUILD-NOTES.md` which
+   of these you could not run and why.
 4. There is nobody to ask. Where this task says "stop and ask", working from the package alone
    means: choose the simplest behaviour that fits the package, and report it under Assumptions
    in `BUILD-NOTES.md`.
@@ -1007,9 +1049,14 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         if step_files
         else ""
     )
-    package_only = _package_only_text(app_id, app, engine, bool(step_files), db_var,
-                                      nav=f"{app}/navigation.json" in packaged,
-                                      api=f"{app}/api/catalogue.json" in packaged)  # fmt: skip
+    pages_dir = f"{app}/pages/"
+    package_only = _package_only_text(
+        app_id, app, engine, bool(step_files), db_var,
+        nav=f"{app}/navigation.json" in packaged, api=f"{app}/api/catalogue.json" in packaged,
+        screens=[r[len(pages_dir):] for r in packaged if r.startswith(pages_dir)],
+        pictures=[r.rsplit("/", 1)[-1] for r in packaged if r.startswith(f"{app}/look/screens/")],
+        static=[r[len(app) + len("/static"):] for r in packaged if r.startswith(f"{app}/static/")],
+    )  # fmt: skip
     # The look (labctl.lookfeel): its own section, its files in the lists, its check.
     from labctl import lookfeel
 
@@ -1107,7 +1154,7 @@ person only where section 7 says to stop.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/codemap.json`, `{app}/session.json`, `{app}/templates.json`, `{app}/{docs.DIR}/**`, `{app}/rules.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/codemap.json`, `{app}/session.json`, `{app}/templates.json`, `{app}/{docs.DIR}/**`, `{app}/rules.json`, `{app}/api/*`, `{app}/static/**`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
@@ -1138,6 +1185,9 @@ person only where section 7 says to stop.
 {objects_step}{enhance_rule}
 
 ## 4. Check
+
+(Inside the repository. Working from the package alone, run the checks of *Working from this
+package alone* instead.)
 
 Run every command from the repository root, after `pip install -e ".[dev]"` (Python 3.11 or
 later). Keep the exact result of each one for steps 5 and 6.

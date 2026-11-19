@@ -787,8 +787,8 @@ class _Run:
 
     def _arm(self, page, step: RecStep) -> None:
         """Before an action that showed a dialog in the source: answer it as recorded."""
-        nxt = self.next_of.get(step.seq)
-        if nxt is None or nxt.action != "dialog" or nxt.caused_by != step.seq:
+        nxt = dialog_after(self.rec.steps, step)
+        if nxt is None:
             return
         d = nxt.dialog or {}
         value = self.values.get(nxt.seq)
@@ -1612,6 +1612,22 @@ def _wait_address(page, url: str, timeout_ms: int = 5000) -> None:
         if time.monotonic() >= deadline:
             raise _WrongAddress(f"expected {url}, the page is at {page.url}")
         page.wait_for_timeout(50)
+
+
+def dialog_after(steps: list[RecStep], step: RecStep) -> RecStep | None:
+    """The dialog a step caused: the first `dialog` step after it before the person acted again.
+    Between them may be steps the action caused (a hash navigation, `caused_by` the step); the
+    recorder often cannot tie the dialog itself to its action (`caused_by` None)."""
+    later = [s for s in steps if s.seq > step.seq]
+    chain = {step.seq}
+    for s in later:
+        if s.action == "dialog":
+            return s if s.caused_by is None or s.caused_by in chain else None
+        if s.caused_by is not None and s.caused_by in chain:
+            chain.add(s.seq)
+            continue
+        return None
+    return None
 
 
 def _placed(rec: Recording, values: dict[int, str]):

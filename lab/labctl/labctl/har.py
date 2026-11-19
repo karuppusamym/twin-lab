@@ -1157,7 +1157,7 @@ CLIENT_RULES: list[_Rule] = [
     ),
     _rule(
         "text",
-        r"Bootstrap v(?P<v>\d+\.\d+\.\d+)",
+        r"Bootstrap v(?P<v>\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.?\d*)?)",
         "ui",
         "Bootstrap",
         C_,
@@ -1451,7 +1451,115 @@ SCRIPT_NAMES: list[tuple[str, re.Pattern, str]] = [
     ("vue", re.compile(r"/_nuxt/|vue[.-]|chunk-vendors"), "script name"),
     ("angular", re.compile(r"angular|/main-es20\d\d|/polyfills[.-]"), "script name"),
 ]  # fmt: skip
-FRONT_KEYS = ("framework", "version", "rendering", "marker", "ui_library")
+FRONT_KEYS = ("framework", "version", "rendering", "marker", "ui_library", "pages")
+STATIC_CLIENT = "static pages rendered in the browser from the API"
+_VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+                   "param", "source", "track", "wbr"})  # fmt: skip
+
+
+def _filled_ids(html: str) -> dict[str, int]:
+    """Per element id, how many elements it holds (its descendants)."""
+    from html.parser import HTMLParser
+
+    counts: dict[str, int] = {}
+    stack: list[str | None] = []
+
+    class _P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            for el in stack:
+                if el is not None:
+                    counts[el] += 1
+            el = dict(attrs).get("id")
+            if el:
+                counts.setdefault(el, 0)
+            if tag not in _VOID:
+                stack.append(el or None)
+
+        def handle_endtag(self, tag):
+            if tag not in _VOID and stack:
+                stack.pop()
+
+    try:
+        _P().feed(html or "")
+    except Exception:  # noqa: BLE001 - a broken page shows nothing
+        return {}
+    return counts
+
+
+def _answer_strings(value, out: set[str]) -> None:
+    if isinstance(value, dict):
+        for v in value.values():
+            _answer_strings(v, out)
+    elif isinstance(value, list):
+        for v in value:
+            _answer_strings(v, out)
+    elif isinstance(value, str):
+        p = sanitize.phrase(value)
+        if len(p) >= 6 and re.search(r"[^\W\d_]{3}", p) and "://" not in p:
+            out.add(p)
+
+
+def client_rendering(
+    served: list[tuple[str, str]],
+    snapshots: list[tuple[str, str]],
+    answers: list[tuple[str, Any]],
+) -> dict | None:
+    """Static pages whose lists the browser fills from API answers: the served HTML of a screen
+    has containers that are empty, the page snapshots of that screen show them filled, and values
+    of the API answers appear in the snapshots but not in the served HTML. `served` and
+    `snapshots` are (screen pattern, HTML); `answers` are ("METHOD /pattern", parsed JSON).
+    Returns {"marker", "containers", "calls", "values", "screens"} (names and counts only), or
+    None when the recording does not show it."""
+    by_call: dict[str, set[str]] = defaultdict(set)
+    for key, body in answers:
+        _answer_strings(body, by_call[key])
+    shots: dict[str, list[str]] = defaultdict(list)
+    for pattern, html in snapshots:
+        shots[pattern].append(html)
+    containers: dict[str, None] = {}
+    calls: dict[str, None] = {}
+    values: set[str] = set()
+    screens: dict[str, None] = {}
+    # Every document the server sent for a screen counts: a server-rendered list page is served
+    # again after a search, with the results in it, and those are not filled by the browser.
+    served_by: dict[str, list[str]] = defaultdict(list)
+    for pattern, html in served:
+        served_by[pattern].append(html)
+    for pattern, docs in served_by.items():
+        later = shots.get(pattern) or []
+        if not later:
+            continue
+        before: dict[str, int] = {}
+        for html in docs:
+            for i, n in _filled_ids(html).items():
+                before[i] = max(before.get(i, 0), n)
+        served_text = " ".join(sanitize.phrase(html) for html in docs)
+        empty = {i for i, n in before.items() if n == 0}
+        for snap in later:
+            after = _filled_ids(snap)
+            filled = sorted(i for i in empty if after.get(i, 0) > 0)
+            snap_text = sanitize.phrase(snap)
+            shown = {key: {v for v in vals if v in snap_text and v not in served_text}
+                     for key, vals in by_call.items()}  # fmt: skip
+            shown = {k: v for k, v in shown.items() if v}
+            n = len(set().union(*shown.values())) if shown else 0
+            if n >= 3 or (n and filled):
+                containers.update(dict.fromkeys(filled))
+                calls.update(dict.fromkeys(sorted(shown)))
+                values |= set().union(*shown.values())
+                screens[pattern] = None
+    if not screens:
+        return None
+    where = ", ".join(f"`{s}`" for s in list(screens)[:4])
+    held = (f"{len(containers)} container(s) empty in the served HTML ("
+            + ", ".join(f"`#{c}`" for c in list(containers)[:4]) + ") filled in the snapshots; "
+            if containers else "")  # fmt: skip
+    marker = (f"the served HTML of {where} lacks the lists the snapshots show: {held}"
+              f"{len(values)} value(s) of the answers of "
+              + ", ".join(f"`{c}`" for c in list(calls)[:4])
+              + " appear in the snapshots and not in the served HTML")  # fmt: skip
+    return {"marker": marker, "containers": list(containers), "calls": list(calls),
+            "values": len(values), "screens": list(screens)}  # fmt: skip
 
 
 def _signals(
@@ -1497,18 +1605,24 @@ def _hits(values: dict[str, set[str]]) -> list[dict]:
     """Apply every rule; one hit per rule, with the version when the signal showed one."""
     hits = []
     for rule in RULES:
-        found, version = False, None
-        for value in values.get(rule.source, ()):
+        found = False
+        seen: list[tuple[int, str]] = []  # (where in its file the marker stood, version)
+        for value in sorted(values.get(rule.source, ())):
             m = rule.rx.search(value)
             if m:
                 found = True
                 groups = m.groupdict()
-                if not version and groups.get("v"):  # `vminor`: the digit after the dot
-                    version = ".".join(x for x in (groups["v"], groups.get("vminor")) if x)
-                if version:
-                    break
+                if groups.get("v"):  # `vminor`: the digit after the dot
+                    seen.append((m.start(), ".".join(x for x in (groups["v"], groups.get("vminor"))
+                                                     if x)))  # fmt: skip
         if found:
-            hits.append({"rule": rule, "version": version or rule.version})
+            # a library's own banner opens its file; one quoted inside another bundle does not
+            seen.sort()
+            hit = {"rule": rule, "version": seen[0][1] if seen else rule.version}
+            versions = sorted({v for _, v in seen})
+            if len(versions) > 1:
+                hit["versions"] = versions
+            hits.append(hit)
     return hits
 
 
@@ -1685,6 +1799,10 @@ def _framework(
             continue
         item = {"name": name, "marker": r.marker, "confidence": r.conf,
                 "role": "ui" if r.kind == "ui" else "library"}  # fmt: skip
+        if h.get("versions"):  # several versions in the recording: the version is not certain
+            item["marker"] += " (versions seen: " + ", ".join(h["versions"]) + ")"
+            if item["confidence"] == CERTAIN:
+                item["confidence"] = LIKELY
         if h["version"]:
             item["version"] = h["version"]
         libraries.append(item)
@@ -1752,6 +1870,55 @@ def _error(status: int, data: Any) -> tuple[str | None, str | None]:
     return None, None
 
 
+INDEX_FILE = re.compile(r"/(index|default)\.(html?|php|aspx?|jsp)$", re.I)
+
+
+def screen_aliases(recordings: list[Path]) -> dict[str, str]:
+    """Addresses that serve the same document as another: {alias: screen}. `/index.html` beside
+    `/` (the directory index of the other) with the same body or title. Two other addresses
+    with the same HTML stay two screens (a single-page application serves one shell for all)."""
+    import hashlib
+
+    docs: dict[str, tuple[str, str]] = {}  # pattern -> (sha of the body, title)
+    order: list[str] = []
+    for path in recordings:
+        try:
+            rec = load(Path(path))
+        except (OSError, ValueError):
+            continue
+        with sanitize.template_rules([]), sanitize.screen_aliases({}):
+            for e in exchanges(rec.har):
+                if e.kind != "document" or not (200 <= e.status < 300) or not e.resp_text                         or e.resp_mime != "text/html":  # fmt: skip
+                    continue
+                pattern = sanitize.route_pattern(e.path)
+                if pattern in docs:
+                    continue
+                m = re.search(r"<title[^>]*>(.*?)</title>", e.resp_text, re.I | re.S)
+                docs[pattern] = (hashlib.sha256(e.resp_text.encode("utf-8", "replace")).hexdigest(),
+                                 " ".join((m.group(1) if m else "").split()))  # fmt: skip
+                order.append(pattern)
+    out: dict[str, str] = {}
+    for p in order:
+        m = INDEX_FILE.search(p)
+        parent = (p[: m.start()] or "/") if m else None
+        if parent is not None and parent + ("/" if parent != "/" else "") in docs:
+            parent = parent + ("/" if parent != "/" else "")
+        # the same document at its directory's address (same body, or the same title): an
+        # SPA's routes all serve one shell, so a body alone never makes two addresses one
+        if parent in docs and (docs[parent][0] == docs[p][0] or docs[parent][1] == docs[p][1]):
+            out[p] = parent
+    return out
+
+
+def static_json(method: str, path: str, body) -> bool:
+    """A static JSON file the pages read (`/config.json` with `{"API_URL": ..., "HLS_URL": ...}`):
+    a GET of a `.json` file whose answer is one object of plain values. It is a file the server
+    sends as it is, not a table."""
+    return (method.upper() == "GET" and path.lower().endswith(".json") and isinstance(body, dict)
+            and bool(body) and all(v is None or isinstance(v, (str, int, float, bool))
+                                   for v in body.values()))  # fmt: skip
+
+
 def _entity(pattern: str) -> str | None:
     """The resource a path names: `/api/cases/{id}/notes` -> `notes`, `/api/cases/search` -> `cases`."""
     segs = [s for s in pattern.split("/") if s]
@@ -1775,6 +1942,17 @@ def open_dialogs(html: str) -> list[str]:
     return [f"#{n.id}" if n.id else n.tag for n in domlib._walk(tree)
             if domlib.is_dialog(n) and domlib.shown(n)
             and not sanitize._player(n.attrs.get("class") or "")]  # fmt: skip
+
+
+def dialog_residue(html: str) -> int:
+    """How many closed dialogs of a snapshot carry an inline `display` a script left when it
+    closed them (`style="display: none;"`): a page as it is after dialogs were opened."""
+    from labctl.behaviour import dom as domlib
+
+    tree = domlib.parse_html(html)
+    return sum(1 for n in domlib._walk(tree)
+               if domlib.is_dialog(n) and not domlib.shown(n)
+               and re.search(r"display\s*:", n.attrs.get("style") or "", re.I))  # fmt: skip
 
 
 def list_key(data: Any):
@@ -1971,8 +2149,28 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
     scripts = [(e.path, e.resp_text) for e in entries if e.kind == "asset" and e.resp_text]
     all_pages = [p for s in screens.values() for p in s.pages]
     tech = _framework(all_pages + shells, scripts, entries)
+    if tech.get("framework") == "server-rendered":
+        # No framework marker: pages that arrive with their content, or static pages whose
+        # scripts fill them from an API (the snapshots show what the served HTML lacks).
+        served = [(sanitize.route_pattern(e.path), e.resp_text) for e in entries
+                  if e.kind == "document" and 200 <= e.status < 300 and e.resp_text
+                  and e.resp_mime == "text/html"]  # fmt: skip
+        shots = [(sanitize.route_pattern(urlsplit(s.url).path or "/"), dom_text[id(s)])
+                 for s in rec.steps if s.dom is not None and id(s) in dom_text
+                 and s.url.startswith("http")]  # fmt: skip
+        answers = [(f"{e.method} {sanitize.route_pattern(e.path)}", e.resp_json) for e in entries
+                   if e.kind == "api" and e.resp_json is not None and 200 <= e.status < 300]  # fmt: skip
+        found = client_rendering(served, shots, answers)
+        # The whole application is static pages filled in the browser only when most of its
+        # served screens are; one screen whose table a script fills (a server-rendered app with
+        # one API-driven list) leaves the application server-rendered.
+        served_screens = {pattern for pattern, _ in served}
+        if found and 2 * len(found["screens"]) >= len(served_screens):
+            tech.update(framework=STATIC_CLIENT, rendering="client", pages="static",
+                        marker=found["marker"])  # fmt: skip
     frontend = {k: tech[k] for k in FRONT_KEYS if k in tech}
-    server_rendered = frontend.get("rendering") == "server"
+    # Static pages are files the server sends as they are: their addresses stay routes.
+    server_rendered = frontend.get("rendering") == "server" or frontend.get("pages") == "static"
     # Words seen as values, to mask names in error messages. A page shows the application's own
     # messages as text too; those words count only if a request or response also held them.
     shown = set().union(*(p.values for p in all_pages + shells))
@@ -2033,7 +2231,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
                 _add_rule(model, rule)
         elif e.status >= 500:
             server_errors += 1
-        if e.method == "GET" and 200 <= e.status < 300 and e.resp_json is not None:
+        if e.method == "GET" and 200 <= e.status < 300 and e.resp_json is not None                 and not (e.host not in siblings and static_json(e.method, e.path, e.resp_json)):  # fmt: skip
             entity = _entity(pattern)
             if entity:
                 _collect(entity, _items(e.resp_json), tables, codes, not_codes, acc.tables)
@@ -2186,11 +2384,12 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         files = []
         if acc.pages and pages_dir is not None:
             # the fullest snapshot with no dialog open (the screen as it is drawn without one:
-            # its picture must not show a modal over it): most ids, then most classes (a list
-            # with its rows), then latest
+            # its picture must not show a modal over it) and none opened before (a dialog closed
+            # by script keeps `style="display: none"`: runtime state, not the screen's markup):
+            # most ids, then most classes (a list with its rows), then latest
             best = max(enumerate(acc.pages),
-                       key=lambda p: (not open_dialogs(p[1].html), len(p[1].ids),
-                                      len(p[1].classes), p[0]))[1]  # fmt: skip
+                       key=lambda p: (not open_dialogs(p[1].html), -dialog_residue(p[1].html),
+                                      len(p[1].ids), len(p[1].classes), p[0]))[1]  # fmt: skip
             pages_dir.mkdir(parents=True, exist_ok=True)
             safe_name = re.sub(r"[^A-Za-z0-9.-]+", "-", name).strip("-.")[:80] or "page"
             out = (
@@ -2292,6 +2491,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             scripts
             + [(e.path, e.resp_text) for e in entries if e.kind == "document" and e.resp_text],
             served_grids=served_grids,
+            api_origins=siblings,
         ),
         **{"from": [ev]},
     )
@@ -2418,6 +2618,7 @@ def data_location(
     scripts: list[tuple[str, str]],
     *,
     served_grids: bool = False,
+    api_origins: set[str] | frozenset[str] = frozenset(),
 ) -> dict:
     """Where the application's business data lives, with the evidence for it (R07).
 
@@ -2459,10 +2660,16 @@ def data_location(
     if writes or records or served_grids:
         out["kind"] = "server"
         out["persistence"] = "server"
-        if writes:
-            where = sorted({f"{e.method} {sanitize.route_pattern(e.path)}" for e in writes})
-            ev.append(f"{len(writes)} state-changing request(s) to the app's own origin: "
-                      + ", ".join(where[:5]) + (" ..." if len(where) > 5 else ""))  # fmt: skip
+        # per origin: the pages' own, or the application's API on another host of its site
+        for label, group in (
+            ("the app's own origin", [e for e in writes if e.host not in api_origins]),
+            ("the application's API origin (another host of the pages' site)",
+             [e for e in writes if e.host in api_origins]),
+        ):  # fmt: skip
+            if group:
+                where = sorted({f"{e.method} {sanitize.route_pattern(e.path)}" for e in group})
+                ev.append(f"{len(group)} state-changing request(s) to {label}: "
+                          + ", ".join(where[:5]) + (" ..." if len(where) > 5 else ""))  # fmt: skip
         if records:
             where = sorted({sanitize.route_pattern(e.path) for e in records})
             ev.append("responses carry records: GET " + ", ".join(where[:5]))

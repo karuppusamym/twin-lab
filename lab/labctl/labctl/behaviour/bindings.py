@@ -14,7 +14,8 @@ steps:
     value: Water the plants
   17:
     action: check
-    record: Pay the bills   # a step on a record the recording did not create: its title
+    record: Pay the bills   # a step on a record the recording did not create: its title (the
+                            # row whose text holds it as a whole phrase, once; or the whole row text)
 ```
 
 `value` is what a `type` or `select` step enters. `record` names the record (list item, table
@@ -57,6 +58,9 @@ class Bindings:
     # Steps whose value a generator wrote (labctl.seedplan, with the seed), not a person: written
     # as `generated: <the value>`, so a value a person changes afterwards is theirs and is kept.
     generated: set[int] = field(default_factory=set)
+    # Steps whose record a generator read from the evidence (the clicked row holds exactly one
+    # seed row's title): written as `generated: <the title>` beside `record:`, kept the same way.
+    generated_records: set[int] = field(default_factory=set)
 
     def merged(self, other: Bindings) -> Bindings:
         """These bindings, with `other` filling the steps these do not bind."""
@@ -123,7 +127,9 @@ def needs(rec: Recording) -> list[Need]:
                     step.action,
                     step.selector,
                     cand.get("title_shape"),
-                    "acts on a record the recording did not create: give its synthetic title",
+                    "acts on a record the recording did not create: write the title of the row "
+                    "it acts on as db/seed.sql holds it (the one row whose text holds that title "
+                    "as a whole phrase), or the row's whole text",
                 )  # fmt: skip
             )
     return out
@@ -162,6 +168,9 @@ def template(rec: Recording, existing: Bindings | None = None) -> str:
         else:
             entry["record_shape"] = n.shape
             entry["record"] = existing.records.get(n.seq)
+            if n.seq in existing.generated_records and entry["record"] is not None:
+                entry["generated"] = entry["record"]
+                n.note = "read from the evidence: the clicked element holds this seed row's title"
         if n.note:
             entry["note"] = n.note
     head = (
@@ -208,6 +217,8 @@ def load(path: Path | None) -> Bindings:
                 out.generated.add(seq)
         if entry.get("record") is not None:
             out.records[seq] = str(entry["record"])
+            if entry.get("generated") is not None and str(entry["generated"]) == out.records[seq]:
+                out.generated_records.add(seq)
         if isinstance(entry.get("index"), int) and not isinstance(entry["index"], bool):
             out.indexes[seq] = entry["index"]
         if entry.get("file"):

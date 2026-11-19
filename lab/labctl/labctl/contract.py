@@ -196,6 +196,10 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
         code = codemap.write(root, app_id, ctxs, done, whole=recorded_scope(root, app_id))
     except codemap.CodeMapError as exc:
         refused = exc.places
+    if code:  # endpoints only the code calls: a stub file each (labctl.apicatalog)
+        done.setdefault("problems", []).extend(
+            apicatalog.write_code_stubs(root, app_id, code, ctxs)
+        )
     nav = navmap.write(root, app_id, brief, ctxs,
                        extend=lambda doc: templates.extend_navigation(
                            codemap.extend_navigation(doc, code) or doc, ctxs))  # fmt: skip

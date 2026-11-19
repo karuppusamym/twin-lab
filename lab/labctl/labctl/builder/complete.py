@@ -189,6 +189,9 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
             doc = {}
         name = f"`{doc.get('method')} {doc.get('path')}`" if doc.get("method") else "an endpoint"
         return f"Endpoint {name}: parameters, schemas, every recorded call with synthetic values."
+    if rel.startswith(app + "static/"):
+        return ("A static file the pages read (configuration), with every address made local: "
+                "serve it at the same path.")  # fmt: skip
     if rel.startswith(app + "pages/"):
         return ("Snapshot of one screen: its real structure, ids, classes and interface text; "
                 "data masked.")  # fmt: skip

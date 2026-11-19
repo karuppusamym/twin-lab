@@ -93,6 +93,29 @@ def _norm(text: str | None) -> str:
     return " ".join((text or "").split())
 
 
+def row_selectors(rows: str) -> list[str]:
+    """A record locator's rows, then the forms that also fit a list that is itself the
+    identified element: `#list div.row > div.col` (written by an older recorder for
+    `<div id="list" class="row">`) is also `#list > div.col` and `#list div.col`."""
+    out = [rows]
+    m = re.fullmatch(r"(\S+)\s+(\S+)\s*>\s*(\S+)", rows.strip())
+    if m:
+        out += [f"{m.group(1)} > {m.group(3)}", f"{m.group(1)} {m.group(3)}"]
+    return out
+
+
+def title_hits(titles: list[str], title: str) -> list[int]:
+    """The rows a binding names: those whose whole text is the binding (the recorder's form),
+    else those whose text holds it as a whole phrase (a record's title: `Nokia lumia 1520` in
+    `Nokia lumia 1520 820 Delete`), ignoring case. The caller wants exactly one."""
+    want = _norm(title)
+    exact = [i for i, t in enumerate(titles) if _norm(t) == want]
+    if exact or not want:
+        return exact
+    rx = re.compile(r"(?<!\w)" + re.escape(want.lower()) + r"(?!\w)")
+    return [i for i, t in enumerate(titles) if rx.search(_norm(t).lower())]
+
+
 def describe(cand: dict) -> str:
     kind = cand.get("kind")
     if kind == "testid":
@@ -217,8 +240,12 @@ def _one(scope, cand: dict, title: str | None):
         if not title:
             return None, None, NO_BINDING
         rows = scope.locator(cand["rows"])
+        for alt in row_selectors(cand["rows"])[1:]:
+            if rows.count():
+                break
+            rows = scope.locator(alt)  # an older recording's locator for a list that is itself
         titles = rows.evaluate_all(_TITLES_JS)
-        hits = [i for i, t in enumerate(titles) if _norm(t) == _norm(title)]
+        hits = title_hits(titles, title)
         if len(hits) != 1:
             return None, len(hits), f"{len(hits)} of {len(titles)} record(s) have that title"
         row = rows.nth(hits[0])

@@ -1348,15 +1348,80 @@ def _assets(raws: list[Raw]) -> dict:
     return out
 
 
+MEDIA_FILES = [
+    (re.compile(r"\.m3u8$", re.I), "an HLS video playlist"),
+    (re.compile(r"\.ts$", re.I), "HLS video segments"),
+    (re.compile(r"\.mpd$", re.I), "a DASH video manifest"),
+    (re.compile(r"\.(m4s|m4v|m4a)$", re.I), "DASH media segments"),
+    (re.compile(r"\.(mp4|webm|ogv|mov)$", re.I), "video files"),
+    (re.compile(r"\.(mp3|ogg|wav|aac|flac)$", re.I), "audio files"),
+    (re.compile(r"\.(vtt|srt)$", re.I), "subtitles"),
+]
+
+
+def _named_by(host: str, raws: list[Raw]) -> list[str]:
+    """Where the application's own answers and scripts name a host: `KEY in /path` for a JSON
+    key whose value names it, `/path` for a script or a page that does. Names only."""
+    found: dict[str, None] = {}
+    for r in raws:
+        if not r.own or not r.text or host not in r.text.lower():
+            continue
+        data = _json(r.text) if "json" in r.mime else None
+        keys = []
+        if data is not None:
+            keys = [k for k, v in _leaves(data) if isinstance(v, str) and host in v.lower()]
+        for k in keys or [""]:
+            name = _field_name(k.rsplit(".", 1)[-1]) if k else ""
+            found[f"`{name}` in `{r.route}`" if name else f"`{r.route}`"] = None
+    return list(found)[:5]
+
+
+def _media(group: list[Raw]) -> list[str]:
+    what: dict[str, None] = {}
+    for r in group:
+        hit = next((label for rx, label in MEDIA_FILES if rx.search(r.path)), None)
+        if hit is None and kind_of(r) == "media":
+            hit = "media files"
+        if hit:
+            what[hit] = None
+    return list(what)
+
+
 def _third_parties(raws: list[Raw], screen_of, page_origins: set[str]) -> tuple[list, list, set]:
+    from labctl import har
+
     groups: dict[str, list[Raw]] = defaultdict(list)
     for r in raws:
         if not r.own:
             groups[r.host].append(r)
+    sites = {har.site_of(urlsplit(o).netloc) for o in page_origins} - {None}
     third, apis, shown = [], [], set()
-    n_third = n_api = 0
+    n_third = n_api = n_media = 0
     for host, group in sorted(groups.items(), key=lambda kv: kv[1][0].n):
         domain, vendor, purpose = _third_party(host)
+        named = _named_by(host, raws) if domain is None and har.site_of(host) in sites else []
+        served = _media(group) if named else []
+        if served:
+            # A host of the pages' own site that the application's configuration or code names
+            # as one of its services: the application's media origin, not a third party.
+            n_media += 1
+            apis.append({
+                "origin": f"media-origin-{n_media}",
+                "role": "media",
+                "serves": served,
+                "named_by": named,
+                "requests": len(group),
+                "calls": sorted({f"{r.method} {r.route}" for r in group})[:20],
+                "screens": sorted({s for s in (screen_of(r) for r in group) if s})[:20],
+                "note": "The application's own media origin (the same site as the pages; its "
+                        "address is named by " + ", ".join(named) + "). It serves "
+                        + ", ".join(served) + ". Serve a stand-in of your own at the same "
+                        "paths (a short clip of your own, from the demo's own origin or a "
+                        "second local origin) and point the configuration there, or leave the "
+                        "video out and give the reason in BUILD-NOTES.md. Never call the "
+                        "original.",
+            })  # fmt: skip
+            continue
         kinds = Counter(_tp_kind(r) for r in group)
         reads = [r for r in group if "json" in r.mime and r.status < 400 and r.text]
         is_app_api = (domain is None and reads and any(
@@ -1366,10 +1431,12 @@ def _third_parties(raws: list[Raw], screen_of, page_origins: set[str]) -> tuple[
             n_api += 1
             apis.append({
                 "origin": f"api-origin-{n_api}",
-                "note": "The application's own API served from another origin (CORS answers name "
-                        "the page's origin). Its calls are not in the endpoint files: serve them "
-                        "from the demo's own origin at the same paths, or keep a second origin "
-                        "with the same CORS headers.",
+                "role": "api",
+                "note": "The application's own API served from another origin of the pages' "
+                        "site (CORS answers name the page's origin). Its endpoints are in the "
+                        "endpoint files at the paths listed: serve them from the demo's own "
+                        "origin at the same paths, or keep a second origin with the same CORS "
+                        "headers.",
                 "endpoints": sorted({r.key for r in group}),
                 "cors": _cors(reads[-1], page_origins),
                 "time_ms": _ms([r.ms for r in group]),
@@ -1551,6 +1618,8 @@ def build(ctxs: list, endpoints: dict[str, dict]) -> dict:
         return next((route for t, route in reversed(shown) if t <= at), None)
 
     third, other_apis, vendors = _third_parties(all_raws, screen_of, page_origins)
+    media = [a for a in other_apis if a.get("role") == "media"]
+    other_apis = [a for a in other_apis if a.get("role") != "media"]
     errors = []
     for name, ep in sorted(eps.items()):
         for status, n in sorted(Counter(r.status for r in ep.raws if r.status >= 400).items()):
@@ -1585,6 +1654,7 @@ def build(ctxs: list, endpoints: dict[str, dict]) -> dict:
         "static_files": _assets(all_raws),
         "third_parties": third,
         "other_origin_apis": other_apis,
+        "media_origins": media,
         "errors": errors,
         "retries": [
             {"endpoint": endpoints[n].get("method", "") + " " + endpoints[n].get("path", ""), **r}
@@ -1615,7 +1685,9 @@ ABOUT = (
     "redirect_chains: every redirect with its hops. streams: server-sent events, WebSocket "
     "messages and long polling (event names and data shapes). static_files: the files of the "
     "application by kind, with sizes and caching: serve the same set the same way. "
-    "third_parties: other origins by purpose, never to be called or copied. errors and retries: "
+    "third_parties: other origins by purpose, never to be called or copied. media_origins: "
+    "hosts of the pages' own site that the application's configuration or code names, with "
+    "what they serve: serve a stand-in, never the original. errors and retries: "
     "the error answers and the calls the page repeated. Per endpoint, the same facts are under "
     "`network` in its file. No value of the recording is in this file."
 )
@@ -1709,6 +1781,9 @@ def brief_lines(net: dict | None) -> list[str]:
     for t in net.get("third_parties") or []:
         out.append(f"- Third party `{t['origin']}` ({t['purpose']}): {t['page_needs']}. Never "
                    "call it.")  # fmt: skip
+    for m in net.get("media_origins") or []:
+        out.append(f"- Media origin `{m['origin']}` (the application's own, {m['requests']} "
+                   f"request(s)): {m['note']}")  # fmt: skip
     for r in net.get("retries") or []:
         out.append(f"- `{r['endpoint']}` answered {r['after']} and the page tried again after "
                    f"{r['delay_ms']} ms ({r['then']})")  # fmt: skip
@@ -1828,6 +1903,9 @@ def architecture_lines(net: dict | None, app: str) -> list[str]:
     for a in net.get("other_origin_apis") or []:
         out.append(f"- `{a['origin']}`: {a['note']} Endpoints: "
                    + ", ".join(f"`{e}`" for e in a["endpoints"]))  # fmt: skip
+    for m in net.get("media_origins") or []:
+        out.append(f"- Media origin `{m['origin']}` ({m['requests']} request(s) from "
+                   + ", ".join(f"`{x}`" for x in m.get("screens") or []) + f"): {m['note']}")  # fmt: skip
     for e in net.get("errors") or []:
         out.append(f"- Error answer: `{e['endpoint']}` {e['status']} x{e['count']}")
     for r in net.get("retries") or []:

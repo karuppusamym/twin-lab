@@ -713,9 +713,17 @@ def _query_params(urls: list[str], codes: set[str]) -> dict[str, dict]:
         role = next((r for rx, r in netfacts.QUERY_ROLES if rx.match(k)), None)
         info: dict = {"role": role or "filter or option", "distinct": len(set(vs)),
                       "sent_in": f"{len(vs)} of {len(urls)} visit(s)"}  # fmt: skip
-        coded = sorted({v for v in vs if v in codes}) if role != "search" else []
+        from labctl import publicdata
+
+        pub = publicdata.current()  # a declared public value (a product's id) is shown too
+        coded = sorted({v for v in vs if v in codes or (pub is not None and v and pub.text(v))}
+                       ) if role != "search" else []  # fmt: skip
         if coded:  # a search is what a person typed: its shape only, even when it is a code
             info["values"] = coded[:30]
+            if len(coded) < info["distinct"]:  # the others are data: never listed, counted
+                info["values_note"] = (f"{len(coded)} of the {info['distinct']} distinct values "
+                                       "are codes or declared public and listed; the others are "
+                                       "data and left out")  # fmt: skip
         elif role in ("page", "page size", "offset") and all(v.isdigit() for v in vs):
             info["values"] = sorted({int(v) for v in vs})[:20]
         else:

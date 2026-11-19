@@ -433,7 +433,10 @@ def build_all(
     # Screens of one structure and many addresses are one template (labctl.templates): the
     # split, the sequence and the draft flows name them by it, as the brief does.
     learned = [t["rule"] for t in templates.rules_for(root, "", [rec])]
-    with sanitize.template_rules(learned):
+    from labctl import har
+
+    same = har.screen_aliases([rec])  # `/index.html` of `/`: one screen in the flows too
+    with sanitize.template_rules(learned), sanitize.screen_aliases(same):
         return _build_all(root, rec, proposal, yes, db_engine, package_dir, say)
 
 
@@ -522,6 +525,10 @@ def _build_all(root, rec, proposal, yes, db_engine, package_dir, say) -> Summary
         draft = seedplan.acceptance_whole(root, rec)
         if draft and not (rec / "acceptance.yaml").exists():
             _write_acceptance(rec / "acceptance.yaml", draft)
+        from labctl.behaviour import drafts  # expected actions, visual states, scope: unapproved
+
+        for path in drafts.write_all(root, rec, [a.id for a in summary.apps if a.brief]):
+            say(f"draft to review: {_rel(root, path)}")
     target = summary_file(rec)
     target.write_text(json.dumps(summary.to_dict(), indent=2), encoding="utf-8")
     say("\n" + summary.text())
@@ -551,9 +558,11 @@ def _replay_inputs(root: Path, app_id: str, part: Path, result: AppResult, say) 
 
 
 def _write_acceptance(path: Path, draft: dict) -> None:
-    head = ("# DRAFT acceptance cases, written by labctl evidence build-all with the seed and the\n"
-            "# replay values. Required only for what the build package states; values the\n"
-            "# application computes by a rule nobody stated are excluded, with the reason.\n")  # fmt: skip
+    head = ("# DRAFT acceptance cases, unapproved, written by labctl evidence build-all with the\n"
+            "# seed, the replay values and what the recording visibly showed (list counts, the\n"
+            "# record a click opened). Required only for what the build package states; values the\n"
+            "# application computes by a rule nobody stated are excluded, with the reason. Review\n"
+            "# each case and fill approved_by before you judge with it.\n")  # fmt: skip
     path.write_text(
         head + yaml.safe_dump(draft, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )

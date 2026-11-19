@@ -153,6 +153,9 @@ class Public:
     phrases: set[str] = field(default_factory=set)  # sanitize.phrase() of declared text values
     numbers: set[str] = field(default_factory=set)  # declared numbers, as written plainly
     shapes: set[str] = field(default_factory=set)  # typed shapes of the recordings
+    # words declared values write with a capital (`Mac` of `MacBook air`), as the sanitiser
+    # reads names (`sanitize.names_in`): they are no undeclared name where a declared text shows
+    capitals: set[str] = field(default_factory=set)
 
     def endpoint(self, method: str, route: str) -> Endpoint | None:
         for d in self.decls:
@@ -207,7 +210,8 @@ class Public:
     def words(self) -> set[str]:
         """Every word of the declared values (lower-case): what the look's privacy check lets
         through."""
-        return set().union(*(sanitize.words(p) for p in self.phrases)) if self.phrases else set()
+        out = set().union(*(sanitize.words(p) for p in self.phrases)) if self.phrases else set()
+        return out | self.capitals
 
     def tokens(self) -> set[str]:
         """Every token (between spaces, punctuation around it dropped) of the declared values,
@@ -246,6 +250,7 @@ class Public:
                             self.numbers.add(_plain_number(str(v)))
                         elif isinstance(v, str) and len(v) <= 2000:
                             self.phrases.add(sanitize.phrase(v))
+                            self.capitals |= sanitize.names_in(v)
 
     def note(self) -> str:
         """Who approved what, for the brief and the task."""
