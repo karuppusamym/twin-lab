@@ -418,7 +418,7 @@ def _rebase(url: str, base_url: str | None) -> str:
     b, u = urlsplit(base_url), urlsplit(url)
     if u.scheme not in ("http", "https"):  # about:blank (a new tab) is no address of the app
         return url
-    return urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment))
+    return _keep_empty_fragment(url, urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment)))
 
 
 SETTLE_MAX_MS = 30000
@@ -595,7 +595,8 @@ class OriginMap:
         if target is None:
             return None
         b = urlsplit(target)
-        return urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment))
+        return _keep_empty_fragment(url or "",
+                                    urlunsplit((b.scheme, b.netloc, u.path, u.query, u.fragment)))  # fmt: skip
 
     def name(self, origin: str | None) -> str | None:
         return self.names.get(origin or "") or origin or None
@@ -1598,8 +1599,21 @@ _SESSION_IN_PATH = re.compile(r"(;jsessionid=)[^;/?#]*", re.I)
 def same_address(url: str) -> str:
     """An address as two sessions can share it. A Java server writes the session's id into the
     path (`/login.xhtml;jsessionid=node01ab...`) until it knows the browser keeps cookies; the id
-    is new in every session, so that it is there is compared, never its value."""
-    return _SESSION_IN_PATH.sub(r"\1*", url)
+    is new in every session, so that it is there is compared, never its value.
+
+    An empty fragment is no fragment: a link `href="#"` leaves the address ending in `#`, which
+    names no part of the page (and an older recorder wrote the address without it). A fragment
+    that is not empty (`#/orders`, `#section`) is part of the address and still compared."""
+    url = _SESSION_IN_PATH.sub(r"\1*", url)
+    return url[:-1] if url.endswith("#") else url
+
+
+def _keep_empty_fragment(original: str, rebuilt: str) -> str:
+    """`urlunsplit` drops an empty fragment (`/#` becomes `/`): put it back, so a replayed
+    address is the recorded one."""
+    if original.endswith("#") and not rebuilt.endswith("#") and "#" not in rebuilt:
+        return rebuilt + "#"
+    return rebuilt
 
 
 def _wait_address(page, url: str, timeout_ms: int = 5000) -> None:
