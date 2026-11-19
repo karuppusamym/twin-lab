@@ -220,7 +220,10 @@ def test_a_window_a_script_opens_and_closes_says_how(site, tmp_path):
         child = page.wrap(opened.value)
         child.wait_for_load_state()
         child.wait_for_timeout(400)
-        child.click("#choose")
+        try:
+            child.click("#choose")
+        except Exception:  # noqa: BLE001 - the window closes itself while the click returns
+            pass
         page.wait_for_timeout(700)
         page.click("#after")
         page.wait_for_timeout(500)
