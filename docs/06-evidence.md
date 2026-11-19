@@ -306,6 +306,42 @@ as candidates for a further recording (`unrecorded_pages`), and their snapshots 
 changes. `labctl.linkcheck.SafeFetcher` is the HTTP part on its own (GET or HEAD only, given
 origins only, rate limited, stops on 429 or 503) for other opt-in fetches.
 
+### Field rules and page behaviour
+
+A recording shows only the rules a person happened to trigger. The rest is in the page's HTML
+and in the application's JavaScript, which the HAR holds. `apps/<app>/rules.json` and the
+brief's *Field rules and page behaviour* (`labctl.pagerules`) list, per screen and field, every
+rule with its message, its evidence and its level:
+
+| Level | Meaning |
+|---|---|
+| `seen` | The recording triggered it: its message appeared |
+| `declared` | The HTML declares it (`required`, `maxlength`, `pattern`, `data-val-*`, `data-p-*`, ...) |
+| `in code, not triggered` | The application's own script has it; the recording never set it off |
+| `in code, not tied to a field` | In the script; which field it belongs to could not be told |
+
+From the scripts: Angular `Validators.*`, jQuery Validate `rules` and `messages`,
+`setCustomValidity`, plain checks (`if (!x.value)`, `.length < n`, `/re/.test(x.value)`) with
+the message beside them, cross-field rules, masks, fields shown, enabled or made required by
+another, dependent drop-downs (with the API call and the step), a submit button disabled until
+the form is valid, and session timers with their delay. From the recording: messages that
+appeared, and what changed after a step that typed, chose or ticked. Each script is tokenised
+and matched against these shapes, never run. Minified code keeps strings, property names and
+call shapes, so a rule tied to an id, a name, a form-control key or a message survives it.
+Third-party scripts and library files are named, not analysed.
+
+Scripts are not carried, only the rules and messages taken from them (messages masked like
+the API's). An owner with the right to share them sets `TWINLAB_PAGE_SCRIPTS=carry`: the
+application's own script files then go to `apps/<app>/scripts/`, source maps stripped and never a
+library, after a check that refuses all of them (and later the package) when one holds
+something shaped like a secret (a private key, a token, a literal assigned to a credential-like
+name), an address of another host, or a value the recording shows as data.
+
+What it cannot recover: rules checked only on the server and never triggered (a JSF
+validator: no attribute and no script states it), the logic of a custom validator function
+(its message is listed when it reads as one), limits read from data at run time, and the
+label words a sanitiser masks in a message (then the message stays the form's, not a field's).
+
 What a package still cannot say, found by the blind rebuild of the help-desk fixture:
 
 - The body of an answer the page never read (a 401 the page only tested the status of).
@@ -314,8 +350,9 @@ What a package still cannot say, found by the blind rebuild of the help-desk fix
 - What a control nobody used does. It is rendered and does nothing, even a Cancel button.
 - A link between tables that no answer shows: rows of a nested list (`/tickets/{id}/history`)
   have no column for their parent in the inferred schema; the endpoint file says so.
-- Rules beyond what was recorded: validation other than the refusals seen, paging at the
-  edges, what an unknown identifier answers, cookie attributes.
+- Rules beyond what was recorded and what the HTML and scripts state (see *Field rules and
+  page behaviour*): server-side validation never triggered, paging at the edges, what an
+  unknown identifier answers, cookie attributes.
 - Which row a click on a repeated element took is given (`record` in `navigation.json`), but
   the replay's own `bindings.yaml` still needs that record named by a person.
 

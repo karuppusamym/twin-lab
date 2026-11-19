@@ -30,6 +30,7 @@ apps/<app>/BRIEF.md + the source files it names
 | `apps/<app>/pages/*.html`: one snapshot per recorded screen | |
 | `apps/<app>/navigation.json`: every way from screen to screen, dialogs, tabs, frames, popup windows, and every element of each screen with what it did | |
 | `apps/<app>/api/catalogue.json` and `api/*.json`: every endpoint the pages called, with schemas and synthetic calls | |
+| `apps/<app>/rules.json`: per screen and field, every validation rule with its message and level, rules between fields, behaviour while typing or choosing, state on load, session timers | |
 | `apps/<app>/steps/*.json`, `*.values.yaml`: the recorded steps and the values the acceptance replay types | |
 | `apps/<app>/app.yaml` | Only its `run:` section |
 | `apps/<app>/pages/*.html` and `apps/<app>/look/` (when there is no source): value-free snapshots of each screen, the original style sheets, `theme.json`, a picture per screen, the interface's images, `texts.json` | |
@@ -53,6 +54,13 @@ person, not edited by you.
    read* (taken from the bots' own code, for example `token` or `items[].review_no`) is in its
    success answer under exactly that name, and every field it lists as *automations send* is
    accepted. A bot breaks on a missing one even when conformance is READY.
+   **Same rules.** Every rule of `apps/<app>/rules.json` (the brief's *Field rules and page
+   behaviour*) at level `seen` or `declared` is implemented exactly, with its message letter
+   for letter; a rule `in code, not triggered` is implemented too, since the real application
+   has it; a rule `in code, not tied to a field` where the brief places it, with your choice in
+   `BUILD-NOTES.md`. The same holds for the masks, the fields shown or enabled by another, the
+   drop-downs filled from the API, a submit button disabled until the form is valid, the state
+   on load and the session timers listed there.
    **Same look.** When the brief has a *Look and feel* section, start from the style sheets in
    `apps/<app>/look/css/`, check against `look/theme.json`, and compare each screen with its
    picture in `look/screens/`. Literal texts (`look/texts.json`) are copied exactly; a
@@ -101,6 +109,8 @@ to read them in:
 | `apps/<app>/look/` | Style sheets, theme and a picture per screen, when that step has run |
 | `apps/<app>/navigation.json` | The navigation map and the actions of each screen |
 | `apps/<app>/api/` | The API catalogue: one file per endpoint, synthetic examples only |
+| `apps/<app>/rules.json` | Field rules and page behaviour, each with its level and evidence |
+| `apps/<app>/scripts/` | Only with `TWINLAB_PAGE_SCRIPTS=carry`: the application's own scripts, checked |
 | `apps/<app>/db/` | `schema.sql`, and `seed.sql` / `seed.json` with the rows to load at start (the replay's user in `app_users`) |
 | `apps/<app>/steps/` | The recorded steps, the replay values, the order across applications |
 | `apps/<app>/model.yaml`, `behaviours.json`, `app.yaml` | Reference |
