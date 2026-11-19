@@ -163,7 +163,10 @@ def _exchanges(har_doc: dict, hosts: set[str]) -> list[Ex]:
             except ValueError:
                 data = None
         post = req.get("postData") or {}
-        form = dict(parse_qsl(str(post.get("text") or ""), keep_blank_values=True))
+        if str(post.get("mimeType") or "").lower().startswith("multipart/"):
+            form = _multipart(str(post.get("text") or ""))
+        else:
+            form = dict(parse_qsl(str(post.get("text") or ""), keep_blank_values=True))
         extras = _extras(entry, post, content)
         if isinstance(extras["body"], dict):
             # a JSON body's fields are what a form's fields are: what the page sent, by name
@@ -174,6 +177,19 @@ def _exchanges(har_doc: dict, hosts: set[str]) -> list[Ex]:
                       dict(parse_qsl(url.query, keep_blank_values=True)), form,
                       int(resp.get("status") or 0), data, **extras))  # fmt: skip
     return [e for e in out if e.started is not None]
+
+
+def _multipart(text: str) -> dict[str, str]:
+    """The fields of a multipart body by name: a text field's value, "" for a file (its content
+    is never read)."""
+    first = text.split("\r\n", 1)[0] if text.startswith("--") else ""
+    out: dict[str, str] = {}
+    for part in text.split(first)[1:] if first else []:
+        head, _, value = part.partition("\r\n\r\n")
+        name = re.search(r'name="([^"]*)"', head)
+        if name:
+            out[name.group(1)] = "" if "filename=" in head else value.removesuffix("\r\n")
+    return out
 
 
 def _extras(entry: dict, post: dict, content: dict) -> dict:
@@ -1147,7 +1163,8 @@ def _format(texts: list[str]) -> tuple[str, str | None]:
         m = ids[0]
         return f"an identifier `{m.group(1)}{m.group(2)}` + {len(m.group(3))} digits", "id"
     distinct = sorted(set(texts))
-    if len(distinct) <= 6 and all(obs.is_vocab_value(t) for t in distinct):
+    named = any(stepfacts.NAME_RUN.search(t) for t in distinct)  # `Cedar Cotton Coat`: a name
+    if len(distinct) <= 6 and not named and all(obs.is_vocab_value(t) for t in distinct):
         return "one of " + ", ".join(f"`{t}`" for t in distinct) + " (the values seen)", "words"
     return "text (masked in the snapshots: no format beyond its shape)", None
 

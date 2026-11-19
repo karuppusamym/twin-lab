@@ -288,10 +288,15 @@ def _label(step) -> str:
     """What a person would call the element: its accessible name, label, placeholder, text or
     test id from the recorded locators (structure only: candidates holding typed text were
     already dropped by the recorder); else its selector."""
+    from labctl.stepfacts import NAME_RUN
+
     for kind, key in (("label", "text"), ("role", "name"), ("placeholder", "text"),
                       ("text", "text"), ("testid", "value"), ("id", "value")):  # fmt: skip
         for cand in step.locators:
             if cand.get("kind") == kind and isinstance(cand.get(key), str) and cand[key].strip():
+                if kind in ("role", "text") and (re.search(r"\d", cand[key]) or NAME_RUN.search(
+                        cand[key])) and step.selector:  # fmt: skip
+                    continue  # a record's name or number (a link of a list): data
                 return cand[key].strip()[:60]
     return (step.selector or "the page")[:60]
 
