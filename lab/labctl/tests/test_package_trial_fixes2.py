@@ -253,3 +253,16 @@ def test_the_task_gives_package_only_checks_and_keeps_repository_checks_apart():
     ):
         assert want in text, want
     assert "pytest" in text.split("3. Instead")[0]  # named only as what to skip
+
+
+def test_a_configuration_only_joined_with_paths_gets_a_relative_same_origin_value():
+    js = ("var API_URL = 'x'; $.getJSON('config.json', function (data) { if (data.API_URL) "
+          "API_URL = data.API_URL }); $.ajax({url: API_URL + '/entries'}); "
+          "var url = HLS_URL + \"/index.m3u8\"; player.src(HLS_URL)")  # fmt: skip
+    assert apicatalog.joined_only("API_URL", [js])
+    assert not apicatalog.joined_only("HLS_URL", [js])  # also passed whole: keep an origin
+    assert not apicatalog.joined_only("CDN_URL", [js])  # never named: no assumption
+    assert apicatalog.local_value("API_URL", "https://api.example.test", True) == "."
+    assert apicatalog.local_value("HLS_URL", "https://hls.example.test", True) == "./hls"
+    assert apicatalog.local_value("HLS_URL", "https://hls.example.test") == (
+        f"{apicatalog.LOCAL_ORIGIN}/hls")  # fmt: skip

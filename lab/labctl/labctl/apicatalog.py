@@ -48,16 +48,36 @@ STATIC_DIR = "static"  # apps/<app>/static/: static files the pages read, values
 LOCAL_ORIGIN = "http://localhost:18080"  # the address BUILD_TASK's example run serves
 
 
-def local_value(key: str, value):
+def local_value(key: str, value, relative: bool = False):
     """A static configuration value with every address made local: the API's to the demo's own
-    origin, any other service's to a path of it (`HLS_URL` -> `<origin>/hls`). Never a real host."""
+    origin, any other service's to a path of it (`HLS_URL` -> `<origin>/hls`). With `relative`
+    (the pages only ever write `KEY + '/path'`) the value is the page's own origin as a relative
+    address (`.`, `./hls`), which works on whatever address the build is served at. Never a
+    real host."""
     if not isinstance(value, str) or "://" not in value:
         return value
     name = re.sub(r"[^a-z0-9]+", "-", re.sub(r"(?i)_?(url|uri|host|origin|base)$", "",
                                             str(key)).lower()).strip("-")  # fmt: skip
+    base = "." if relative else LOCAL_ORIGIN
     if not name or "api" in name.split("-"):
-        return LOCAL_ORIGIN
-    return f"{LOCAL_ORIGIN}/{name}"
+        return base
+    return f"{base}/{name}"
+
+
+def joined_only(key: str, scripts: list[str]) -> bool:
+    """Whether the scripts use a configuration key only to start an address (`KEY + '/entries'`,
+    `KEY + "/index.m3u8"`): then a relative value (`.`) keeps every call on the page's origin.
+    False when a script uses it any other way, or never names it."""
+    uses = joined = 0
+    for text in scripts:
+        for m in re.finditer(r"(?<![\w$.])" + re.escape(key) + r"(?![\w$])", text or ""):
+            after = text[m.end() : m.end() + 12]
+            before = text[max(0, m.start() - 12) : m.start()]
+            if re.match(r"\s*[=:]\s*[^=]", after) or re.search(r"\.\s*$", before):
+                continue  # where it is set (`var KEY = ...`, `KEY: ...`) or read (`data.KEY`)
+            uses += 1
+            joined += bool(re.match(r"\s*\+\s*[\"'`]/", after))
+    return uses > 0 and joined == uses
 
 
 def static_file(method: str, route: str, exs: list) -> dict | None:
@@ -71,10 +91,12 @@ def static_file(method: str, route: str, exs: list) -> dict | None:
     keys = list(dict.fromkeys(k for b in bodies for k in b))
     return {"path": route, "file": f"{STATIC_DIR}{route}", "keys": keys,
             "note": "A static file the pages read, not an endpoint with a table: serve it as a file "
-                    f"at `{route}`. `{STATIC_DIR}{route}` holds its keys with the addresses made "
-                    f"local ({LOCAL_ORIGIN}, the address of the example run: write the address "
-                    "your build serves there, or generate the file at start). Never write the "
-                    "original's hosts."}  # fmt: skip
+                    f"at `{route}`, as `{STATIC_DIR}{route}` has it. Its addresses are local: "
+                    "a relative `.` (or `./<name>`) where the pages only ever write `KEY + "
+                    "'/path'`, so every call stays on the address your build is served at, "
+                    f"else {LOCAL_ORIGIN} (the example run's: write the address your build "
+                    "serves there, or generate the file at start). Never write the original's "
+                    "hosts."}  # fmt: skip
 
 
 FORMAT = "twinlab-api-catalogue/1"
@@ -1504,7 +1526,7 @@ def write(root: Path, app: str) -> dict:
     for name, text in texts.items():
         (folder / name).write_bytes(text.encode("utf-8"))
         files.append(folder / name)
-    files += write_static(root, app, built["endpoints"])
+    files += write_static(root, app, built["endpoints"], _scripts(ctxs))
     return {"files": files, "index": built["index"] if INDEX in texts else None,
             "endpoints": built["endpoints"], "problems": problems, "ctxs": ctxs,
             "network": built.get("network") if netfacts.FILE in texts else None}  # fmt: skip
@@ -1587,9 +1609,23 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
-def write_static(root: Path, app: str, endpoints: dict) -> list[Path]:
+def _scripts(ctxs: list[Ctx]) -> list[str]:
+    """The text of every script the recordings downloaded (in memory only)."""
+    from labctl import har
+
+    out = []
+    for c in ctxs:
+        try:
+            rec = har.load(c.part.path)
+        except (OSError, ValueError):
+            continue
+        out += [e.resp_text for e in har.exchanges(rec.har) if e.kind == "asset" and e.resp_text]
+    return out
+
+
+def write_static(root: Path, app: str, endpoints: dict, scripts: list[str] = ()) -> list[Path]:
     """`apps/<app>/static/<path>` for each static JSON file: the synthetic example's keys, every
-    address local (`local_value`)."""
+    address local (`local_value`; relative when the scripts only join the key with a path)."""
     folder = Path(root) / "apps" / app / STATIC_DIR
     if folder.is_dir():
         for old in sorted(folder.rglob("*.json"), reverse=True):
@@ -1601,7 +1637,8 @@ def write_static(root: Path, app: str, endpoints: dict) -> list[Path]:
             continue
         example = next((r.get("example") for r in (doc.get("responses") or {}).values()
                         if isinstance(r.get("example"), dict)), {})  # fmt: skip
-        body = {k: local_value(k, example.get(k)) for k in st["keys"]}
+        body = {k: local_value(k, example.get(k), joined_only(k, list(scripts)))
+                for k in st["keys"]}  # fmt: skip
         target = folder / st["path"].lstrip("/")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((json.dumps(body, indent=4) + "\n").encode("utf-8"))
