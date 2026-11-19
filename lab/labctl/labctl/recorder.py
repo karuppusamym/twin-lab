@@ -354,7 +354,14 @@ LISTENER_JS = r"""
       // wrapper added around the list does not lose them.
       const [ra, raSel] = anchorOf(row), holder = row.parentElement;
       // the list itself may be the identified ancestor (PrimeFaces: <tbody id="form:table_data">)
-      const rows = raSel + (holder === ra ? " > " : " " + (holder && holder !== document.body ? seg(holder) + " > " : "")) + seg(row);
+      let rows = raSel + (holder === ra ? " > " : " " + (holder && holder !== document.body ? seg(holder) + " > " : "")) + seg(row);
+      // the list may itself be the identified element (`<div id="tbodyid" class="row">`): a
+      // locator must find the rows in this very page, so the first form that does is kept
+      const finds = (s) => { try { return Array.from(document.querySelectorAll(s)).includes(row); } catch (e) { return false; } };
+      if (!finds(rows)) {
+        rows = [raSel + " > " + seg(row), raSel + " " + seg(row),
+                (holder && holder !== document.body ? seg(holder) + " > " : "") + seg(row)].find(finds) || rows;
+      }
       let control = row === el ? "" : pathFrom(row, el);
       // a cell of a table row (`td`) is one of several alike: its place among them names it
       let alike = 0;
