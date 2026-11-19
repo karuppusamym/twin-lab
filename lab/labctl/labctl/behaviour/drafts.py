@@ -5,7 +5,8 @@ person reviews it and approves it (or deletes what should not count). Nothing he
 
 - `expected-actions.draft.yaml`: the recording's semantic actions in order (what `--expect`
   takes), each a person checks against the flow before passing it.
-- `visual.yaml`: one state per recorder picture, in threshold mode with a small ratio, and the
+- `visual.draft.yaml` (the replay reads `visual.yaml` by itself, so the draft has another
+  name): one state per recorder picture, in threshold mode with a small ratio, and the
   text regions left out when the package carries no font (a fallback font never matches the
   original's pixels exactly). The person may still choose `mode: exact`.
 - `scope.yaml`: exclusions for what the package tells the builder not to replicate (the player of
@@ -14,6 +15,8 @@ person reviews it and approves it (or deletes what should not count). Nothing he
   `labctl.seedplan.acceptance`): the count of a list's rows where a step acted on one of them,
   that count after the step when the step changed it (a cart row deleted), and the record's title
   on the page a click on it opened (`{record: <step>}`: a seed value, never a recorded one).
+  They are `required: false` until a person sets `required: true`: an unapproved case never
+  decides a replay's result.
 """
 
 from __future__ import annotations
@@ -27,6 +30,9 @@ from labctl.behaviour import dom as domlib
 from labctl.locate import row_selectors
 
 EXPECTED = "expected-actions.draft.yaml"
+# Not `visual.yaml`: the replay reads that one by itself; a draft is used only once a person
+# reviewed it and passed it (`--visual visual.draft.yaml`) or renamed it.
+VISUAL = "visual.draft.yaml"
 VISUAL_RATIO = 0.02  # differing pixels allowed in threshold mode (2 %)
 VISUAL_TOLERANCE = 16  # a channel difference up to this is no difference (anti-aliasing)
 TEXT_REGIONS = {"css": "h1, h2, h3, h4, h5, h6, p, a, span, label, button, li, td, th, small, "
@@ -163,7 +169,7 @@ def acceptance_cases(part, records: list[dict]) -> list[dict]:
         n = len(select(before, rows)) if before else 0
         if n and earlier:
             add({"id": f"rows-before-{st['seq']}", "after": earlier[-1], "check": "count",
-                 "locator": rows, "equals": n, "basis": "evidence",
+                 "locator": rows, "equals": n, "basis": "evidence", "required": False,
                  "note": f"the list showed {n} row(s) when step {st['seq']} acted on one"})  # fmt: skip
         later = _settled(part.raw, st)
         if later:
@@ -171,7 +177,7 @@ def acceptance_cases(part, records: list[dict]) -> list[dict]:
             m = len(select(after_html, rows))
             if m and m != n:
                 add({"id": f"rows-after-{st['seq']}", "after": later[-1]["seq"], "check": "count",
-                     "locator": rows, "equals": m, "basis": "evidence",
+                     "locator": rows, "equals": m, "basis": "evidence", "required": False,
                      "note": f"step {st['seq']} changed the list from {n} to {m} row(s)"})  # fmt: skip
     for r in records:
         title = r.get("record")
@@ -189,7 +195,7 @@ def acceptance_cases(part, records: list[dict]) -> list[dict]:
         loc = next((sel for x in inner if (sel := _locator_of(x, html))), None)
         if loc and target["seq"] != r["n"]:
             add({"id": f"record-shown-{r['n']}", "after": target["seq"], "check": "text",
-                 "locator": loc, "equals": {"record": r["n"]}, "basis": "evidence",
+                 "locator": loc, "equals": {"record": r["n"]}, "basis": "evidence", "required": False,
                  "note": f"the page step {r['n']} opened showed the record it acted on"})  # fmt: skip
     return out
 
@@ -284,7 +290,7 @@ def write_all(root: Path, recording: Path, apps: list[str]) -> list[Path]:
     written = []
     fonts = any((root / "apps" / a / "look" / "fonts").is_dir()
                 and any((root / "apps" / a / "look" / "fonts").iterdir()) for a in apps)  # fmt: skip
-    texts = {EXPECTED: expected_draft(rec), "visual.yaml": visual_draft(rec, fonts)}
+    texts = {EXPECTED: expected_draft(rec), VISUAL: visual_draft(rec, fonts)}
     for a in apps:
         net_file = root / "apps" / a / "api" / "network.json"
         try:

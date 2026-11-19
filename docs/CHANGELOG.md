@@ -20,7 +20,8 @@ a blind rebuild from it and a judge's replay found these; each is fixed in `labc
   stand-in or leave the video out with a reason. Real third parties are unchanged.
 - **Static JSON configuration** (`/config.json`): a file, not a table; carried as
   `apps/<app>/static/config.json` with its keys and local addresses (`http://localhost:18080`,
-  `.../hls`), never the real hosts. `static/` is a generated folder for the guard.
+  `.../hls`; a relative `.` and `./hls` when the pages only write `KEY + '/path'`), never the
+  real hosts. `static/` is a generated folder for the guard.
 - **Public data, consistently**: a declared value in an element with an id (`p#article`) is
   carried in snapshots, `texts.json` and pictures; a number in an element of its own (`#totalp`)
   and cart rows stay masked; capitalised parts of declared values (`Mac` of `MacBook`) pass the
@@ -33,9 +34,11 @@ a blind rebuild from it and a judge's replay found these; each is fixed in `labc
   accepts a title that a row's text holds as a whole phrase, once.
 - **Drafts to judge with**, all unapproved: acceptance cases the recording showed (row counts,
   the count after a delete, the record's title on the page a click opened), `visual.yaml`
-  (threshold mode, 2 %, tolerance 16; text regions left out when no font is carried; the
-  `labctl behaviour visual` template defaults to threshold too), `expected-actions.draft.yaml`
-  and a `scope.yaml` excluding the media player.
+  as `visual.draft.yaml` (threshold mode, 2 %, tolerance 16; text regions left out when no
+  font is carried; the `labctl behaviour visual` template defaults to threshold too),
+  `expected-actions.draft.yaml` and a `scope.yaml` excluding the media player. The new
+  acceptance cases are `required: false` and the visual draft has its own name, so no
+  unapproved draft decides a replay.
 - **Aliases**: `/index.html` beside `/` with the same document is one screen
   (`sanitize.screen_aliases`); the brief says to serve both addresses, `navigation.json` lists
   `aliases`. Relative links resolve against their page, so in-scope screens are no longer
