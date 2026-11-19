@@ -1766,13 +1766,34 @@ def _entity(pattern: str) -> str | None:
     return None
 
 
+def list_key(data: Any):
+    """The key under which an envelope answer holds its list of records (`items`, `Items`,
+    `DATA`: `ITEM_KEYS` in any case), or None. `{"Items": [...], "LastEvaluatedKey": {...}}`
+    (DynamoDB) is a list of items; its other keys describe the page, not records."""
+    if not isinstance(data, dict):
+        return None
+    by_lower: dict[str, Any] = {}
+    for k in data:
+        by_lower.setdefault(str(k).lower(), k)
+    for name in ITEM_KEYS:
+        k = by_lower.get(name)
+        if k is not None and isinstance(data[k], list):
+            return k
+    return None
+
+
+def is_list_answer(data: Any) -> bool:
+    """A list of records: a JSON array, or an envelope with one (`list_key`)."""
+    return isinstance(data, list) or list_key(data) is not None
+
+
 def _items(data: Any) -> list[dict]:
     if isinstance(data, list):
         return [x for x in data if isinstance(x, dict)]
     if isinstance(data, dict):
-        lists = [k for k in ITEM_KEYS if isinstance(data.get(k), list)]
-        if lists:
-            return [x for x in data[lists[0]] if isinstance(x, dict)]
+        key = list_key(data)
+        if key is not None:
+            return [x for x in data[key] if isinstance(x, dict)]
         return [data]
     return []
 
@@ -2013,6 +2034,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         entity = _entity(pattern)
         if method != "GET" and entity in tables and entity not in acc.tables:
             acc.tables.append(entity)
+    _rpc_tables(entries, routes, tables, codes, not_codes, screens)
 
     for (method, pattern), acc in routes.items():
         timing = None
@@ -2765,6 +2787,64 @@ def _form_columns(info: sanitize.PageInfo, pattern: str, heads: list[str], table
         if (2 <= len(codes) <= MAX_CODES and all(codes) and not NOT_CODE_FIELD.search(col)
                 and col not in ("id",)):  # fmt: skip
             t.codes.setdefault(col, {}).update(dict.fromkeys(codes))
+
+
+# A remote-procedure path names a verb and the resource it acts on in one word: `viewcart`,
+# `addtocart`, `deleteitem`, `get_orders`.
+RPC_PATH = re.compile(
+    r"^(?:view|get|list|load|fetch|read|show|find|search|add|create|new|insert|save|update|edit|"
+    r"set|put|delete|del|remove|rm)(?:_?(?:to|from|in|into))?_?(?P<noun>[a-z][a-z_]{2,})$"
+)
+GENERIC_NOUNS = {"item", "items", "row", "rows", "entry", "record", "records", "line", "lines"}
+
+
+def rpc_noun(pattern: str) -> str | None:
+    """The resource a remote-procedure path acts on: `/addtocart` -> `cart`, `/viewcart` ->
+    `cart`, `/deleteitem` -> `item`. None for a path that is not a verb and a noun."""
+    last = next((s for s in reversed(pattern.split("/")) if s and not s.startswith("{")), "")
+    m = RPC_PATH.match(last.lower())
+    return m.group("noun").strip("_") if m else None
+
+
+def _rpc_tables(entries, routes, tables, codes, not_codes, screens) -> None:
+    """Tables a remote-procedure API shows through POST answers (no GET lists them):
+
+    - an answer whose records have exactly the columns of a known table is a read of that table
+      (`POST /bycat` filtering `entries`, `POST /view` reading one of them);
+    - another list answer of a verb-and-noun path is a table of that noun (`POST /viewcart`
+      listing `cart`), and every verb on the same noun writes it (`/addtocart`);
+    - a verb on a generic noun (`/deleteitem`) acts on the table such a list read showed on the
+      same screen."""
+    read: dict[tuple[str, str], str] = {}
+    for e in entries:
+        if e.method == "GET" or not (200 <= e.status < 300) or e.resp_json is None:
+            continue
+        key = (e.method, sanitize.route_pattern(e.path))
+        if key not in routes:
+            continue
+        items = _items(e.resp_json)
+        cols = {str(k) for i in items[:20] for k, v in i.items() if not isinstance(v, (dict, list))}
+        same = next((t for t, have in tables.items() if len(cols) >= 2 and cols ==
+                     {k for k in have if not k.startswith("{")}), None)  # fmt: skip
+        noun = rpc_noun(key[1])
+        if same is None and is_list_answer(e.resp_json) and noun and noun not in GENERIC_NOUNS:
+            same = _entity("/" + noun)
+        if same is None:
+            continue
+        _collect(same, items, tables, codes, not_codes, routes[key].tables)
+        read[key] = same
+    for key, acc in routes.items():
+        if key[0] == "GET" or acc.tables:
+            continue
+        noun = rpc_noun(key[1])
+        table = _entity("/" + noun) if noun else None
+        if table in tables:
+            acc.tables.append(table)
+        elif noun in GENERIC_NOUNS:
+            near = {read[k] for scr in screens.values() if key in scr.calls
+                    for k in scr.calls if k in read and rpc_noun(k[1])}  # fmt: skip
+            if len(near) == 1:
+                acc.tables.append(near.pop())
 
 
 def _collect(entity, items, tables, codes, not_codes, route_tables) -> None:

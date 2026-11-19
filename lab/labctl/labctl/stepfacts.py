@@ -293,8 +293,7 @@ def _identifiers(entries, doms: dict[int, str]) -> tuple[list[dict], list[dict]]
             continue
         route = f"{e.method} {sanitize.route_pattern(e.path)}"
         items = har._items(e.resp_json)
-        if isinstance(e.resp_json, dict) and any(isinstance(e.resp_json.get(k), list)
-                                                 for k in har.ITEM_KEYS):  # fmt: skip
+        if isinstance(e.resp_json, dict) and har.list_key(e.resp_json) is not None:
             info = lists.setdefault(route, {"route": route, "rows": 0, "answers": 0})
             info["answers"] += 1
             info["rows"] = max(info["rows"], len(items))

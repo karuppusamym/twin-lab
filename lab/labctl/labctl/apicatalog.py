@@ -434,7 +434,7 @@ class Synth:
         for k, v in data.items():
             name = k if har._field(str(k)) != "{key}" else self.w.text(str(k))
             if isinstance(v, list):
-                sub = entity if k in har.ITEM_KEYS else har._entity("/" + str(k))
+                sub = entity if str(k).lower() in har.ITEM_KEYS else har._entity("/" + str(k))
                 out[name] = [self.obj(x, e, sub, error) if isinstance(x, (dict, list))
                              else self.leaf(str(k), x, e, None, error) for x in v]  # fmt: skip
             elif isinstance(v, dict):

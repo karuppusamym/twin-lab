@@ -282,8 +282,7 @@ def _options(node) -> list[tuple[str, str]]:
 def _items(data) -> list[dict] | None:
     from labctl import har
 
-    if isinstance(data, list) or (isinstance(data, dict) and any(
-            isinstance(data.get(k), list) for k in har.ITEM_KEYS)):  # fmt: skip
+    if har.is_list_answer(data):
         return har._items(data)
     return None
 
