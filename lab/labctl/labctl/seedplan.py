@@ -1852,9 +1852,11 @@ def apply_whole(root: Path, recording: Path) -> int:
     return given
 
 
-def acceptance(root: Path, app: str, rec_name: str) -> dict | None:
+def acceptance(root: Path, app: str, rec_name: str, number=None) -> dict | None:
     """Draft acceptance cases from the values file: only what the package states is required;
-    a value the application computes by a rule nobody stated is excluded, with the reason."""
+    a value the application computes by a rule nobody stated is excluded, with the reason.
+    `number(seq)` is the step number the evidence cases' ids and notes use (see
+    labctl.behaviour.drafts.acceptance_cases)."""
     path = Path(root) / "apps" / app / "steps" / f"{rec_name}{VALUES}"
     if not path.is_file():
         return None
@@ -1874,7 +1876,8 @@ def acceptance(root: Path, app: str, rec_name: str) -> dict | None:
     for v in doc.get("validations") or []:
         # the message as the application wrote it: only one with no masked data in it
         if v.get("refused") and not re.search(r"\b9[9.,]*\b|\bX+\b|\bx+\b", v["message"]):
-            cases.append({"id": f"refused-{v['step']}", "after": v.get("shown_at", v["step"]),
+            ref = (number(v["step"]) if number else None) or v["step"]
+            cases.append({"id": f"refused-{ref}", "after": v.get("shown_at", v["step"]),
                           "check": "texts", "locator": v["element"], "contains": v["message"],
                           "note": f"the replay types {', '.join(r['value'] for r in v['refused'])}"})  # fmt: skip
     scope = [f"{app}: values the package states (steps/{rec_name}{VALUES})"]
@@ -1887,7 +1890,7 @@ def acceptance(root: Path, app: str, rec_name: str) -> dict | None:
         except (OSError, ValueError):
             loaded = None
         if loaded is not None:
-            cases += drafts.acceptance_cases(loaded, doc.get("records") or [])
+            cases += drafts.acceptance_cases(loaded, doc.get("records") or [], number)
             said = dialog_texts(loaded)
             scope += [f"{app}: {line}" for line in drafts.dialog_lines(loaded, said)]
     return {"version": 1, "recording": rec_name, "approved_by": None, "scope": scope,
@@ -1904,7 +1907,8 @@ def acceptance_whole(root: Path, recording: Path) -> dict | None:
         if not (part / "steps.jsonl").is_file():
             continue
         glob = {s["seq"]: s.get("global_seq") for s in _raw_steps(part)}
-        draft = acceptance(root, app, recording.name) or {}
+        # ids and notes in the whole recording's numbers, as `after:` is below
+        draft = acceptance(root, app, recording.name, number=glob.get) or {}
         for c in draft.get("cases") or []:
             c = dict(c)
             if isinstance(c.get("after"), int):

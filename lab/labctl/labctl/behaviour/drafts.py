@@ -146,9 +146,12 @@ def _settled(raw: list[dict], st: dict) -> list[dict]:
     return out
 
 
-def acceptance_cases(part, records: list[dict]) -> list[dict]:
+def acceptance_cases(part, records: list[dict], number=None) -> list[dict]:
     """Cases from what the recording visibly showed (see the module's doc); `part` is a
-    `labctl.seedplan.Part`, `records` its record bindings (`seedplan.record_bindings`)."""
+    `labctl.seedplan.Part`, `records` its record bindings (`seedplan.record_bindings`).
+    `number(seq)` is the step number ids and notes use (the whole recording's, when the cases
+    are for it): the same numbering `after:` ends up in. By default the part's own."""
+    num = (lambda seq: number(seq) or seq) if number else (lambda seq: seq)
     out: list[dict] = []
     seen: set[str] = set()
     by_seq = {s["seq"]: s for s in part.raw}
@@ -168,17 +171,17 @@ def acceptance_cases(part, records: list[dict]) -> list[dict]:
         earlier = [s["seq"] for s in part.raw if s["seq"] < st["seq"] and s.get("dom")]
         n = len(select(before, rows)) if before else 0
         if n and earlier:
-            add({"id": f"rows-before-{st['seq']}", "after": earlier[-1], "check": "count",
+            add({"id": f"rows-before-{num(st['seq'])}", "after": earlier[-1], "check": "count",
                  "locator": rows, "equals": n, "basis": "evidence", "required": False,
-                 "note": f"the list showed {n} row(s) when step {st['seq']} acted on one"})  # fmt: skip
+                 "note": f"the list showed {n} row(s) when step {num(st['seq'])} acted on one"})  # fmt: skip
         later = _settled(part.raw, st)
         if later:
             after_html = part.doms.get(later[-1]["seq"]) or ""
             m = len(select(after_html, rows))
             if m and m != n:
-                add({"id": f"rows-after-{st['seq']}", "after": later[-1]["seq"], "check": "count",
+                add({"id": f"rows-after-{num(st['seq'])}", "after": later[-1]["seq"], "check": "count",
                      "locator": rows, "equals": m, "basis": "evidence", "required": False,
-                     "note": f"step {st['seq']} changed the list from {n} to {m} row(s)"})  # fmt: skip
+                     "note": f"step {num(st['seq'])} changed the list from {n} to {m} row(s)"})  # fmt: skip
     for r in records:
         title = r.get("record")
         if not title:
@@ -194,9 +197,9 @@ def acceptance_cases(part, records: list[dict]) -> list[dict]:
         inner = [x for x in nodes if not any(c in nodes for c in domlib._walk(x))]
         loc = next((sel for x in inner if (sel := _locator_of(x, html))), None)
         if loc and target["seq"] != r["n"]:
-            add({"id": f"record-shown-{r['n']}", "after": target["seq"], "check": "text",
+            add({"id": f"record-shown-{num(r['n'])}", "after": target["seq"], "check": "text",
                  "locator": loc, "equals": {"record": r["n"]}, "basis": "evidence", "required": False,
-                 "note": f"the page step {r['n']} opened showed the record it acted on"})  # fmt: skip
+                 "note": f"the page step {num(r['n'])} opened showed the record it acted on"})  # fmt: skip
     return out
 
 
