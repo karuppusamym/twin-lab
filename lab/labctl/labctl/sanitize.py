@@ -313,17 +313,71 @@ def is_id_segment(segment: str) -> bool:
 
 
 def route_pattern(path: str) -> str:
-    """`/reviews/R-1001` -> `/reviews/{id}`; a second value becomes `{id2}` and so on."""
+    """`/reviews/R-1001` -> `/reviews/{id}`; a second value becomes `{id2}` and so on. A
+    segment without digits that a learned screen template names (`labctl.templates`: many
+    addresses with the same page structure, `/p/blue-linen-shirt`, `/p/red-wool-scarf`) is a
+    value too: `/p/{slug}`."""
     path = urlsplit(path).path or "/"
-    out, n = [], 0
-    for seg in path.split("/"):
-        seg = seg.split(";", 1)[0]  # matrix parameters such as ;jsessionid=... are dropped
-        if is_id_segment(seg):
+    segs = [seg.split(";", 1)[0] for seg in path.split("/")]  # matrix parameters are dropped
+    ids = [is_id_segment(seg) for seg in segs]
+    slugs = _slug_positions(segs, ids)
+    out, n, m = [], 0, 0
+    for seg, is_id, i in zip(segs, ids, range(len(segs)), strict=True):
+        if i in slugs:
+            m += 1
+            out.append("{slug}" if m == 1 else f"{{slug{m}}}")
+        elif is_id:
             n += 1
             out.append("{id}" if n == 1 else f"{{id{n}}}")
         else:
             out.append(seg)
     return "/".join(out) or "/"
+
+
+# Screen templates learned from a recording (labctl.templates.rules_for), applied while a brief
+# is generated (`with template_rules(rules):`). A rule is a tuple of segments: a literal, "{}"
+# (any value segment) or "*" (any segment: a value of the template, written `{slug}`).
+_TEMPLATE_RULES: list[tuple[str, ...]] = []
+
+
+@contextlib.contextmanager
+def template_rules(rules):
+    """Within the block, `route_pattern` also applies these learned templates."""
+    global _TEMPLATE_RULES
+    before = _TEMPLATE_RULES
+    _TEMPLATE_RULES = [tuple(r) for r in rules or []]
+    try:
+        yield
+    finally:
+        _TEMPLATE_RULES = before
+
+
+def slug_masked(path: str, mark: str = "*") -> str:
+    """The address with each segment a learned template names written `mark` (`/p/blue-linen`
+    -> `/p/*`), every other segment as it is: for patterns that write values their own way."""
+    segs = [seg.split(";", 1)[0] for seg in (urlsplit(path).path or "/").split("/")]
+    slugs = _slug_positions(segs, [is_id_segment(s) for s in segs])
+    return "/".join(mark if i in slugs else s for i, s in enumerate(segs)) or "/"
+
+
+def _slug_positions(segs: list[str], ids: list[bool]) -> set[int]:
+    for rule in _TEMPLATE_RULES:
+        if len(rule) != len(segs):
+            continue
+        hits = set()
+        for i, (want, seg, is_id) in enumerate(zip(rule, segs, ids, strict=True)):
+            if want == "*":
+                if not seg:
+                    break
+                hits.add(i)
+            elif want == "{}":
+                if not is_id:
+                    break
+            elif want != seg or is_id:
+                break
+        else:
+            return hits
+    return set()
 
 
 SAFE_WORD = re.compile(r"^([^\d@]*|\(?\d{1,3}[).,:;]?)$")  # no digits, or a small number

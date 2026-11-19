@@ -420,12 +420,22 @@ def build_all(
     package_dir: Path | None = None,
     say: Callable[[str], None] = print,
 ) -> Summary:
-    from labctl import factory
-    from labctl.builder import package as pkg
+    from labctl import sanitize, templates
 
     root, rec = Path(root), Path(recording)
     if not rec.is_dir():
         raise BuildAllError(f"{rec} is not a recording folder")
+    # Screens of one structure and many addresses are one template (labctl.templates): the
+    # split, the sequence and the draft flows name them by it, as the brief does.
+    learned = [t["rule"] for t in templates.rules_for(root, "", [rec])]
+    with sanitize.template_rules(learned):
+        return _build_all(root, rec, proposal, yes, db_engine, package_dir, say)
+
+
+def _build_all(root, rec, proposal, yes, db_engine, package_dir, say) -> Summary:
+    from labctl import factory
+    from labctl.builder import package as pkg
+
     prop, prop_path, accepted = _proposal(rec, proposal, yes)
     for p in sp.problems(rec):  # a damaged recording: said before anything is built from it
         say(f"recording: {p}")

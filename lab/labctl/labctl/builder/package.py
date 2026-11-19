@@ -117,6 +117,7 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         f"{app}/navigation.json",
         f"{app}/codemap.json",
         f"{app}/session.json",
+        f"{app}/templates.json",
         "AGENTS.md",
         "docs/factory-playbook.md",
     ]
@@ -695,6 +696,11 @@ def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
         rows.append(f"`{app}/navigation.json`: every screen, each way in and out, dialogs, tabs, "
                     "frames and popup windows, and every element of each screen with what "
                     "happened when the recording used it.")  # fmt: skip
+    if f"{app}/templates.json" in have:
+        rows.append(f"`{app}/templates.json`: each screen as a template (build it once, whatever "
+                    "the number of addresses), its parameters, data fields and seed rows per "
+                    "instance, and its parts (breadcrumbs, gallery, variant picker, facets, "
+                    "lists that load more); `navigation.json` `shared_layout` is built once.")  # fmt: skip
     if f"{app}/codemap.json" in have:
         rows.append(f"`{app}/codemap.json`: what the application's code defines. Build every "
                     "route in it at least as a reachable page with its menus, tabs and dialogs "
@@ -1063,7 +1069,7 @@ person only where section 7 says to stop.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/codemap.json`, `{app}/session.json`, `{app}/{docs.DIR}/**`, `{app}/rules.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/codemap.json`, `{app}/session.json`, `{app}/templates.json`, `{app}/{docs.DIR}/**`, `{app}/rules.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
