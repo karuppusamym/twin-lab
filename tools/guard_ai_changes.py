@@ -10,7 +10,7 @@ Rules (AGENTS.md states them; this makes CI enforce them):
    `model.yaml`, `db/schema.sql`, `db/seed.sql` (and `db/seed.json`: the seed the acceptance
    replay depends on), `behaviours.json`, `rules.json` (the field rules), `session.json` (the
    sign-in and cookie facts), `templates.json` (the screen templates), `pages/`, `look/`, `scripts/` (the application's scripts, carried
-   on the owner's request), `spec/` (the package's build documents), or anything in `app.yaml`
+   on the owner's request), `spec/` (the package's build documents), `static/` (static files the pages read), or anything in `app.yaml`
    outside its `run:` section.
 3. Independent oracle, on AI-built pull requests. The checks that judge the app (`automations/`,
    `flows/`, `lab/`, `conditions/`) may not change in the same pull request as an app. Otherwise
@@ -35,7 +35,7 @@ APPROVED = {"owner_approved", "reference_verified"}
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
              "behaviours.json", "codemap.json", "rules.json", "session.json",
              "templates.json")  # fmt: skip
-GENERATED_DIRS = ("pages/", "look/", "scripts/", "spec/")
+GENERATED_DIRS = ("pages/", "look/", "scripts/", "spec/", "static/")
 ORACLES = ("automations/", "flows/", "lab/", "conditions/")
 APP_FILE = re.compile(r"^apps/([^/]+)/(.+)$")
 

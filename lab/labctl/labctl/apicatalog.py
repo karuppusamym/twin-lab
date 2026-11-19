@@ -44,6 +44,39 @@ from labctl import sanitize, seedplan, stepfacts
 
 DIR = "api"
 INDEX = "catalogue.json"
+STATIC_DIR = "static"  # apps/<app>/static/: static files the pages read, values local
+LOCAL_ORIGIN = "http://localhost:18080"  # the address BUILD_TASK's example run serves
+
+
+def local_value(key: str, value):
+    """A static configuration value with every address made local: the API's to the demo's own
+    origin, any other service's to a path of it (`HLS_URL` -> `<origin>/hls`). Never a real host."""
+    if not isinstance(value, str) or "://" not in value:
+        return value
+    name = re.sub(r"[^a-z0-9]+", "-", re.sub(r"(?i)_?(url|uri|host|origin|base)$", "",
+                                            str(key)).lower()).strip("-")  # fmt: skip
+    if not name or "api" in name.split("-"):
+        return LOCAL_ORIGIN
+    return f"{LOCAL_ORIGIN}/{name}"
+
+
+def static_file(method: str, route: str, exs: list) -> dict | None:
+    """A static JSON file the pages read (labctl.har.static_json): its keys and a copy of the file
+    with local values, for `apps/<app>/static/`."""
+    from labctl import har
+
+    bodies = [e.data for e in exs if 200 <= e.status < 300 and e.data is not None]
+    if not bodies or not all(har.static_json(method, route, b) for b in bodies):
+        return None
+    keys = list(dict.fromkeys(k for b in bodies for k in b))
+    return {"path": route, "file": f"{STATIC_DIR}{route}", "keys": keys,
+            "note": "A static file the pages read, not an endpoint with a table: serve it as a file "
+                    f"at `{route}`. `{STATIC_DIR}{route}` holds its keys with the addresses made "
+                    f"local ({LOCAL_ORIGIN}, the address of the example run: write the address "
+                    "your build serves there, or generate the file at start). Never write the "
+                    "original's hosts."}  # fmt: skip
+
+
 FORMAT = "twinlab-api-catalogue/1"
 MAX_CALLS = 60  # recorded calls carried per endpoint (the schema covers all of them)
 ASSET = re.compile(r"\.(js|mjs|css|map|png|jpe?g|gif|svg|ico|woff2?|ttf|eot|webp|avif)$", re.I)
@@ -54,6 +87,8 @@ MIN_LEAK = 4  # a value shorter than this is not searched for (it would match by
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 URL = re.compile(r"https?://[A-Za-z0-9.-]+(:\d+)?(/[^\s?#]*)?")
 COOKIE_PAIR = re.compile(r"(?P<name>[A-Za-z0-9_.!#$%&*+^`|~-]{1,64})=(?P<value>[^;\s]*)")
+PAGING_KEYS = {"lastevaluatedkey", "exclusivestartkey", "nextpagetoken", "next_page", "cursor",
+               "next", "paging", "pagination"}  # fmt: skip
 HOST_LABELS = {"api", "www", "app", "hls", "cdn", "static", "media", "img", "images", "auth"}
 
 
@@ -69,6 +104,8 @@ class Ctx:
     known: set[str]  # data words of the recording, lower-case (har.page_knowledge)
     vocab: set[str]  # interface words
     shapes: set[str]  # shapes of what was typed
+    # step seq -> the record binding read from the evidence (seedplan.record_bindings)
+    records: dict[int, dict] = field(default_factory=dict)
 
     @property
     def name(self) -> str:
@@ -105,6 +142,7 @@ def load(root: Path, app: str) -> list[Ctx]:
             continue
         vfile = Path(root) / "apps" / app / "steps" / f"{path.name}{seedplan.VALUES}"
         values: dict[int, str] = {}
+        records: dict[int, dict] = {}
         if vfile.is_file():
             try:
                 doc = yaml.safe_load(vfile.read_text(encoding="utf-8")) or {}
@@ -113,6 +151,9 @@ def load(root: Path, app: str) -> list[Ctx]:
             for row in doc.get("steps") or []:
                 if isinstance(row, dict) and isinstance(row.get("n"), int) and "value" in row:
                     values[row["n"]] = str(row["value"])
+            for row in doc.get("records") or []:
+                if isinstance(row, dict) and isinstance(row.get("n"), int):
+                    records[row["n"]] = row
         rec = har.load(path)
         hosts = {urlsplit(str(s.get("url") or "")).netloc.lower() for s in part.raw
                  if str(s.get("url") or "").startswith("http")}  # fmt: skip
@@ -121,7 +162,7 @@ def load(root: Path, app: str) -> list[Ctx]:
         entries = [e for e in every if not hosts or e.host in hosts]
         known, vocab = har.page_knowledge([*part.doms.values(), *part.befores.values()], entries)
         shapes = {str(s["typed_shape"]) for s in part.raw if s.get("typed_shape")}
-        out.append(Ctx(part, values, known, vocab, shapes))
+        out.append(Ctx(part, values, known, vocab, shapes, records))
     return out
 
 
@@ -508,6 +549,11 @@ class Synth:
                 sub = entity if str(k).lower() in har.ITEM_KEYS else har._entity("/" + str(k))
                 out[name] = [self.obj(x, e, sub, error) if isinstance(x, (dict, list))
                              else self.leaf(str(k), x, e, None, error) for x in v]  # fmt: skip
+            elif isinstance(v, dict) and top and str(k).lower() in PAGING_KEYS:
+                # where the next page starts (`LastEvaluatedKey`): paging numbers, as recorded
+                out[name] = {kk: vv if isinstance(vv, (int, float)) or (
+                    isinstance(vv, str) and vv.isdigit() and len(vv) <= 6)
+                    else self.leaf(str(kk), vv, e, None, error) for kk, vv in v.items()}  # fmt: skip
             elif isinstance(v, dict):
                 out[name] = self.obj(v, e, har._entity("/" + str(k)), error)
             else:
@@ -863,6 +909,10 @@ def build(root: Path, app: str, ctxs: list[Ctx] | None = None) -> dict:
     for (method, route), ep in eps.items():
         exs = [e for _, e in ep["exs"]]
         doc = _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world)
+        static = static_file(method, route, exs)
+        if static:
+            doc["static_file"] = static
+            doc.pop("table", None)
         name = _slug(method, route) + ".json"
         n = 2
         while name in endpoints:
@@ -884,6 +934,7 @@ def build(root: Path, app: str, ctxs: list[Ctx] | None = None) -> dict:
             "statuses": sorted(doc["responses"]),
             "triggered_by": [_trigger_text(t) for t in doc["triggered_by"]],
             "calls_recorded": doc["calls_recorded"],
+            **({"static_file": doc["static_file"]["file"]} if doc.get("static_file") else {}),
         })  # fmt: skip
     index = {
         "format": FORMAT,
@@ -1141,7 +1192,46 @@ def list_facts(ctxs: list[Ctx], kept: Kept) -> list[dict]:
                 info["observed"] = rules
         fact["parameters"] = params
         out.append(fact)
+    # The order every answer of a list kept (`GET /entries` by `id`; `POST /viewcart` none),
+    # read for each list endpoint whatever its method: a builder answers in that order.
+    answers: dict[tuple[str, str], list] = {}
+    for c in ctxs:
+        for e in c.part.exchanges:
+            items = seedplan._items(e.data) if 200 <= e.status < 300 and is_api(e) else None
+            if items and len(items) > 1:
+                answers.setdefault((e.method, e.route), []).append(items)
+    for (method, route), lists in answers.items():
+        fact = next((f for f in out if f["endpoint"] == f"{method} {route}"), None)
+        if fact is None:
+            fact = {"endpoint": f"{method} {route}", "answers": len(lists), "parameters": {}}
+            out.append(fact)
+        fact.setdefault("order", observed_order(lists))
     return out
+
+
+def observed_order(lists: list[list[dict]]) -> str:
+    """The order all the answers' rows share, by a field: `rows ordered by `id` ascending`, or
+    that none was shared. Field names only."""
+
+    def sortable(v):
+        if isinstance(v, bool) or v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return (0, float(v))
+        if isinstance(v, str) and re.fullmatch(r"-?\d+(\.\d+)?", v.strip()):
+            return (0, float(v))
+        return (1, v.lower()) if isinstance(v, str) else None
+
+    keys = [k for k in lists[0][0] if all(sortable(r.get(k)) is not None for x in lists for r in x)]
+    for k in sorted(keys, key=lambda k: (str(k).lower() != "id", str(k))):
+        for name, rev in (("ascending", False), ("descending", True)):
+            if all([sortable(r[k]) for r in x] == sorted((sortable(r[k]) for r in x), reverse=rev)
+                   and len({sortable(r[k]) for r in x}) > 1 for x in lists):  # fmt: skip
+                return f"rows ordered by `{k}` {name} in every recorded answer"
+    return (
+        "no field orders the rows in every recorded answer: answer them in the order they "
+        "were stored (the recorded calls show it)"
+    )
 
 
 def _param_rule(name: str, value: str, calls: list, kept: Kept) -> str | None:
@@ -1414,9 +1504,109 @@ def write(root: Path, app: str) -> dict:
     for name, text in texts.items():
         (folder / name).write_bytes(text.encode("utf-8"))
         files.append(folder / name)
+    files += write_static(root, app, built["endpoints"])
     return {"files": files, "index": built["index"] if INDEX in texts else None,
             "endpoints": built["endpoints"], "problems": problems, "ctxs": ctxs,
             "network": built.get("network") if netfacts.FILE in texts else None}  # fmt: skip
+
+
+_STRINGIFY = re.compile(r"JSON\.stringify\(\s*\{(?P<body>[^{}]{0,600})\}")
+_KEY = re.compile(r"(?:^|[,{\s])[\"']?([A-Za-z_$][\w$]{0,40})[\"']?\s*:")
+
+
+def code_fields(scripts: list[str], path: str) -> list[str]:
+    """The request field names a script sends to `path` (`url: API_URL + '/login'` next to a
+    `JSON.stringify({username: ..., password: ...})`): names only, never a value."""
+    out: dict[str, None] = {}
+    for text in scripts:
+        for m in re.finditer(r"[\"']" + re.escape(path) + r"[\"']", text or ""):
+            near = text[max(0, m.start() - 600) : m.end() + 600]
+            for body in _STRINGIFY.finditer(near):
+                out.update(dict.fromkeys(_KEY.findall(body.group("body"))))
+    return list(out)[:30]
+
+
+def write_code_stubs(root: Path, app: str, code: dict, ctxs: list[Ctx]) -> list[str]:
+    """`api/<endpoint>.json` for each call the application's code makes and the recording never
+    did (`codemap.json` `api_calls`, "in code, not called"): method, path, the request fields
+    the code sends, the functions that call it; the answer is not recorded. Returns problems."""
+    from labctl import codemap as cm
+    from labctl import har
+
+    folder = Path(root) / "apps" / app / DIR
+    if not folder.is_dir():
+        return []
+    have = {f"{d.get('method')} {d.get('path')}" for f in folder.glob("*.json")
+            if (d := _read_json(f)) and d.get("method")}  # fmt: skip
+    scripts = []
+    for c in ctxs:
+        try:
+            rec = har.load(c.part.path)
+        except (OSError, ValueError):
+            continue
+        scripts += [
+            e.resp_text for e in har.exchanges(rec.har) if e.kind == "asset" and e.resp_text
+        ]
+    stubs: dict[str, dict] = {}
+    for call in code.get("api_calls") or []:
+        if call.get("status") != "in code, not called" or not call.get("path"):
+            continue
+        key = f"{call['method']} {call['path']}"
+        if key in have:
+            continue
+        doc = stubs.setdefault(key, {
+            "id": _slug(call["method"], call["path"]), "method": call["method"],
+            "path": call["path"], "basis": "in code, not called",
+            "request": {"auth": "not recorded", "fields_in_code": code_fields(scripts, call["path"])},
+            "responses": {}, "answer": "not recorded: the recording never made this call",
+            "called_by": [], "calls_recorded": 0,
+            "build": "The application's code calls this endpoint from the functions listed; the "
+                     "recording never did. Answer it on the same method and path and accept the "
+                     "fields the code sends. Its answer is unknown: give the simplest answer the "
+                     "calling code reads and write it under Assumptions in BUILD-NOTES.md.",
+        })  # fmt: skip
+        who = f"{call.get('in') or 'the script'} in `{call.get('file')}`"
+        if who not in doc["called_by"]:
+            doc["called_by"].append(who)
+    problems = []
+    for key, doc in stubs.items():
+        text = _dump(doc)
+        bad = cm.check_text(text, set())
+        if bad:
+            problems.append(f"{key}: stub not written ({'; '.join(bad[:2])})")
+            continue
+        name = doc["id"] + ".json"
+        (folder / name).write_bytes(text.encode("utf-8"))
+    return problems
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def write_static(root: Path, app: str, endpoints: dict) -> list[Path]:
+    """`apps/<app>/static/<path>` for each static JSON file: the synthetic example's keys, every
+    address local (`local_value`)."""
+    folder = Path(root) / "apps" / app / STATIC_DIR
+    if folder.is_dir():
+        for old in sorted(folder.rglob("*.json"), reverse=True):
+            old.unlink()
+    out = []
+    for doc in endpoints.values():
+        st = doc.get("static_file")
+        if not st:
+            continue
+        example = next((r.get("example") for r in (doc.get("responses") or {}).values()
+                        if isinstance(r.get("example"), dict)), {})  # fmt: skip
+        body = {k: local_value(k, example.get(k)) for k in st["keys"]}
+        target = folder / st["path"].lstrip("/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((json.dumps(body, indent=4) + "\n").encode("utf-8"))
+        out.append(target)
+    return out
 
 
 def _dump(doc) -> str:
@@ -1461,16 +1651,23 @@ def brief_section(app: str, done: dict) -> str:
             )
             answers.append(f"`{status}`: {what}")
         sent = "; ".join(row["triggered_by"][:10]) or "-"
+        if row.get("static_file"):
+            answers.append(f"a static file: serve `{row['static_file']}`")
         out.append(f"| `{row['method']} {row['path']}` | {sent} | {req} | {'<br>'.join(answers)} | "
                    f"{row['auth']} | `{row['file']}` |")  # fmt: skip
     out.append("")
+    for doc in eps.values():
+        st = doc.get("static_file")
+        if st:
+            out.append(f"**Static file `{st['path']}`** (keys "
+                       + ", ".join(f"`{k}`" for k in st["keys"]) + f"): {st['note']}\n")  # fmt: skip
     nested = [(d["method"], d["path"], n) for d in eps.values() for n in d.get("notes") or []
               if "belongs to one" in n]  # fmt: skip
     if nested:
         out.append("**Records inside a record.**\n")
         out += [f"- `{m} {path}`: {n}" for m, path, n in nested]
         out.append("")
-    lists = [x for x in index.get("lists") or [] if x.get("parameters")]
+    lists = [x for x in index.get("lists") or [] if x.get("parameters") or x.get("order")]
     if lists:
         out.append("**Search, filter, sort and paging.** Checked on every recorded answer:\n")
         for x in lists:

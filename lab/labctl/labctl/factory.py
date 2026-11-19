@@ -173,7 +173,14 @@ def _with_templates(root, app_id, system, source, db_engine, force, data) -> Res
     # Screens with one structure and many addresses (`/p/blue-linen-shirt`) are one template
     # (labctl.templates): every address pattern written below follows the learned rules.
     learned = templates.rules_for(root, app_id)
-    with sanitize.template_rules([t["rule"] for t in learned]):
+    # Two addresses of one document (`/index.html` beside `/`) are one screen (labctl.har).
+    from labctl import har
+
+    try:
+        same = har.screen_aliases(discover(root, app_id).recordings)
+    except Exception:  # noqa: BLE001 - no evidence folder: no alias
+        same = {}
+    with sanitize.template_rules([t["rule"] for t in learned]), sanitize.screen_aliases(same):
         return _generate(root, app_id, system, source, db_engine, force, data)
 
 
@@ -271,6 +278,20 @@ def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
     text = pagerules.extend(root, app_id, model, text)
     from labctl import publicdata
 
+    same = sanitize.aliases()
+    if same:  # one screen served at more than one address
+        marker = "## Running in the lab"
+        note = (
+            "## One screen, several addresses\n\n"
+            + "\n".join(
+                f"- `{a}` serves the same document as `{s}` (the recording opened both): it is the "
+                f"screen `{s}`, built once. Serve it at `{a}` too, with the same page (no redirect: "
+                "the recorded steps open both addresses)."
+                for a, s in sorted(same.items())
+            )
+            + "\n\n"
+        )
+        text = text.replace(marker, note + marker, 1) if marker in text else f"{text}\n{note}"
     pub = publicdata.current()
     if pub is not None:  # which data is real public catalogue content, and who approved it
         marker = "## Running in the lab"
@@ -378,7 +399,7 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
              "behaviours.json", "pages", "steps", "look", "api",
              "navigation.json", "codemap.json", "rules.json",
-             "scripts", "session.json", "templates.json")  # fmt: skip
+             "scripts", "session.json", "templates.json", "static")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:
