@@ -222,9 +222,10 @@ def test_libraries_are_named_not_analysed():
     assert pr.library_name("/js/jquery-3.7.1.min.js", "") == "jQuery"
     assert pr.library_name("/js/jquery.validate.unobtrusive.min.js", "") == (
         "jQuery Validation Unobtrusive")  # fmt: skip
-    assert pr.library_name("/javax.faces.resource/jsf.js.xhtml", "") == "JSF"
+    # named as the code map names them (`labctl.libraries`); the version is kept apart
+    assert pr.library_name("/javax.faces.resource/jsf.js.xhtml", "") == "javax.faces"
     assert pr.library_name("/x.js", "/*! Select2 4.1.0 | https://github.com/select2 */") == (
-        "Select2 4.1.0")  # fmt: skip
+        "Select2")  # fmt: skip
     assert pr.library_name("/static/app.js", "/* the page's own checks */") is None
 
 
@@ -501,7 +502,8 @@ def test_cross_field_rules_behaviour_state_and_session(permit):
     assert timers[900000]["goes_to"] == "/signed-out"
     scripts = permit.rules["scripts"]
     assert [s["script"] for s in scripts["analysed"]] == ["/static/apply.js"]
-    assert scripts["libraries"] == [{"file": "jquery.validate-shim.js", "name": "jQuery Validation",
+    assert scripts["libraries"] == [{"name": "jQuery Validation", "version": None,
+                                     "files": ["jquery.validate-shim.js"],
                                      "origin": "this application"}]  # fmt: skip
     assert permit.rules["not_tied"] == [] and scripts["carried"]["opt_in"] is False
 
@@ -674,5 +676,5 @@ def test_jsf_reference_rules_expected_against_found(tmp_path):
     beh = {(b["kind"], b.get("source"), b.get("target")): b for b in edit["behaviour"]}
     assert beh[("partial update", "select#edit:status", "edit:statusNote")]["level"] == pr.DECLARED
     assert beh[("toggle", "select#edit:status", "input#edit:resolution")]["level"] == pr.SEEN
-    assert {x["name"] for x in doc["scripts"]["libraries"]} == {"JSF"}
+    assert {x["name"] for x in doc["scripts"]["libraries"]} == {"javax.faces"}
     assert len(JSF_NOT_RECOVERABLE) == 3

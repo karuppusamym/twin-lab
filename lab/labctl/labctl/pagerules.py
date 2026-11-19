@@ -65,7 +65,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from labctl import sanitize
+from labctl import libraries, sanitize
 
 FILE = "rules.json"
 FORMAT = "twinlab-page-rules/1"
@@ -2222,56 +2222,14 @@ def _fields_inside(tree, selector: str) -> list:
 # The application's scripts
 # =================================================================================================
 
-LIBRARY_NAMES = [
-    (r"jquery[.-]validate[.-]unobtrusive", "jQuery Validation Unobtrusive"),
-    (r"jquery[.-]validat", "jQuery Validation"),
-    (r"jquery[.-]?mask|jquery[.-]inputmask|inputmask", "Inputmask"),
-    (r"jquery[.-]ui", "jQuery UI"), (r"sweet-?alert", "SweetAlert"),
-    (r"jquery", "jQuery"),
-    (r"(^|/)angular(js)?([.-][\d.]+)?(\.min)?\.js$|/angularjs/", "AngularJS"),
-    (r"react(-dom)?([.-]production|[.-]development)?(\.min)?\.js$", "React"),
-    (r"(^|/)vue([.-][\d.]+|\.global|\.runtime|\.esm)?[^/]*\.js$", "Vue"),
-    (r"bootstrap", "Bootstrap"), (r"popper", "Popper"), (r"lodash", "Lodash"),
-    (r"underscore", "Underscore"), (r"moment", "Moment"), (r"knockout", "Knockout"),
-    (r"backbone", "Backbone"), (r"(^|/)(jsf|faces)(-uncompressed)?\.js", "JSF"),
-    (r"javax\.faces\.resource|jakarta\.faces\.resource", "JSF"), (r"primefaces", "PrimeFaces"),
-    (r"select2", "Select2"), (r"datatables", "DataTables"), (r"chart(\.umd)?(\.min)?\.js", "Chart.js"),
-    (r"(^|/)d3(\.v\d)?(\.min)?\.js", "D3"), (r"zone(\.min)?\.js", "zone.js"),
-    (r"(^|/)polyfills?([.-][\w]+)?\.js", "polyfills"), (r"core-js", "core-js"),
-    (r"(^|/)(vendors?|chunk-vendors)([.~-][\w]+)?\.js", "vendor bundle"), (r"htmx", "htmx"),
-    (r"alpine", "Alpine.js"), (r"axios", "axios"), (r"webforms|microsoftajax|webresource\.axd|"
-                                                   r"scriptresource\.axd", "ASP.NET Web Forms"),
-    (r"(^|/)(gtag|gtm|analytics|ga)\.js|googletagmanager|hotjar|newrelic|sentry", "analytics"),
-]  # fmt: skip
-_BANNER = re.compile(r"^\s*/\*[!*]?\s*(?:@license\s+)?([A-Z][\w.]*(?: [A-Z][\w.]*){0,3})\s+v?(\d+\.\d+"
-                     r"(?:\.\d+)?)", re.IGNORECASE)  # fmt: skip
-
 
 def library_name(path: str, text: str | None) -> str | None:
-    """The library a script file is, by its name or its banner (None: the application's own).
-    The file's own name is read first, then the package folder it is served from, then the rest
-    of its address: `/node_modules/bootstrap-sweetalert/dist/sweetalert.min.js` is SweetAlert,
-    not Bootstrap."""
-    low = (path or "").lower()
-    file = low.rsplit("/", 1)[-1]
-    for rx, name in LIBRARY_NAMES:
-        if file and re.search(rx, file):
-            return name
-    # A file served from a package folder is a package, not the application's own code
-    # (`/node_modules/videojs-contrib-hls/dist/...`): named by its package.
-    pkg = re.search(r"(?:^|/)(?:node_modules|bower_components)/((?:@[\w.-]+/)?[\w.-]+)/", low)
-    if pkg:
-        return pkg.group(1)
-    for rx, name in LIBRARY_NAMES:
-        if re.search(rx, low):
-            return name
-    head = (text or "")[:600]
-    m = _BANNER.match(head)
-    if m and not re.search(r"\bapp(lication)?\b", m.group(1), re.IGNORECASE):
-        return f"{m.group(1)} {m.group(2)}"
-    if re.search(r"@license|\(c\) \d{4}.*(?:MIT|Apache|BSD)", head) and len(text or "") > 20000:
-        return "a library (licence banner)"
-    return None
+    """The library a script file is (None: the application's own), as the code map names it
+    (`labctl.libraries.identify`): the file's own name first, then the package folder it is
+    served from, then the rest of its address, then a licence banner:
+    `/node_modules/bootstrap-sweetalert/dist/sweetalert.min.js` is SweetAlert, not Bootstrap."""
+    lib = libraries.identify(path, text)
+    return lib.name if lib else None
 
 
 @dataclass
@@ -2281,6 +2239,8 @@ class Script:
     own: bool
     library: str | None
     file: bool  # a script file (an inline script is not)
+    version: str | None = None  # a library's version (`libraries.identify`)
+    version_from: str | None = None  # `libraries.CONTENT`, or `libraries.ADDRESS` (a guess)
 
 
 class _Inline(HTMLParser):
@@ -2356,8 +2316,10 @@ def scripts_of(ctxs: list) -> tuple[list[Script], set[str]]:
                 if digest in seen:
                     continue
                 seen.add(digest)
-                lib = library_name(parts.path, text)
-                out.append(Script(path, text, host in own, lib, True))
+                lib = libraries.identify(parts.path, text)
+                out.append(Script(path, text, host in own, lib.name if lib else None, True,
+                                  lib.version if lib else None,
+                                  lib.version_from if lib else None))  # fmt: skip
             elif "html" in mime and host in own:
                 screen = stepfacts._pattern(url) or "/"
                 for body in inline_scripts(text):
@@ -2612,12 +2574,15 @@ def build(root: Path, app_id: str, ctxs: list | None = None) -> dict | None:
                         ids[n.attrs["id"]].append(_selector(n))
     scripts, own = scripts_of(ctxs)
     findings: list[dict] = []
-    analysed, libraries = [], []
+    analysed, libs = [], []
     for s in scripts:
         if not s.own or s.library:
-            libraries.append({"file": s.path.rsplit("/", 1)[-1] if s.file else s.path,
-                              "name": s.library or "a script of another site",
-                              "origin": "this application" if s.own else "another site"})  # fmt: skip
+            row = {"name": s.library or "a script of another site", "version": s.version,
+                   "files": [s.path.rsplit("/", 1)[-1] if s.file else s.path],
+                   "origin": "this application" if s.own else "another site"}  # fmt: skip
+            if s.version:
+                row["version_from"] = s.version_from
+            libs.append(row)
             continue
         found = analyse(s.text, s.path)
         findings += found
@@ -2676,7 +2641,7 @@ def build(root: Path, app_id: str, ctxs: list | None = None) -> dict | None:
         "not_tied": doc.loose,
         "scripts": {
             "analysed": analysed,
-            "libraries": _dedupe(libraries),
+            "libraries": libraries.group(libs),
             "not_recovered": NOT_RECOVERED,
         },  # fmt: skip
     }
@@ -3076,7 +3041,9 @@ def brief_section(app_id: str, doc: dict | None) -> str:
         out.append("")
     scripts = doc.get("scripts") or {}
     names = [f"`{s['script']}`" for s in scripts.get("analysed") or []]
-    libs = sorted({f"{x['name']} (`{x['file']}`)" for x in scripts.get("libraries") or []})
+    libs = sorted({x["name"] + (f" {x['version']}" if x.get("version") else "") + " ("
+                   + ", ".join(f"`{f}`" for f in x.get("files") or [x.get("file")]) + ")"
+                   for x in scripts.get("libraries") or []})  # fmt: skip
     out.append("**Scripts read:** " + (", ".join(names[:20]) if names else "none of the "
                "application's own") + ". " + ("Named, not analysed: " + ", ".join(libs[:20]) + ". "
                if libs else "") + "No script is carried" + (

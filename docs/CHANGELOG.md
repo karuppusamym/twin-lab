@@ -60,6 +60,34 @@ a blind rebuild from it and a judge's replay found these; each is fixed in `labc
   rows never are), so it stays TO DO; G2 (carrying the application's scripts) stays an owner
   opt-in; duplicate dialog texts in `codemap.json` are the code-map work's.
 
+## 2026-11-19 — Typed values: taken out where they are a value, never out of ids
+- The recorder took every typed value out of snapshots, the HAR and locators as a substring, so
+  it also changed ids, classes and names that held it: typing `report` on Caseboard PF turned
+  `main:navReports` into `main:navAs` and broke that element's selector in the rebuild and the
+  replay. One rule now decides (`labctl/typedvalues.py`, used by `recorder._Secrets`, the
+  browser's picture mask `MARK_TYPED_JS`, and the HAR scrub): a typed value is replaced by its
+  shape only where it is a value (text nodes, form values, `title`/`alt`/`placeholder`/
+  `aria-label` and other content attributes, `data-*`, an address's query, fragment and a path
+  segment that is the whole value, JSON strings and numbers, form fields), and only as a whole
+  token (`Reports`, `main:navReports`, `report-row` keep it). `id`, `class`, `name`, `for`,
+  `form`, ARIA id references, test ids and enumerated attributes (`type`, `role`, ...) are never
+  changed by a value inside them; one whose whole value is a typed value becomes the placeholder
+  `tl-typed-a` (`-b`, ... per value) in the snapshot, the step's selector and locators, and the
+  page's scripts and style sheets that name it, and the step says so (`typed_placeholders`:
+  placeholder and the step it was typed at, never the value). The replay tries the placeholder
+  (the rebuilt page) and then the value it types for that step (the application itself), and
+  compares the live page with the placeholder in place (`locate.typed_values`,
+  `fidelity._placed`). The HAR is read by what each string is: markup as markup, JSON as JSON,
+  an address as an address.
+- Caseboard PF's flow filters by `report` again (it typed `missing` to dodge this) and
+  `test_reference_primefaces.py` checks `a#main:navReports` opens the Reports sub-page in the
+  package. Tests: `test_typed_values.py` (a recording typing `report` beside `main:navReports`,
+  a name in a text node, a value inside a class, an id equal to a value, a value in a query,
+  replayed on a fresh copy).
+- Left open: a value the replay must see in the address bar (a typed word in the page's own
+  address) is still compared by its shape and fails the address check, as before; a JSF request
+  parameter that names an id equal to a typed value (`javax.faces.source`) gets its shape, not
+  the placeholder.
 ## 2026-11-18 — Desktop recorder: the four faults the certification runs found
 - WPF and Java Swing are now CAPTURE VERIFIED, as WinForms: all three pass detect, capture (20
   expected actions each) and self-replay (WinForms and WPF 29 of 36 steps verified, 7 covered by
@@ -203,6 +231,30 @@ a blind rebuild from it and a judge's replay found these; each is fixed in `labc
   every remaining step passes; the damage is under "Why not pass" and in `compared`, but
   whether it should lower the status is a decision for a person. The replay loop itself was
   not run in a browser for these cases.
+
+## 2026-11-19 — Code map: library versions from the files, one entry per library and dialog
+Three defects of `codemap.json` found on the Demoblaze recording:
+- Library versions were guessed: Bootstrap was reported as 5.0.0 while its own banner says
+  v4.0.0-alpha.6. A library is now named and dated by `labctl.libraries.identify`, shared by the
+  code map and the page rules (`rules.json` `scripts.libraries`): the version the file's content
+  states comes first (a banner such as `Bootstrap v4.0.0-alpha.6` or `/*! jQuery v3.2.1`,
+  `@version`, a `VERSION = "..."` assignment in a library, JSF's `specversion`); the address is
+  only a fallback, and `version_from` then says it is a guess. A file under `node_modules/` or
+  `bower_components/` is named by its package, so video.js, its HLS plug-in and Tether are no
+  longer analysed as the application's own code.
+- A library was listed twice (its style sheet and its script): one entry per library and
+  version, listing its files; a file that states no version joins its library's only version.
+  The page rules list their libraries the same way (`name`, `version`, `files`).
+- `dialogs` held 47 entries: each page's modals once per page and each browser alert once per
+  script. Each dialog is now listed once with its `routes` and `files`. A third-party widget's
+  own dialogs (video.js `vjs-*` modal dialogs and other media players', inside the player's
+  container or written by the library's script) are left out, with the rule the navigation map
+  already used (`sanitize._player`). Demoblaze: 47 dialogs to 17 (5 modals, 12 alerts), six
+  libraries with their files, Bootstrap 4.0.0-alpha.6.
+- The navigation map already left out a player's dialogs; its sub-views stay per screen, as each
+  screen has its own opening and closing steps.
+- Left open: the media-player class list is the only widget rule; another library's dialog
+  markup in a downloaded page (not from its script) is still listed.
 
 ## 2026-11-18 — The application's map from its code: every route, menu, tab, dialog and call
 A recording shows the screens a person visited; the code the browser downloaded describes the

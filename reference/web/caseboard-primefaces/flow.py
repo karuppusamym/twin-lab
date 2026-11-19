@@ -27,10 +27,10 @@ START = "/login.xhtml"
 PAUSE = 700  # longer than the recorder's settle time: each step is snapshotted before the next
 
 USER, WRONG_PASSWORD, PASSWORD = "casey.morgan", "not-the-password", "demo"
-# Two of the seventeen titles hold it. A typed value is taken out of everything the recorder
-# writes, attribute values and ids included (case does not matter): a word an id or a label also
-# holds ("report" in `main:navReports`) would be masked there too, so the flow types none.
-FILTER = "missing"
+# Three of the seventeen titles hold it. A typed value is taken out of what the recorder writes
+# only where it is a value, as a whole word (labctl.typedvalues): the id `main:navReports` and
+# the menu item "Reports" keep it, so the Reports sub-page is recorded and replayed by its id.
+FILTER = "report"
 NOTE = "Called the requester back"
 NEW_TITLE = "Window blind stuck"
 
@@ -49,8 +49,8 @@ TYPED = [
 # The rows the flow clicks (row expansion, selection, the row opened as a page), by their title:
 # the row's text without the text of its controls, as Caseboard PF's seed has them.
 RECORDS = [
-    "C-2017 Locker key missing Marchetti Closed",  # filtered, sorted by owner: the first row
-    "C-2006 Payroll export missing rows Tanaka In progress",  # the second row
+    "C-2013 Travel report overdue Abernathy Open",  # filtered, sorted by owner: the first row
+    "C-2016 Quarterly report template Lindqvist Open",  # the second row
     "C-2001 Printer jam on floor three Okafor Open",  # the first row of the unsorted list
 ]
 
