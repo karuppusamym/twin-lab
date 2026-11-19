@@ -671,7 +671,9 @@ def detected_stack(stack) -> list[str]:
     rows: list[tuple[str, str, str, str]] = []
     front = stack.frontend or {}
     if front.get("framework") and front.get("marker"):
-        sure = "guess" if front["framework"] == "server-rendered" else "certain"
+        # pages filled from the API are read from what the snapshots show: likely, not a marker
+        sure = ("guess" if front["framework"] == "server-rendered"
+                else "likely" if front.get("pages") == "static" else "certain")  # fmt: skip
         rows.append(("Front end", _name_version(front, "framework"), front["marker"], sure))
     else:
         rows.append(("Front end", NOT_IDENTIFIED, "", ""))
@@ -930,8 +932,14 @@ def render(brief: Brief, repo_root: Path) -> str:
     front = model.stack.frontend or {}
     if front.get("marker"):
         name = " ".join(str(front[k]) for k in ("framework", "version") if front.get(k))
-        w(f"Front end: **{name}**, read from the recording ({front['marker']}). Build the screens "
-          "with it, so they render the same elements.")  # fmt: skip
+        if front.get("pages") == "static":
+            w(f"Front end: **{name}**, read from the recording ({front['marker']}). Serve each "
+              "screen as a static HTML file and let its scripts fetch every list and detail "
+              "from the API and render it in the browser, as the original does: the server "
+              "never fills a page.")  # fmt: skip
+        else:
+            w(f"Front end: **{name}**, read from the recording ({front['marker']}). Build the "
+              "screens with it, so they render the same elements.")  # fmt: skip
         if brief.browser_only:
             w("No server database (see *Browser storage* for where the data lives and whether it "
               "persists). The container only serves the files; say in BUILD-NOTES.md what serves "
