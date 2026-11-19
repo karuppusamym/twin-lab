@@ -248,7 +248,10 @@ class Pkg:
         self.nav = self.json(f"{self.app}/navigation.json") or {}
         self.cat = self.json(f"{self.app}/api/catalogue.json") or {}
         self.rules = self.json(f"{self.app}/rules.json") or {}
-        self.session = self.json(f"{self.app}/session.json")
+        # session.json: the sign-in facts, or only the cookies when nobody signed in (then the
+        # app has no sign-in, and `session` is None as without the file)
+        self.session_doc = self.json(f"{self.app}/session.json")
+        self.session = self.session_doc if (self.session_doc or {}).get("sign_in") else None
         self.codemap = self.json(f"{self.app}/{CODEMAP}")
         self.seed = self.json(f"{self.app}/db/seed.json") or {}
         self.conf = self.yaml(f"{self.app}/app.yaml") or {}
@@ -1468,9 +1471,9 @@ def session_lines(pkg: Pkg) -> list[str]:
     app = pkg.app
     out = ["## Sign-in, session and cookies", ""]
     ses = pkg.session
-    if ses and not ses.get("sign_in"):  # no sign-in recorded: only the cookies
+    if not ses and pkg.session_doc:  # no sign-in recorded: only the cookies
         out += [f"From `{app}/session.json`: no sign-in was recorded; build no sign-in screen.", ""]
-        out += cookie_table(ses.get("cookies") or [])
+        out += cookie_table(pkg.session_doc.get("cookies") or [])
         return out
     if not ses:
         body = pkg.section("Sign-in and session")

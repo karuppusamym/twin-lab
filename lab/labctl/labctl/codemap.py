@@ -323,6 +323,14 @@ def own_hosts(recordings: list[Path]) -> set[str]:
                 continue
             if url.startswith(("http://", "https://")):
                 out.add(urlsplit(url).netloc.lower())
+    # the pages' own API on another origin of their site (`api.` beside `www.`: har.api_hosts)
+    from labctl import har
+
+    for rec in recordings:
+        try:
+            out |= har.api_hosts(set(out), har.exchanges(har.load(Path(rec)).har))
+        except (OSError, ValueError):
+            continue
     return out
 
 
