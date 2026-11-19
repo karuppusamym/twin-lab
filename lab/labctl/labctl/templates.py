@@ -44,7 +44,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
-from labctl import sanitize
+from labctl import jsfviews, sanitize
 
 FILE = "templates.json"  # apps/<app>/templates.json
 FORMAT = "twinlab-templates/1"
@@ -119,7 +119,9 @@ def _visited(recordings: list[Path]) -> dict[str, str]:
                     pages[urlsplit(s.url).path or "/"] = s.dom.read_text("utf-8", "replace")
                 except OSError:
                     pass
-    return pages
+    # A JSF view is a screen of its own (labctl.jsfviews), whatever the address bar showed, and
+    # its sub-pages are sub-views of it: no JSF page is a template's instance.
+    return {p: h for p, h in pages.items() if not jsfviews.is_jsf(h)}
 
 
 def _page_links(html: str) -> list[tuple[str, str]]:
@@ -320,15 +322,23 @@ def _links(node) -> int:
     return sum(1 for x in domlib._walk(node) if x.tag == "a" and x.attrs.get("href") is not None)
 
 
+def screen_of(step: dict, views: dict[int, str]) -> str:
+    """The screen a step was on: its JSF view when it has one (labctl.jsfviews), else the
+    pattern of its address, as `navmap` and `stepfacts` say."""
+    return views.get(step.get("seq")) or sanitize.route_pattern(
+        urlsplit(str(step.get("url") or "")).path or "/")  # fmt: skip
+
+
 def _representatives(ctxs: list) -> dict[str, tuple[str, str]]:
     """screen pattern -> (raw HTML, sanitised HTML) of its fullest snapshot."""
     best: dict[str, tuple[int, str, object]] = {}
     for c in ctxs:
+        views = jsfviews.step_views(c.part.raw, c.part.doms)
         for s in c.part.raw:
             url = str(s.get("url") or "")
             if not url.startswith("http") or s.get("seq") not in c.part.doms:
                 continue
-            screen = sanitize.route_pattern(urlsplit(url).path or "/")
+            screen = screen_of(s, views)
             html = c.part.doms[s["seq"]]
             if screen not in best or len(html) > best[screen][0]:
                 best[screen] = (len(html), html, c)
@@ -723,18 +733,21 @@ def build(root: Path, app: str, ctxs: list, nav: dict | None, done: dict | None,
     reps = _representatives(ctxs)
     urls: dict[str, list[str]] = defaultdict(list)  # screen -> address of every visit
     trees: dict[str, dict[str, object]] = defaultdict(dict)  # screen -> path -> raw tree
+    jsf_screens: set[str] = set()  # JSF views: one screen each, its sub-pages sub-views
     for c in ctxs:
         last = None
+        views = jsfviews.step_views(c.part.raw, c.part.doms)
+        jsf_screens |= set(views.values())
         for s in c.part.raw:
             url = str(s.get("url") or "")
             if not url.startswith("http"):
                 continue
-            screen = sanitize.route_pattern(urlsplit(url).path or "/")
-            if url != last:
+            screen = screen_of(s, views)
+            if (url, screen) != last:  # a JSF forward changes the view, not the address
                 urls[screen].append(url)
-                last = url
+                last = (url, screen)
             if s.get("seq") in c.part.doms:
-                path = urlsplit(url).path or "/"
+                path = screen if s.get("seq") in views else urlsplit(url).path or "/"
                 trees[screen].setdefault(path, c.part.doms[s["seq"]])  # as it loaded
     kept = ac.kept_values(root, app, ctxs)
     avoid = set().union(*(c.part.words for c in ctxs))
@@ -745,7 +758,8 @@ def build(root: Path, app: str, ctxs: list, nav: dict | None, done: dict | None,
         row_nav = nav_by.get(screen) or {}
         if row_nav and not row_nav.get("in_scope", True):
             continue
-        paths = list(dict.fromkeys(urlsplit(u).path or "/" for u in urls[screen]))
+        paths = [screen] if screen in jsf_screens else list(
+            dict.fromkeys(urlsplit(u).path or "/" for u in urls[screen]))  # fmt: skip
         raw_trees = [domlib.parse_html(h) for h in trees[screen].values()]
         rep = reps.get(screen)
         safe = domlib.parse_html(rep[1]) if rep else None

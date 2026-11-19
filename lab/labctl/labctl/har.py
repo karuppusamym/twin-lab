@@ -1763,6 +1763,7 @@ def page_knowledge(doms, entries) -> tuple[set[str], set[str]]:
 
 def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None) -> AppModel:
     """The app model one recording shows. Writes value-free page snapshots when `pages_dir` is set."""
+    from labctl import jsfviews
     from labctl.model_build import rel, same_id, screen_name
 
     rec = load(path)
@@ -1811,19 +1812,23 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         if step.dom is not None
     }
     known, vocab = page_knowledge(dom_text.values(), entries)
+    # JSF: a step's screen is the view its page shows (a forward keeps the address before).
+    views = jsfviews.step_views([{"seq": s.seq, "url": s.url} for s in rec.steps],
+                                {s.seq: dom_text[id(s)] for s in rec.steps if s.dom is not None})  # fmt: skip
+    jsf_views = set(views.values())
     # What changes between snapshots of the same screen at the same place is data (a record's
     # name in a heading, say): a first reading of every snapshot, by screen.
     first: dict[str, list[sanitize.PageInfo]] = {}
     for step in rec.steps:
         url = urlsplit(step.url)
         if step.dom is not None and url.scheme in ("http", "https"):
-            first.setdefault(sanitize.route_pattern(url.path or "/"), []).append(
-                sanitize.page(dom_text[id(step)], known, vocab))  # fmt: skip
+            first.setdefault(sanitize.route_pattern(views.get(step.seq) or url.path or "/"),
+                             []).append(sanitize.page(dom_text[id(step)], known, vocab))  # fmt: skip
     for e in entries:
         if e.kind in ("document", "form") and 200 <= e.status < 300 and e.resp_mime == "text/html" \
                 and e.resp_text is not None:  # fmt: skip
-            first.setdefault(sanitize.route_pattern(e.path), []).append(
-                sanitize.page(e.resp_text, known, vocab))  # fmt: skip
+            first.setdefault(sanitize.route_pattern(jsfviews.view_id(e.resp_text) or e.path),
+                             []).append(sanitize.page(e.resp_text, known, vocab))  # fmt: skip
     vary = {pattern: sanitize.varying(pages) for pattern, pages in first.items()}
 
     timeline: list[tuple[datetime, str]] = []
@@ -1832,7 +1837,7 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
         url = urlsplit(step.url)
         if url.scheme not in ("http", "https"):
             continue
-        acc = screen(url.path or "/")
+        acc = screen(views.get(step.seq) or url.path or "/")
         if step.ts:
             timeline.append((step.ts, acc.pattern))
         if step.selector and step.action in ("click", "type", "select", "submit"):
@@ -1851,15 +1856,16 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             continue
         if e.resp_mime != "text/html" or e.resp_text is None:
             continue
-        info = sanitize.page(e.resp_text, known, vocab, vary.get(sanitize.route_pattern(e.path)))
+        doc_path = jsfviews.view_id(e.resp_text) or e.path  # JSF: a postback answers its next view
+        info = sanitize.page(e.resp_text, known, vocab, vary.get(sanitize.route_pattern(doc_path)))
         served_grids = served_grids or bool(info.grids)
         if e.started:
-            timeline.append((e.started, sanitize.route_pattern(e.path)))
+            timeline.append((e.started, sanitize.route_pattern(doc_path)))
         if info.has_content:
-            screen(e.path).pages.append(info)
+            screen(doc_path).pages.append(info)
         else:
             shells.append(info)
-            screen(e.path)
+            screen(doc_path)
     timeline.sort(key=lambda t: t[0])
     # No request for data, no grid served, and the page changed by itself (or browser storage was
     # recorded): the state is not on the server (R07).
@@ -1882,6 +1888,8 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
     values = set().union(*(e.values for e in entries)) | (shown - own)
 
     def screen_at(e: Exchange) -> str | None:
+        if e.method == "POST" and sanitize.route_pattern(e.path) in jsf_views:
+            return sanitize.route_pattern(e.path)  # a JSF form posts to its own view
         ref = urlsplit(e.request.get("referer", ""))
         if ref.netloc.lower() in hosts and ref.path:
             return sanitize.route_pattern(ref.path)

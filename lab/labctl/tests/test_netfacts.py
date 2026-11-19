@@ -354,3 +354,55 @@ def test_websocket_binary_and_base64_bodies_are_read_safely():
     assert nf._decoded(content) == '{"x": 1}'
     assert nf.value_kind("8c1f0f3e-1d2b-4c5d-9e8f-0a1b2c3d4e5f") == "a UUID"
     assert nf.value_kind("123456") == "a number"
+
+
+JSF_PAGE = ('<html><body><form id="main" method="post" action="/workspace.xhtml">'
+            '<input type="hidden" name="javax.faces.ViewState" value="-1234567890:987654321">'
+            "</form></body></html>")  # fmt: skip
+PARTIAL_ANSWER = ('<?xml version="1.0" encoding="UTF-8"?><partial-response><changes>'
+                  '<update id="main:cases"><![CDATA[<div id="main:cases"><h2>Cases</h2></div>]]>'
+                  '</update><update id="j_id1:javax.faces.ViewState:0"><![CDATA[-555:777888999]]>'
+                  "</update><eval><![CDATA[PF('casesDlg').show();]]></eval>"
+                  '<extension ln="primefaces" type="args">{"validationFailed":true}</extension>'
+                  "</changes></partial-response>")  # fmt: skip
+
+
+def jsf_post(n: float, state: str) -> dict:
+    form = (f"javax.faces.partial.ajax=true&javax.faces.source=main%3AopenCase&"
+            f"javax.faces.partial.execute=main%3AopenCase&javax.faces.partial.render=main%3Acases"
+            f"&main=main&main%3Aq=Margarethe&javax.faces.ViewState={state}")  # fmt: skip
+    return entry(n, "POST", f"{ORIGIN}/workspace.xhtml", mime="text/xml", body=PARTIAL_ANSWER,
+                 req={"Faces-Request": "partial/ajax"},
+                 post={"mimeType": "application/x-www-form-urlencoded; charset=UTF-8",
+                       "text": form})  # fmt: skip
+
+
+def test_jsf_partial_requests_and_answers_are_described_by_client_id(tmp_path):
+    entries = [entry(0, "GET", f"{ORIGIN}/login.xhtml", mime="text/html", body=JSF_PAGE,
+                     req={"Sec-Fetch-Dest": "document"}),
+               jsf_post(1, "-1234567890%3A987654321"), jsf_post(2, "-555%3A777888999")]  # fmt: skip
+    ctx = fake_ctx(tmp_path, entries)
+    eps = {"post-workspace-xhtml.json": {"method": "POST", "path": "/workspace.xhtml",
+                                         "calls": [], "responses": {}}}  # fmt: skip
+    found = nf.build([ctx], eps)
+    facts = found["endpoints"]["post-workspace-xhtml.json"]
+    body = facts["body"]
+    assert body["format"] == "JSF partial request (ajax)"
+    assert body["source"] == "main:openCase" and body["render"] == ["main:cases"]
+    assert body["fields"] == ["main", "main:q"] and "javax.faces.ViewState" in body["faces_fields"]
+    answer = facts["answers"]["200"]["jsf_partial_response"]
+    assert answer["updates"] == ["main:cases"] and answer["ignored"] == [
+        "j_id1:javax.faces.ViewState:0"]  # fmt: skip
+    assert answer["scripts_run"] == ["PF('...').show"] and answer["callback_args"] == [
+        "validationFailed"]  # fmt: skip
+    assert answer["validation_failed"] == "2 of 2 answer(s)"
+    csrf = {c["comes_from"] for c in facts["csrf"]}
+    assert "the hidden field `javax.faces.ViewState` of the page `/login.xhtml`" in csrf
+    assert "POST /workspace.xhtml partial answer `<update id=...ViewState>`" in csrf
+    assert facts["request_headers"]["Faces-Request"].startswith("the same on every call")
+    text = json.dumps(found["endpoints"]) + json.dumps(found["network"])
+    assert "987654321" not in text and "777888999" not in text and "Margarethe" not in text
+    lines = " | ".join(nf.endpoint_lines(facts))
+    assert "is a JSF partial request (ajax): source `main:openCase`" in lines
+    assert "JSF partial response updating `main:cases`" in lines
+    assert nf.extend(tmp_path, "jsf", [ctx], {"endpoints": eps}) == []

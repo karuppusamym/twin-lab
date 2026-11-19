@@ -58,7 +58,9 @@ BROWSER_HEADERS = {
     "purpose", "sec-purpose",
 }  # fmt: skip
 CSRF_NAME = re.compile(
-    r"csrf|xsrf|authenticity[-_]?token|requestverificationtoken|^_?token$|anti[-_]?forgery", re.I
+    r"csrf|xsrf|authenticity[-_]?token|requestverificationtoken|^_?token$|anti[-_]?forgery|"
+    r"faces\.viewstate$",
+    re.I,
 )
 CODE_TOKEN = re.compile(r"^[A-Za-z][\w.:-]{0,40}$")
 FIELD = re.compile(r"^[A-Za-z_$][\w$-]{0,63}$")
@@ -605,7 +607,63 @@ def _multipart(r: Raw, uploads: list[dict]) -> dict:
 
 
 def _field_name(name: str) -> str:
-    return name if FIELD.match(name.replace("[", "").replace("]", "")) else "{field}"
+    """A form or query name as written (JSF writes client ids: `main:cases`, `javax.faces.*`),
+    or `{field}` when it is not shaped like a name (a value used as a key)."""
+    plain = name.replace("[", "").replace("]", "")
+    return name if FIELD.match(plain) or FORM_NAME.match(plain) else "{field}"
+
+
+FORM_NAME = re.compile(r"^[A-Za-z_$][\w$.:-]{0,127}$")
+FACES = re.compile(r"^(?:javax|jakarta)\.faces\.")
+
+
+def jsf_request(form: dict[str, str]) -> dict | None:
+    """A JSF postback by its form: a partial (ajax) request with the component that sent it, its
+    event and the client ids it executed and rendered, or a full postback; the form's own
+    fields by name. `javax.faces.ViewState` is the view's state and anti-forgery token: never
+    its value (see `csrf`)."""
+    from labctl import jsfviews
+
+    names = list(form)
+    if not any(FACES.match(n) for n in names):
+        return None
+    ajax = any(n.endswith("faces.partial.ajax") for n in names)
+    out: dict = {"format": "JSF partial request (ajax)" if ajax else "JSF postback (whole form)"}
+    for name in jsfviews.FACES_PARAMS:
+        v = form.get(f"javax.faces.{name}") or form.get(f"jakarta.faces.{name}")
+        if v:
+            key = name.replace("partial.", "").replace("behavior.", "")
+            ids = [x for x in v.split() if x.startswith("@") or FORM_NAME.match(x)]
+            out[key] = ids[0] if key in ("source", "event") and ids else ids
+    out["fields"] = [_field_name(n) for n in names if not FACES.match(n)]
+    out["faces_fields"] = [n for n in names if FACES.match(n)]
+    return out
+
+
+def jsf_answers(group: list[Raw]) -> dict | None:
+    """What the JSF partial responses of one status did, together (labctl.jsfviews)."""
+    from labctl import jsfviews
+
+    done = [d for d in (jsfviews.parse_partial(r.text) for r in group) if d is not None]
+    if not done:
+        return None
+    out: dict = {"answers": len(done),
+                 "updates": sorted({u["id"] for d in done for u in d["updates"]}),
+                 "ignored": sorted({i for d in done for i in d["ignored"]})}  # fmt: skip
+    evals = sorted({c for d in done for e in d["evals"] for c in e})
+    if evals:
+        out["scripts_run"] = evals
+    for key in ("redirect", "error"):
+        vals = sorted({d[key] for d in done if d.get(key)})
+        if vals:
+            out[key] = vals
+    args = sorted({a for d in done for a in d.get("callback_args") or []})
+    if args:
+        out["callback_args"] = args
+    failed = sum(1 for d in done if d.get("validation_failed"))
+    if failed:
+        out["validation_failed"] = f"{failed} of {len(done)} answer(s)"
+    return out
 
 
 def _soap(r: Raw) -> dict | None:
@@ -643,7 +701,11 @@ def body_format(r: Raw, uploads: list[dict]) -> dict | None:
             return {"format": "JSON-RPC", "batch": isinstance(body, list)}
         return {"format": "json", "top": "array" if isinstance(body, list) else "object"}
     if r.req_mime == "application/x-www-form-urlencoded":
-        names = [_field_name(k) for k, _ in parse_qsl(r.post_text or "", keep_blank_values=True)]
+        pairs = parse_qsl(r.post_text or "", keep_blank_values=True)
+        jsf = jsf_request(dict(pairs))
+        if jsf:
+            return jsf
+        names = [_field_name(k) for k, _ in pairs]
         return {"format": "application/x-www-form-urlencoded", "fields": list(dict.fromkeys(names))}
     soap = _soap(r)
     if soap:
@@ -669,6 +731,15 @@ def _sources(raws: list[Raw]):
             continue
         k = kind_of(r)
         if k == "api" and r.status < 400:
+            # a JSF partial response hands the page the view state its next request sends
+            for m in re.finditer(r'<update\s+id="([^"]*ViewState[^"]*)"\s*>\s*(?:<!\[CDATA\[)?'
+                                 r"([^<\]]+)", r.text or ""):  # fmt: skip
+                if _flowing(m.group(2).strip()):
+                    yield (
+                        r.started,
+                        m.group(2).strip(),
+                        (f"{r.key} partial answer `<update id=...ViewState>`"),
+                    )
             data = _json(r.text)
             for i, (path, v) in enumerate(_leaves(data)):
                 if i >= MAX_LEAVES:
@@ -960,6 +1031,9 @@ def endpoint_facts(key: str, ep: _Ep, doc: dict | None, ctx_steps, page_origins,
                         and n not in ("x-powered-by", "x-aspnet-version")})  # fmt: skip
         if extra:
             info["headers"] = {h: _resp_header_kind(h, group) for h in extra}
+        jsf = jsf_answers(group)
+        if jsf:
+            info["jsf_partial_response"] = jsf
         empty = all((r.size or 0) <= 0 and not r.text for r in group)
         if empty:
             info["body"] = "empty"
@@ -1670,6 +1744,12 @@ def endpoint_lines(net: dict | None) -> list[str]:
                 bits.append(f"size {v['size_class']}")
             parts.append(f"`{k}` ({', '.join(bits)})")
         out.append("sends multipart/form-data: " + ", ".join(parts))
+    elif str(body.get("format") or "").startswith("JSF"):
+        bits = [f"{k} `{v}`" if isinstance(v, str) else f"{k} " + ", ".join(f"`{x}`" for x in v)
+                for k in ("source", "event", "execute", "render") if (v := body.get(k))]  # fmt: skip
+        out.append(f"is a {body['format']}" + (": " + "; ".join(bits) if bits else "")
+                   + "; the form's fields: " + (", ".join(f"`{f}`" for f in body.get("fields") or [])
+                                               or "none"))  # fmt: skip
     elif body.get("format") in ("GraphQL", "JSON-RPC", "SOAP", "XML"):
         ops = (net.get("graphql") or {}).get("operations") or (net.get("json_rpc") or {}).get(
             "methods") or {}  # fmt: skip
@@ -1689,6 +1769,13 @@ def endpoint_lines(net: dict | None) -> list[str]:
             bits.append("compressed " + ", ".join(a["compression"]))
         for h, what in (a.get("headers") or {}).items():
             bits.append(f"header `{h}`: {what}")
+        jsf = a.get("jsf_partial_response") or {}
+        if jsf:
+            bits.append("JSF partial response updating " + (", ".join(
+                f"`{u}`" for u in jsf.get("updates") or []) or "nothing")
+                + (f", running {', '.join(jsf['scripts_run'])}" if jsf.get("scripts_run") else "")
+                + (f", validation failed in {jsf['validation_failed']}"
+                   if jsf.get("validation_failed") else ""))  # fmt: skip
         if bits:
             out.append(f"answer `{status}`: " + "; ".join(bits))
     paging = net.get("paging") or {}

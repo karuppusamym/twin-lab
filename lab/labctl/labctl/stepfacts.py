@@ -81,7 +81,7 @@ class Facts:
 
 def facts(part: Path) -> Facts:
     """Everything above for one recording folder (an app's part of a recording)."""
-    from labctl import har
+    from labctl import har, jsfviews
     from labctl.har import _safe_selector
 
     part = Path(part)
@@ -93,6 +93,7 @@ def facts(part: Path) -> Facts:
     doms = {s["seq"]: t for s in raw if (t := _read(part, s.get("dom"))) is not None}
     befores = {s["seq"]: t for s in raw if (t := _read(part, s.get("dom_before"))) is not None}
     known, vocab = har.page_knowledge([*doms.values(), *befores.values()], entries)
+    views = jsfviews.step_views(raw, doms)  # JSF: the view a page shows, not the address bar
     out = Facts(part.name)
 
     def messages(html: str | None) -> set[tuple[str, str]]:
@@ -124,7 +125,7 @@ def facts(part: Path) -> Facts:
     screen_before: str | None = None
     for i, s in enumerate(raw):
         action = str(s.get("action") or "")
-        here = _pattern(s.get("url"))
+        here = views.get(s.get("seq")) or _pattern(s.get("url"))
         reqs = [f"{e.method} {sanitize.route_pattern(e.path)} {e.status}" for e in owner.get(i, [])
                 if e.kind != "asset"]  # fmt: skip
         row = {"n": s.get("seq"), "action": action, "screen": screen_before or here}

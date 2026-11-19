@@ -440,7 +440,10 @@ def _track(page) -> None:
     page.on("requestfailed", end)
 
 
-def _settle(page, settle_ms: int) -> None:
+def _settle(page, settle_ms: int, page_work: bool = True) -> None:
+    """Wait until no request is in flight for `settle_ms`; with `page_work`, also while the page
+    holds a request back (`_page_busy`). A typed value's snapshot is the page when the person
+    moved on, not a settled page: what the page does a moment after typing is not waited for."""
     try:
         page.wait_for_load_state("networkidle", timeout=5000)
     except Exception:  # noqa: BLE001 - a page that never goes idle is still compared
@@ -452,7 +455,19 @@ def _settle(page, settle_ms: int) -> None:
     while quiet < settle_ms and waited < SETTLE_MAX_MS:
         page.wait_for_timeout(50)
         waited += 50
-        quiet = quiet + 50 if page._tl_inflight == 0 else 0
+        idle = page._tl_inflight == 0 and not (page_work and _page_busy(page))
+        quiet = quiet + 50 if idle else 0
+
+
+def _page_busy(page) -> bool:
+    """PrimeFaces holds a request back (a filter's delay, its queue) or jQuery animates: no
+    request is in flight yet, but the page is not done (labctl.jsfviews.BUSY_JS, read-only)."""
+    from labctl import jsfviews
+
+    try:
+        return bool(page.evaluate(jsfviews.BUSY_JS))
+    except Exception:  # noqa: BLE001 - a page that is navigating is not busy in this sense
+        return False
 
 
 class MissingValue(Exception):  # noqa: N818 - reported as BLOCKED
@@ -1255,7 +1270,7 @@ def replay(
                 if step.action == "tab-close" or page is None or page.is_closed():
                     reached.add(step.seq)
                     continue
-                _settle(page, settle_ms)
+                _settle(page, settle_ms, page_work=step.action != "type")
                 reached.add(step.seq)
                 report.replica_origin = _origin(page.url) or None
                 if step.seq in deferred:

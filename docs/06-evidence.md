@@ -357,6 +357,98 @@ navigations; server-side rules and where a server page's command button leads (J
 in the server's code); names the build minified (a component is then named by its selector);
 addresses and texts built at run time (their variable parts are `{name}`).
 
+### JSF and PrimeFaces: views, sub-pages and partial responses
+
+Office JSF applications break "one address, one screen". A postback is often answered with the
+next view (a forward, no redirect), so the address bar keeps the page before: the workspace shows
+under `/login.xhtml`. And most of the work happens inside one view: ajax re-renders a region (a
+dynamic `ui:include`), a tab, a wizard step, an accordion panel, a dialog, a dialog-framework page
+in an iframe, or a data table's page, sort, filter, selection and expansion, while the address
+never changes. `labctl/jsfviews.py` reads both from what the recording already holds, running none
+of the page's code:
+
+- **The screen of a step is its view**, not the address: the address its JSF forms post to (a JSF
+  form posts to its own view; frames' documents left out), else PrimeFaces'
+  `PrimeFaces.settings.viewId`; a step without a snapshot takes the view of the last page at the
+  same address. The step list, the screens and their snapshots, the transitions and each call's
+  screen follow it (`stepfacts`, `har.analyse`, `navmap`). `navigation.json` lists the page loads
+  whose address showed another page (`jsf.address_lag`), and marks such a transition
+  `forward: true` with `address_after`: build it the same way, a postback answered with the next
+  view.
+- **Partial responses** (`<partial-response>`, which the HAR holds in full): per ajax request the
+  component that sent it, its event, what it asked to execute and render, and what the answer
+  did: the regions it updated (client ids), the scripts it ran (by the functions they call:
+  `PrimeFaces.openDialog`), a redirect, an error, PrimeFaces' callback arguments
+  (`validationFailed`). `navigation.json` gives them per element use (`jsf_ajax`) and in all
+  (`jsf.partial_actions`); the view state and head resources they also carried are listed as
+  `jsf.ignored` (the rebuilt application makes its own).
+- **States inside a view** are sub-views of their screen: `sub-page (ajax region)` (a region a
+  partial response replaced with new HTML holding a heading; one state per set of components it
+  holds), `tab`, `wizard step`, `accordion panel`, `dialog`, `confirm dialog`,
+  `dialog-framework page (iframe)` (with the page it shows), `table page`, `table sort`,
+  `table result (filter)`, `table row expansion`, `table row selection`. Each has the steps and
+  elements that opened and closed it, what that action re-rendered, and its own value-free
+  snapshot (`apps/<app>/pages/<screen>--NN-<kind>-<title>.html`, sanitised like the screen's page
+  file); the screen's page document has a section per state. PrimeFaces hides a dialog by
+  `aria-hidden` and empties its `role`: both are read.
+- **PrimeFaces widgets** in `codemap.json` (`widgets`): every `PrimeFaces.cw(...)` of the pages and
+  partial responses, by type, widget variable, client id and option names (never their values).
+- **The recorder's settle rule** also waits while PrimeFaces still holds a request (its ajax queue,
+  a data table's filter waiting out its delay) or a frame of the page's origin is still loading
+  (a dialog-framework page), and up to 3 s while jQuery animates. These are read-only looks at the
+  page. The replay waits the same way before it compares.
+- A click on a PrimeFaces table row is named by a record locator that finds the row again: the
+  identified `<tbody>` itself is the list, striping classes (`even`, `odd`) and PrimeFaces' state
+  classes (`ui-state-*`) do not narrow it, and a cell is named by its place in the row. The replay
+  does not compare PrimeFaces' pointer classes (`ui-state-hover`, `ui-state-focus`).
+
+Proven on `reference/web/caseboard-primefaces` (Mojarra 2.3.9, PrimeFaces 10.0.0; its
+`certify_local.py` and `tests/test_reference_primefaces.py`). Not covered: a forward to a view
+with no JSF form on it (the address is then the only clue), sub-pages that no partial response
+replaced (a region swapped by plain script), PrimeFaces' client-side state saving, `p:fileUpload`,
+push (`p:socket`), and the server's navigation rules themselves (`faces-config.xml` outcomes are
+code the HAR does not hold). The recorder takes every typed value out of what it writes, ids and
+attribute values included: a value that an id or a label also holds is masked there too.
+
+### What the application's code defines
+
+The HAR also holds the code the browser downloaded: the pages, the scripts, the style sheets
+and the JSON files. That code names much more than the recording visited, so `labctl brief`
+reads it, without running any of it, into `apps/<app>/codemap.json` (`labctl/codemap.py`):
+
+- every route of the route table (Angular, React Router, Vue Router; for server-rendered
+  applications such as JSF, the pages and their links), with its guards, lazy chunk, redirect
+  and title, and whether the recording visited it;
+- the menus, links, tabs and dialogs of the templates, with the route each belongs to and the
+  element that opens or closes a dialog where the code says so;
+- every API call the code can make, *called in the recording* or *in code, not called*;
+- the interface texts (translation files), lists of values and titles, each through the same
+  data checks as the snapshots: a text that may be data is dropped;
+- the third-party libraries, named with their version, not analysed.
+
+The brief's *What the application's code defines* tells the builder to build every route at
+least as a reachable page, wired as the code shows, and to report a screen only the code has as
+reconstructed. `navigation.json` lists those screens too, and says of each transition whether
+the recording, a link on a recorded page or the code shows it.
+
+A lazy chunk of a route nobody opened was never downloaded. `labctl evidence fetch-code
+<recording>` lists such files; with `--yes` it fetches them: only `.js`, `.mjs`, `.css` and
+`.json` files of the application's own origin, with GET, never a page or an API address,
+never a redirect, the answer's content type checked, at most one request a second by default
+(`--delay`, at least 0.2 s), stopping at a 429 or 503, and without a session unless the person
+passes the recorder's saved browser state (`--storage-state`). The files stay beside the
+recording (`<recording>/code/`), never in a package; regenerate the brief to use them.
+
+No script is carried in a package, only the map. A value that looks like a secret (a key, a
+token, a password, a private key, a connection string, a session identifier) or a host name
+other than the application's own is never kept: a map that holds one is not written, and
+`labctl build package` refuses one.
+
+What the code cannot tell: what a handler or a service computes beyond its calls and
+navigations; server-side rules and where a server page's command button leads (JSF outcomes are
+in the server's code); names the build minified (a component is then named by its selector);
+addresses and texts built at run time (their variable parts are `{name}`).
+
 ### Field rules and page behaviour
 
 A recording shows only the rules a person happened to trigger. The rest is in the page's HTML

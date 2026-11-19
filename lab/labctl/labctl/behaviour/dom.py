@@ -19,6 +19,11 @@ SKIP_TEXT = {"script", "style", "template", "noscript"}
 INTERACTIVE = {"input", "select", "textarea", "button"}
 FORM_TAGS = {"input", "select", "textarea"}
 TEXT_CAP = 200
+# Classes a widget library sets while the pointer is over an element or it has the keyboard focus
+# (PrimeFaces, jQuery UI): where the mouse happens to be, not the page's state; and the mark of a
+# field that holds a value, which PrimeFaces sets when the field is left (the value itself is
+# compared). Not compared.
+POINTER_CLASSES = {"ui-state-hover", "ui-state-focus", "ui-state-filled"}
 
 # Run as an init script before the page's own code: remembers every shadow root, closed ones
 # included (page code cannot reach a closed root afterwards, and neither could a recorder).
@@ -322,7 +327,7 @@ def _state(node: Node, key: str) -> ElementState:
         key=key,
         tag=node.tag,
         id=node.id,
-        classes=node.classes,
+        classes=[c for c in node.classes if c not in POINTER_CLASSES],
         visible=_visible(node),
         enabled=_enabled(node),
         interactive=_is_interactive(node),
@@ -378,7 +383,7 @@ def snapshot(html: str) -> Snapshot:
             elements[key] = _state(node, key)
         if interactive:
             sig = node.tag + (f"#{node.id}" if node.id else "")
-            sig += "".join(f".{c}" for c in node.classes)
+            sig += "".join(f".{c}" for c in node.classes if c not in POINTER_CLASSES)
             signatures.append(sig)
     return Snapshot(elements=elements, signatures=signatures)
 

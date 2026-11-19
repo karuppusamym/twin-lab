@@ -399,3 +399,34 @@ def test_a_long_session_grows_per_template_not_per_instance(tmp_path, shop):
         assert len([n for n in long.texts if n.startswith(prefix)]) <= len(
             [n for n in shop.texts if n.startswith(prefix)]), prefix  # fmt: skip
     assert long.zip.stat().st_size < 2 * shop.zip.stat().st_size
+
+
+def test_a_jsf_view_is_one_screen_never_a_template_instance(tmp_path):
+    def view(name: str, body: str) -> str:
+        return (f'<html><body>{LAYOUT}<form id="main" method="post" action="/{name}.xhtml">'
+                f'<input type="hidden" name="javax.faces.ViewState" value="1:2">{body}</form>'
+                f"{FOOT}</body></html>")  # fmt: skip
+
+    same = "<table id='main:cases'><tr><td>x</td></tr></table>"
+    pages = {f"/admin/{n}.xhtml": view(f"admin/{n}", same) for n in ("users", "roles", "groups")}
+    assert tp.learn(pages)  # three views of one structure would be a template...
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    entries = [{"startedDateTime": "2026-11-18T09:00:00Z", "time": 5,
+                "request": {"method": "GET", "url": f"https://jsf.example.test{p}", "headers": []},
+                "response": {"status": 200, "headers": [],
+                             "content": {"mimeType": "text/html", "text": h}}}
+               for p, h in pages.items()]  # fmt: skip
+    (rec / "recording.har").write_text(json.dumps({"log": {"entries": entries}}), "utf-8")
+    assert tp._visited([rec]) == {} and tp.rules_for(tmp_path, "jsf", [rec]) == []  # ...not JSF
+    # the address bar keeps /login.xhtml after the sign-in forward: the screen is the view
+    raw = [{"seq": 1, "url": "https://jsf.example.test/login.xhtml", "action": "goto"},
+           {"seq": 2, "url": "https://jsf.example.test/login.xhtml", "action": "click"}]  # fmt: skip
+    doms = {1: view("login", "<input id='main:user'>"), 2: view("workspace", same)}
+    part = SimpleNamespace(raw=raw, doms=doms, words=set(), exchanges=[])
+    ctx = SimpleNamespace(part=part, known=set(), vocab=set(), name="r")
+    doc = tp.build(tmp_path, "jsf", [ctx], {"screens": []}, None)
+    by = {t["screen"]: t for t in doc["templates"]}
+    assert set(by) == {"/login.xhtml", "/workspace.xhtml"}
+    assert by["/workspace.xhtml"]["instances"] == 1 and "path_parameters" not in by[
+        "/workspace.xhtml"]  # fmt: skip
