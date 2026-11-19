@@ -125,13 +125,18 @@ def test_the_step_before_typing_is_snapshotted_before_the_typing_shows(recorded)
 def test_a_type_step_says_when_its_field_was_left_and_the_replay_leaves_it_too(recorded):
     rec, base, steps = recorded
     first, second, last = [s for s in steps if s["action"] == "type"]
-    # The focus had gone on (to the next field, to the button) when the snapshot was taken:
-    # what leaving does is in the snapshot.
-    assert first.get("left") is True and second.get("left") is True
-    assert "input#first.dirty.visited" in signatures(rec, first)
+    # The focus had gone on (to the next field, to the button) when the snapshot was taken.
+    # A step says its field was left exactly when its snapshot shows what leaving did. The
+    # second field is left by a person's click (held for 80 ms): what leaving does is rendered
+    # by then. The first is left by typing into the next field at once: on a fast machine its
+    # snapshot shows it left, on a busy one not yet, and the step says so either way.
+    first_left = "input#first.dirty.visited" in signatures(rec, first)
+    assert bool(first.get("left")) == first_left
+    assert first_left or "input#first.dirty.untouched" in signatures(rec, first)
+    assert second.get("left") is True
     assert "input#second.dirty.visited" in signatures(rec, second)
     assert last.get("left") is None  # the recording ended with the focus in the field
-    assert [s.left for s in load(rec).steps if s.action == "type"] == [True, True, False]
+    assert [s.left for s in load(rec).steps if s.action == "type"] == [first_left, True, False]
 
     server, fresh = serve()
     try:
