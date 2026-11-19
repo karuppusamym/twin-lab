@@ -313,6 +313,10 @@ of the data:
   names, code lists, identifiers the application generated, paging numbers and the
   application's own error messages are kept; every other value is replaced, and the written
   files are checked against the HAR (`labctl.apicatalog.leaks`).
+  The order of a list's rows (`api/catalogue.json` `lists`) is stated as a rule only when two
+  or more answers agree on a key that is not random; otherwise it says `not stable (one
+  answer)` or `not stable (random keys)` (a UUID, a token or a hash orders nothing), and the
+  endpoint's notes say the examples' order is one possible order, not a rule.
 - `apps/<app>/navigation.json`: every screen, each way in and out, dialogs, in-page tabs,
   frames and popup windows, links seen and not visited, and every interactive element with
   what happened when the recording used it, or "seen, not used".

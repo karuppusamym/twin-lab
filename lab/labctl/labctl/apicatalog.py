@@ -983,6 +983,23 @@ ABOUT = (
 )
 
 
+def order_note(exs) -> str | None:
+    """The endpoint's note when the answers list rows whose order is not stable (one answer,
+    or a key with random values): the examples show one possible order, not a rule."""
+    from labctl import listorder
+
+    listed = [items for e in exs if 200 <= e.status < 300
+              and (items := seedplan._items(e.data)) and len(items) > 1]  # fmt: skip
+    if not listed:
+        return None
+    order = listorder.judge(listed)
+    if order.stable:
+        return None
+    return (f"The order of the rows is {order.label}: {order.reason}. The examples show one "
+            "possible order (their synthetic ids need not sort the way the rows are listed); "
+            "answer in any order, and never rely on it.")  # fmt: skip
+
+
 def _trigger_text(t: dict) -> str:
     if t["action"] == "page load":
         text = f"page load of {t.get('screen')}"
@@ -1124,6 +1141,9 @@ def _endpoint_doc(method, route, ep, exs, kept, id_patterns, shapes, world: Worl
                      "order, with synthetic values. An order that followed a masked field (a "
                      "title, a name) therefore does not hold in the example: order the rows by "
                      "the rule in api/catalogue.json `lists`, not by the example.")  # fmt: skip
+    unstable = order_note(exs)
+    if unstable:
+        notes.append(unstable)
     parent = _parent_of(route)
     if parent and table:
         notes.append(f"A row of `{table}` belongs to one `{parent}` record (the `{{...}}` of the "
@@ -1232,28 +1252,22 @@ def list_facts(ctxs: list[Ctx], kept: Kept) -> list[dict]:
 
 
 def observed_order(lists: list[list[dict]]) -> str:
-    """The order all the answers' rows share, by a field: `rows ordered by `id` ascending`, or
-    that none was shared. Field names only."""
+    """The order all the answers' rows share, by a field: `rows ordered by `id` ascending`,
+    `not stable (one answer)` / `not stable (random keys)` when one answer or a key with random
+    values (UUIDs, tokens, hashes) is all that shows it (`labctl.listorder`), or that none was
+    shared. Field names only."""
+    from labctl import listorder
 
-    def sortable(v):
-        if isinstance(v, bool) or v is None:
-            return None
-        if isinstance(v, (int, float)):
-            return (0, float(v))
-        if isinstance(v, str) and re.fullmatch(r"-?\d+(\.\d+)?", v.strip()):
-            return (0, float(v))
-        return (1, v.lower()) if isinstance(v, str) else None
-
-    keys = [k for k in lists[0][0] if all(sortable(r.get(k)) is not None for x in lists for r in x)]
-    for k in sorted(keys, key=lambda k: (str(k).lower() != "id", str(k))):
-        for name, rev in (("ascending", False), ("descending", True)):
-            if all([sortable(r[k]) for r in x] == sorted((sortable(r[k]) for r in x), reverse=rev)
-                   and len({sortable(r[k]) for r in x}) > 1 for x in lists):  # fmt: skip
-                return f"rows ordered by `{k}` {name} in every recorded answer"
-    return (
-        "no field orders the rows in every recorded answer: answer them in the order they "
-        "were stored (the recorded calls show it)"
-    )
+    got = listorder.judge(lists)
+    if got.stable:
+        return got.label
+    if got.label.endswith("(no key orders the rows)"):
+        return (
+            "no field orders the rows in every recorded answer: answer them in the order they "
+            "were stored (the recorded calls show it)"
+        )
+    return (f"{got.label}: {got.reason}. Answer in any order; the examples' order is not a rule "
+            "and a check on this list must not pin one")  # fmt: skip
 
 
 def _param_rule(name: str, value: str, calls: list, kept: Kept) -> str | None:
@@ -1714,7 +1728,8 @@ def brief_section(app: str, done: dict) -> str:
                        + (f"; beside the rows it answers {', '.join(f'`{b}`' for b in beside)}"
                           if beside else "") + "):")  # fmt: skip
             if x.get("order"):
-                out.append(f"  - every answer: {x['order']}.")
+                said = "order" if x["order"].startswith("not stable") else "every answer"
+                out.append(f"  - {said}: {x['order']}.")
             for name, info in x["parameters"].items():
                 line = f"  - `{name}`"
                 if info.get("control"):
