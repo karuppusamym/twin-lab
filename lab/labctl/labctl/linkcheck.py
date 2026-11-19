@@ -332,8 +332,10 @@ def field_names(tree) -> frozenset:
 def _has_password(tree) -> bool:
     from labctl.behaviour import dom as domlib
 
+    # a password field the screen shows: a closed modal's (Bootstrap keeps its Log in dialog in
+    # every page) does not make the screen a sign-in screen; an open one does
     return any(n.tag == "input" and (n.attrs.get("type") or "").lower() == "password"
-               for n in domlib._walk(tree))  # fmt: skip
+               and domlib.shown(n) for n in domlib._walk(tree))  # fmt: skip
 
 
 def _link_text(node) -> str:

@@ -274,6 +274,47 @@ def _visible(node: Node) -> bool:
     return True
 
 
+HIDING_CLASSES = {"hidden", "d-none", "vjs-hidden", "is-hidden", "invisible"}
+
+
+def is_dialog(node: Node) -> bool:
+    """A dialog by its markup: `<dialog>`, role dialog/alertdialog, `aria-modal`, or a
+    Bootstrap/Foundation-style `modal` container."""
+    role = (node.attrs.get("role") or "").lower()
+    classes = set((node.attrs.get("class") or "").split())
+    return (node.tag == "dialog" or role in ("dialog", "alertdialog")
+            or node.attrs.get("aria-modal") == "true" or "modal" in classes)  # fmt: skip
+
+
+def closed_by_markup(node: Node) -> bool:
+    """Whether an element's own markup says it is not drawn, beyond `hidden` and inline styles:
+    a hiding class (`d-none`, `vjs-hidden`), a `<dialog>` without `open`, and a dialog that is
+    `aria-hidden="true"` or a `modal` without `show`/`in` and not displayed by its style (how
+    Bootstrap keeps every modal in the page, closed)."""
+    classes = set((node.attrs.get("class") or "").split())
+    if classes & HIDING_CLASSES:
+        return True
+    if node.tag == "dialog":
+        return "open" not in node.attrs
+    if not is_dialog(node):
+        return False
+    if (node.attrs.get("aria-hidden") or "").lower() == "true":
+        return True
+    style = (node.attrs.get("style") or "").replace(" ", "").lower()
+    return "modal" in classes and not classes & {"show", "in"} and "display:block" not in style
+
+
+def shown(node: Node) -> bool:
+    """Visible as the page drew it: `_visible`, and no element on the way up closed by its
+    markup (`closed_by_markup`): a closed modal's fields are not on the screen."""
+    cur: Node | None = node
+    while cur is not None and cur.tag != "#document":
+        if _hidden_self(cur) or closed_by_markup(cur):
+            return False
+        cur = cur.parent
+    return True
+
+
 def _enabled(node: Node) -> bool:
     cur: Node | None = node
     while cur is not None and cur.tag != "#document":
