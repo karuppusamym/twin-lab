@@ -177,8 +177,10 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     ctxs = done.get("ctxs") or []
     if not ctxs:
         (out / navmap.FILE).unlink(missing_ok=True)
+        (out / signin.FILE).unlink(missing_ok=True)
         return text
     found = signin.observe(ctxs)
+    signin.write_facts(root, app_id, found)
     wrote = None
     if found and state.get("tables"):
         wrote = signin.write(root, app_id, found, state.get("taken") or {},

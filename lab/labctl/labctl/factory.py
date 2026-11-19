@@ -347,7 +347,7 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
              "behaviours.json", "pages", "steps", "look", "api",
              "navigation.json", "codemap.json", "rules.json",
-             "scripts")  # fmt: skip
+             "scripts", "session.json")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:

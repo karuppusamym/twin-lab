@@ -8,9 +8,10 @@ Rules (AGENTS.md states them; this makes CI enforce them):
 2. Inputs stay as generated, on AI-built pull requests (branch `devin/...` or `build/...`, or label `ai-built`).
    The builder may not edit what the factory generated from the evidence: `BRIEF.md`,
    `model.yaml`, `db/schema.sql`, `db/seed.sql` (and `db/seed.json`: the seed the acceptance
-   replay depends on), `behaviours.json`, `rules.json` (the field rules), `pages/`, `look/`,
-   `scripts/` (the application's scripts, carried on the owner's request), or anything in
-   `app.yaml` outside its `run:` section.
+   replay depends on), `behaviours.json`, `rules.json` (the field rules), `session.json` (the
+   sign-in and cookie facts), `pages/`, `look/`, `scripts/` (the application's scripts, carried
+   on the owner's request), `spec/` (the package's build documents), or anything in `app.yaml`
+   outside its `run:` section.
 3. Independent oracle, on AI-built pull requests. The checks that judge the app (`automations/`,
    `flows/`, `lab/`, `conditions/`) may not change in the same pull request as an app. Otherwise
    the same author can make both wrong in the same way and every check still passes. Override with
@@ -32,7 +33,7 @@ import yaml
 
 APPROVED = {"owner_approved", "reference_verified"}
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
-             "behaviours.json", "codemap.json", "rules.json")  # fmt: skip
+             "behaviours.json", "codemap.json", "rules.json", "session.json")  # fmt: skip
 GENERATED_DIRS = ("pages/", "look/", "scripts/")
 ORACLES = ("automations/", "flows/", "lab/", "conditions/")
 APP_FILE = re.compile(r"^apps/([^/]+)/(.+)$")

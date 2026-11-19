@@ -98,6 +98,9 @@ class Ex:
     cookies_sent: tuple = ()
     cookies_set: tuple = ()
     auth_scheme: str = ""
+    # The cookies the response set, by name, with their attributes (path, domain relative to the
+    # host, flags, lifetime as a duration): sanitize.cookie_attributes. Never a value.
+    cookie_attrs: tuple = ()
 
 
 @dataclass
@@ -208,6 +211,7 @@ def _extras(entry: dict, post: dict, content: dict) -> dict:
         "cookies_sent": tuple(sorted(n for n in sent if sanitize.COOKIE_NAME.match(n))),
         "cookies_set": tuple(sorted(n for n in made if sanitize.COOKIE_NAME.match(n))),
         "auth_scheme": scheme if re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{1,20}", scheme) else "",
+        "cookie_attrs": tuple(sanitize.cookie_attributes(entry)),
     }
 
 
