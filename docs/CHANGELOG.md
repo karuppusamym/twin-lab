@@ -146,6 +146,30 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   whether it should lower the status is a decision for a person. The replay loop itself was
   not run in a browser for these cases.
 
+## 2026-11-19 — Code map: library versions from the files, one entry per library and dialog
+Three defects of `codemap.json` found on the Demoblaze recording:
+- Library versions were guessed: Bootstrap was reported as 5.0.0 while its own banner says
+  v4.0.0-alpha.6. A library is now named and dated by `labctl.libraries.identify`, shared by the
+  code map and the page rules (`rules.json` `scripts.libraries`): the version the file's content
+  states comes first (a banner such as `Bootstrap v4.0.0-alpha.6` or `/*! jQuery v3.2.1`,
+  `@version`, a `VERSION = "..."` assignment in a library, JSF's `specversion`); the address is
+  only a fallback, and `version_from` then says it is a guess. A file under `node_modules/` or
+  `bower_components/` is named by its package, so video.js, its HLS plug-in and Tether are no
+  longer analysed as the application's own code.
+- A library was listed twice (its style sheet and its script): one entry per library and
+  version, listing its files; a file that states no version joins its library's only version.
+  The page rules list their libraries the same way (`name`, `version`, `files`).
+- `dialogs` held 47 entries: each page's modals once per page and each browser alert once per
+  script. Each dialog is now listed once with its `routes` and `files`. A third-party widget's
+  own dialogs (video.js `vjs-*` modal dialogs and other media players', inside the player's
+  container or written by the library's script) are left out, with the rule the navigation map
+  already used (`sanitize._player`). Demoblaze: 47 dialogs to 17 (5 modals, 12 alerts), six
+  libraries with their files, Bootstrap 4.0.0-alpha.6.
+- The navigation map already left out a player's dialogs; its sub-views stay per screen, as each
+  screen has its own opening and closing steps.
+- Left open: the media-player class list is the only widget rule; another library's dialog
+  markup in a downloaded page (not from its script) is still listed.
+
 ## 2026-11-18 — The application's map from its code: every route, menu, tab, dialog and call
 A recording shows the screens a person visited; the code the browser downloaded describes the
 whole application. `labctl.codemap` reads it without running it (`labctl.jstokens`, a small
