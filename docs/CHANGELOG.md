@@ -2,6 +2,34 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Typed values: taken out where they are a value, never out of ids
+- The recorder took every typed value out of snapshots, the HAR and locators as a substring, so
+  it also changed ids, classes and names that held it: typing `report` on Caseboard PF turned
+  `main:navReports` into `main:navAs` and broke that element's selector in the rebuild and the
+  replay. One rule now decides (`labctl/typedvalues.py`, used by `recorder._Secrets`, the
+  browser's picture mask `MARK_TYPED_JS`, and the HAR scrub): a typed value is replaced by its
+  shape only where it is a value (text nodes, form values, `title`/`alt`/`placeholder`/
+  `aria-label` and other content attributes, `data-*`, an address's query, fragment and a path
+  segment that is the whole value, JSON strings and numbers, form fields), and only as a whole
+  token (`Reports`, `main:navReports`, `report-row` keep it). `id`, `class`, `name`, `for`,
+  `form`, ARIA id references, test ids and enumerated attributes (`type`, `role`, ...) are never
+  changed by a value inside them; one whose whole value is a typed value becomes the placeholder
+  `tl-typed-a` (`-b`, ... per value) in the snapshot, the step's selector and locators, and the
+  page's scripts and style sheets that name it, and the step says so (`typed_placeholders`:
+  placeholder and the step it was typed at, never the value). The replay tries the placeholder
+  (the rebuilt page) and then the value it types for that step (the application itself), and
+  compares the live page with the placeholder in place (`locate.typed_values`,
+  `fidelity._placed`). The HAR is read by what each string is: markup as markup, JSON as JSON,
+  an address as an address.
+- Caseboard PF's flow filters by `report` again (it typed `missing` to dodge this) and
+  `test_reference_primefaces.py` checks `a#main:navReports` opens the Reports sub-page in the
+  package. Tests: `test_typed_values.py` (a recording typing `report` beside `main:navReports`,
+  a name in a text node, a value inside a class, an id equal to a value, a value in a query,
+  replayed on a fresh copy).
+- Left open: a value the replay must see in the address bar (a typed word in the page's own
+  address) is still compared by its shape and fails the address check, as before; a JSF request
+  parameter that names an id equal to a typed value (`javax.faces.source`) gets its shape, not
+  the placeholder.
 ## 2026-11-18 — Desktop recorder: the four faults the certification runs found
 - WPF and Java Swing are now CAPTURE VERIFIED, as WinForms: all three pass detect, capture (20
   expected actions each) and self-replay (WinForms and WPF 29 of 36 steps verified, 7 covered by

@@ -832,7 +832,7 @@ class _Run:
     def act(self, step: RecStep) -> tuple[str | None, bool]:
         """Perform one step. (what found the target or how it was done, whether it was implied
         by an earlier step rather than performed)."""
-        from labctl.locate import Unresolved, resolve
+        from labctl.locate import Unresolved, resolve, typed_values
 
         if step.action == "tab-open":
             return self._tab_open(step)
@@ -884,7 +884,7 @@ class _Run:
                 raise MissingValue(f"no binding gives the value for step {step.seq} "
                                    f"({step.selector}){shape}: add it to bindings.yaml")  # fmt: skip
         loc, found = resolve(page, step, _record_title(step, self.values, self.bnd),
-                             self.timeout_ms)  # fmt: skip
+                             self.timeout_ms, typed_values(step, self.values))  # fmt: skip
         if loc is None and step.action != "keypress":
             raise Unresolved("the step names no element", [])
         self._arm(page, step)
@@ -1143,6 +1143,7 @@ def replay(
         stopped = True  # nothing runs on a baseline that cannot be applied
     step_by_seq = {s.seq: s for s in rec.steps}
     deferred = _observed_at_navigation(rec)
+    placed = _placed(rec, vals)
 
     def record_title(seq) -> str | None:
         if isinstance(seq, dict):
@@ -1310,7 +1311,10 @@ def replay(
                         problems.append(lost)
                 else:
                     report.compared = True
-                    diffs = compare_dom(expected_html, domlib.page_html(page), step.seq, supplied)
+                    live = domlib.page_html(page)
+                    if placed is not None:  # ids that were a typed value: as recorded
+                        live = placed.redact_html(live)
+                    diffs = compare_dom(expected_html, live, step.seq, supplied)
                     for d in diffs:
                         ex = scope_mod.which(sc, d.element, step.url)
                         if ex is None:
@@ -1608,6 +1612,19 @@ def _wait_address(page, url: str, timeout_ms: int = 5000) -> None:
         if time.monotonic() >= deadline:
             raise _WrongAddress(f"expected {url}, the page is at {page.url}")
         page.wait_for_timeout(50)
+
+
+def _placed(rec: Recording, values: dict[int, str]):
+    """The recorder's rule for typed values (labctl.typedvalues), with the values this replay
+    types, when the recording has an id or name that was a typed value (its placeholder): the
+    live page is compared with those placeholders in place, as the recording has them."""
+    from labctl.locate import typed_values
+    from labctl.typedvalues import TypedValues
+
+    typed: dict[str, str] = {}
+    for step in rec.steps:
+        typed.update(typed_values(step, values))
+    return TypedValues.for_replay(typed) if typed else None
 
 
 def _record_title(step: RecStep, values: dict[int, str], bnd: bindings_mod.Bindings) -> str | None:

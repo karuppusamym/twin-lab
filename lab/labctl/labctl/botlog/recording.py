@@ -74,6 +74,9 @@ class RecStep:
     shadow: str | None = None  # open | closed: the target is inside a shadow root
     surface: str | None = None  # canvas: an action no DOM element describes
     service_worker: str | None = None  # the page registered a service worker
+    # an id or name that was a whole typed value, recorded as its placeholder (labctl.typedvalues):
+    # [{placeholder, typed_at}], never the value
+    typed_placeholders: list[dict] = field(default_factory=list)
 
     @property
     def path(self) -> str | None:
@@ -342,6 +345,12 @@ def _extra(d: dict) -> dict:
         out["locators"] = [_mask_locator(c) for c in locs if isinstance(c, dict) and c.get("kind")]
     if isinstance(d.get("caused_by"), int):
         out["caused_by"] = d["caused_by"]
+    if isinstance(d.get("typed_placeholders"), list):
+        out["typed_placeholders"] = [
+            {"placeholder": str(n.get("placeholder")), "typed_at": n.get("typed_at")}
+            for n in d["typed_placeholders"]
+            if isinstance(n, dict) and isinstance(n.get("placeholder"), str)
+        ]
     return out
 
 

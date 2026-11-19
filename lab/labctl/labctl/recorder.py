@@ -62,7 +62,10 @@ The DOM is captured inside the page, after each navigation (full load or history
 each click, change or submit, once the page has been quiet for `settle_ms` with no fetch or XHR
 in flight (up to 15 s; `recording.json` says so under `settle`). Values typed are never
 written: the recorder holds them in memory only, to take them out of snapshots, the HAR, pictures
-(masked) and locator texts, and to tell which record (list item, table row) a later action is on:
+(masked) and locator texts where they are a value, never inside an id, class or name (the rule:
+labctl.typedvalues; an id that is a whole typed value becomes a placeholder, `tl-typed-a`, and
+the step says so in `typed_placeholders`), and to tell which record (list item, table row) a
+later action is on:
 a step on a record says "the record titled with what was typed at step N", and the replay takes
 that title from the bindings (labctl.behaviour.bindings). The raw recording is evidence: it holds
 whatever the application showed, so it belongs in `evidence/`, which Git ignores.
@@ -75,6 +78,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
+
+from labctl.typedvalues import TypedValues
 
 LISTENER_JS = r"""
 (() => {
@@ -953,9 +958,18 @@ LOCATOR_FIELDS = {"kind", "attr", "value", "role", "name", "text", "tag", "css",
 MARK_TYPED_JS = r"""([values, check]) => {
   // check: count what shows a typed value and is not marked (the page changed since marking).
   if (!check) for (const el of document.querySelectorAll("[data-tl-mask]")) el.removeAttribute("data-tl-mask");
+  // The rule of labctl.typedvalues: a value shows where it is a whole token (not inside a
+  // longer word: "report" typed does not mask "Reports"), a short one where it is all the text.
+  const W = "[\\p{L}\\p{N}_]";
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pats = values.filter((v) => v.length >= 3).map((v) => new RegExp(
+    (new RegExp("^" + W, "u").test(v) ? "(?<!" + W + ")" : "") +
+    v.split(/\s+/).map(esc).join("\\s+") +
+    (new RegExp(W + "$", "u").test(v) ? "(?!" + W + ")" : ""), "iu"));
+  const shorts = values.filter((v) => v.length < 3);
   const hit = (t) => {
-    t = (t || "").toLowerCase();
-    return values.some((v) => v.length >= 3 ? t.includes(v) : t.trim() === v);
+    t = t || "";
+    return pats.some((p) => p.test(t)) || shorts.includes(t.trim().toLowerCase());
   };
   let n = 0;
   const mark = (el) => {
@@ -973,11 +987,6 @@ MARK_TYPED_JS = r"""([values, check]) => {
   }
   return n;
 }"""
-
-
-def _literal(text: str):
-    """A re.sub replacement that is taken as it is (a shape can hold a backslash)."""
-    return lambda _m: text
 
 
 def _public(step: dict) -> dict:
@@ -1137,13 +1146,10 @@ def _guid(page) -> str:
     return str(getattr(impl, "_guid", None) or f"page-{id(page)}")
 
 
-class _Secrets:
+class _Secrets(TypedValues):
     """Values typed while recording. Held in memory only; used to keep them out of everything
-    written: snapshots, the HAR, pictures, locator texts. Blank values are not secrets."""
-
-    def __init__(self) -> None:
-        self.values: list[tuple[str, str, str]] = []  # (value, origin, type event id)
-        self.steps: dict[str, int] = {}  # type event id -> seq
+    written: snapshots, the HAR, pictures, locator texts. Blank values are not secrets. Where a
+    typed value is taken out, and where it is kept as structure, is labctl.typedvalues."""
 
     def __bool__(self) -> bool:
         return bool(self.values)
@@ -1151,9 +1157,13 @@ class _Secrets:
     def add(self, value: str, origin: str, tid: str) -> None:
         if value.strip():
             self.values.append((value, origin, tid))
+            self._remember(value, tid)
 
     def place(self, tid: str, seq: int) -> None:
         self.steps[tid] = seq
+
+    def renumbered(self, mapping: dict[int, int]) -> None:
+        self.steps = {t: mapping.get(s, s) for t, s in self.steps.items()}
 
     def for_origin(self, origin: str) -> list[str]:
         return sorted({v.strip().lower() for v, o, _ in self.values if o == origin or not o})
@@ -1168,55 +1178,23 @@ class _Secrets:
                 return self.steps[tid]
         return None
 
-    def _forms(self) -> list[tuple[str, bool]]:
-        """Each value in the forms it can take in markup, longest first; True when long enough
-        to be taken out wherever it is (a short one only where it is the whole text)."""
-        import html as html_mod
-
-        seen: dict[str, bool] = {}
-        for value, _, _ in self.values:
-            for v in {value, value.strip(), html_mod.escape(value), html_mod.escape(value.strip())}:
-                if v.strip():
-                    seen[v] = len(v.strip()) >= 3
-        return sorted(seen.items(), key=lambda kv: -len(kv[0]))
-
-    def redact_text(self, text: str) -> str:
-        import re
-
-        for v, everywhere in self._forms():
-            if everywhere:
-                text = re.sub(re.escape(v), lambda m: _shape(m.group()), text, flags=re.I)
-            elif text.strip().lower() == v.strip().lower():
-                text = text.replace(text.strip(), _shape(text.strip()))
-        return text
-
-    def redact_html(self, html: str) -> str:
-        """Typed values out of text and attribute values (tag and attribute names untouched)."""
-        import re
-
-        if not self.values or not html:
-            return html
-        html = re.sub(r">([^<]+)<", lambda m: ">" + self.redact_text(m.group(1)) + "<", html)
-        return re.sub(r'="([^"]*)"', lambda m: '="' + self.redact_text(m.group(1)) + '"', html)
-
-    def contains(self, text: str) -> bool:
-        low = text.lower()
-        for v, everywhere in self._forms():
-            if (v.lower() in low) if everywhere else (low.strip() == v.strip().lower()):
-                return True
-        return False
-
     def clean_step(self, step: dict) -> dict:
-        """Locator candidates whose text holds a typed value are dropped; a typed value in the
-        page address (its query, fragment or a whole path segment) or in a storage key is
-        replaced by its shape."""
+        """A step by the rule (labctl.typedvalues): locator candidates whose text holds a typed
+        value are dropped; an id, test id or class in the selector, the frame or a locator that
+        is a whole typed value gets its placeholder (said in `typed_placeholders`, with the
+        placeholders its snapshots use); a typed value in the page address (its query,
+        fragment or a whole path segment) or in a storage key is replaced by its shape."""
         if not self.values:
             return step
         out = dict(step)
+        used = set(step.get("_ph_dom") or ())
         locs = step.get("locators")
         if locs:
-            out["locators"] = [c for c in locs if not any(isinstance(v, str) and self.contains(v)
-                                                         for k, v in c.items() if k != "kind")]  # fmt: skip
+            out["locators"] = self.clean_locators(locs, used)
+        for k in ("selector", "frame"):
+            if isinstance(step.get(k), str):
+                css, shown = self.redact_css(step[k], used)
+                out[k] = self._text(css) if shown else css
         if isinstance(step.get("url"), str):
             out["url"] = self.redact_url(step["url"])
         store = step.get("storage")
@@ -1226,50 +1204,12 @@ class _Secrets:
                 if isinstance(store.get(kind), dict):
                     store[kind] = {self.redact_text(k): v for k, v in store[kind].items()}
             out["storage"] = store
+        notes = self.placeholder_notes(used)
+        if notes:
+            out["typed_placeholders"] = notes
+        else:
+            out.pop("typed_placeholders", None)
         return out
-
-    def redact_url(self, url: str) -> str:
-        """Typed values out of an address: from its query and fragment wherever they are, from
-        its path only where a whole segment is one (a word typed somewhere must not change the
-        address of a page that happens to contain it)."""
-        from urllib.parse import unquote, urlsplit, urlunsplit
-
-        if not self.values or not url:
-            return url
-        p = urlsplit(url)
-        wanted = {" ".join(v.split()).lower() for v, _, _ in self.values}
-        segs = [_shape(unquote(s)) if " ".join(unquote(s).split()).lower() in wanted else s
-                for s in p.path.split("/")]  # fmt: skip
-        query = self.scrub(p.query) if p.query else p.query
-        frag = self.scrub(p.fragment) if p.fragment else p.fragment
-        return urlunsplit((p.scheme, p.netloc, "/".join(segs), query, frag))
-
-    def scrub(self, value):
-        """A HAR (parsed JSON) with typed values taken out of every string, also URL-encoded."""
-        from urllib.parse import quote, quote_plus
-
-        if isinstance(value, dict):
-            return {k: self.scrub(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [self.scrub(v) for v in value]
-        if not isinstance(value, str) or not self.values:
-            return value
-        import re
-
-        for raw, _, _ in self.values:
-            for v in {raw, raw.strip(), quote(raw.strip()), quote_plus(raw.strip())}:
-                if not v.strip():
-                    continue
-                if len(v.strip()) >= 3:
-                    value = re.sub(re.escape(v), _literal(_shape(raw.strip())), value, flags=re.I)
-                elif value == v:
-                    value = _shape(v)
-                else:  # a short value: only where it is a whole JSON string or form field
-                    value = re.sub(r'(?<=")' + re.escape(v) + r'(?=")', _literal(_shape(v)), value)
-                    value = re.sub(
-                        r"(?<==)" + re.escape(v) + r"(?=&|$)", _literal(_shape(v)), value
-                    )
-        return value
 
     def scrub_har(self, path: Path) -> None:
         if not self.values or not path.exists():
@@ -1457,7 +1397,10 @@ class _Steps:
                     self._documents(page, html, step.get("url") or "")
                 if "data-tl-pending=" in html:
                     step["frames_unread"] = html.count("data-tl-pending=")
-                html = self.secrets.redact_html(html)
+                used: set[str] = set()
+                html = self.secrets.redact_html(html, used)
+                if used:  # ids and names that were a whole typed value: their placeholders
+                    step["_ph_dom"] = sorted(used | set(step.get("_ph_dom") or ()))
                 (self.out_dir / step["dom"]).write_text(html, encoding="utf-8")
             if live and isinstance(step.get("storage"), dict) and step.get("url"):
                 try:  # HttpOnly cookies too, by name; a cookie's value is never read
@@ -1615,16 +1558,18 @@ class _Steps:
             self._close_open(key)  # a new document in the tab: the old one's batch is final
         self.open_doc[key] = doc
         self.seq += 1
-        before = None
+        before, used = None, set()
         if event.get("before"):
             before = f"dom/{self.seq:04d}.before.html"
             (self.out_dir / before).write_text(
-                self.secrets.redact_html(event["before"]), encoding="utf-8"
+                self.secrets.redact_html(event["before"], used), encoding="utf-8"
             )
         # ts is when the action happened; the snapshot is taken once the page is quiet.
         step = {"seq": self.seq, "ts": event.get("at") or _now(), "url": url,
                 "action": event.get("action"), "selector": event.get("selector"), "dom": None,
                 "dom_before": before, "screenshot": None}  # fmt: skip
+        if used:
+            step["_ph_dom"] = sorted(used)
         if tab:
             step["tab"] = tab
             if info and info.get("opener"):
@@ -1845,6 +1790,10 @@ class _Steps:
         else:  # one tab: no tab steps (a single page's recording reads as it always did)
             steps = [s for s in steps if not str(s.get("action") or "").startswith("tab-")]
         renumbered = self._renumber(steps)
+        if self.secrets:
+            # A value typed late may have been on the page before it was typed: every snapshot
+            # once more with every value typed (each step then names the placeholders they use).
+            self._redact_snapshots(steps)
         if (several or renumbered or reordered or self.rewrite or len(steps) != len(self.written)
                 or self.secrets):  # fmt: skip
             # A value typed late may have been on the page before it was typed: go over
@@ -1861,11 +1810,16 @@ class _Steps:
                 row["first_url"] = self.secrets.redact_url(info.get("first_url") or "")
                 rows.append(row)
             (self.out_dir / "tabs.json").write_text(json.dumps(rows, indent=1), encoding="utf-8")
-        if not self.secrets:
-            return
+
+    def _redact_snapshots(self, steps: list[dict]) -> None:
+        owner = {s[k]: s for s in steps for k in ("dom", "dom_before") if isinstance(s.get(k), str)}
         for path in (self.out_dir / "dom").glob("*.html"):
             text = path.read_text(encoding="utf-8")
-            clean = self.secrets.redact_html(text)
+            used: set[str] = set()
+            clean = self.secrets.redact_html(text, used)
+            step = owner.get(f"dom/{path.name}")
+            if used and step is not None:
+                step["_ph_dom"] = sorted(used | set(step.get("_ph_dom") or ()))
             if clean != text:
                 path.write_text(clean, encoding="utf-8")
 
@@ -1909,6 +1863,7 @@ class _Steps:
             isinstance(s.get("seq"), int) for s in steps
         ):
             return False
+        self.secrets.renumbered(mapping)
         moves: list[tuple[Path, Path]] = []
         for n, s in enumerate(steps, 1):
             old = s.get("seq")
