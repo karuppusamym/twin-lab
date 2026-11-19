@@ -13,7 +13,9 @@ What is read, from the HAR (and the files `labctl evidence fetch-code` added bes
 
 - the inventory of the application's own files: documents, scripts (which are lazy chunks, which
   were never downloaded), style sheets, JSON configuration, translation bundles, manifests;
-  third-party libraries are named with their version where the code shows it, and not analysed;
+  third-party libraries are named with their version where the code shows it, and not analysed
+  (`labctl.libraries`: the version the file states first, its address only as a marked guess;
+  one entry per library and version, listing its files);
 - route tables: Angular (`provideRouter`, `RouterModule.forRoot/forChild`, route objects with
   `component`, `loadComponent`, `loadChildren`, `redirectTo`, `canActivate`, `children`), React
   Router (route objects with `element`, `Component`, `lazy`, and `<Route path>` compiled to
@@ -23,7 +25,8 @@ What is read, from the HAR (and the files `labctl evidence fetch-code` added bes
   instructions), HTML inside scripts, compiled JSX: links (`routerLink`, `href`, `to`), menus,
   navigation bars, tab sets and tabs, tab panels, dialogs, and which component and route each
   belongs to; dialogs opened by code (`dialog.open(X)`, `$('#x').modal('show')`, `showModal()`)
-  and the element whose handler opens or closes them where the code says so;
+  and the element whose handler opens or closes them where the code says so; each dialog once,
+  with every route it appears on; a third-party widget's own dialogs (a video player's) left out;
 - API calls: `fetch`, `XMLHttpRequest.open`, `axios`, `$.ajax`, `http.get/post/...`, with the
   method and the address template; each is marked *called in the recording* (it matches an
   endpoint of `api/catalogue.json`) or *in code, not called*;
@@ -46,9 +49,9 @@ import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qsl, urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit
 
-from labctl import jsfviews, sanitize
+from labctl import jsfviews, libraries, sanitize
 from labctl import jstokens as js
 
 FILE = "codemap.json"
@@ -90,19 +93,7 @@ I18N_PATH = re.compile(
     re.IGNORECASE,
 )
 LANG_FILE = re.compile(r"(?:^|/)([a-z]{2}(?:[-_][A-Za-z]{2})?)\.json$")
-# Third-party libraries, by the first words of a file name. Two-word names first.
-LIBRARIES = ("jquery-ui", "jquery-migrate", "react-dom", "react-router", "react-router-dom",
-             "vue-router", "font-awesome", "core-js", "sweetalert2", "ext-all", "zone.js",
-             "jquery", "bootstrap", "popper", "lodash", "underscore", "moment", "react", "vue",
-             "angular", "zone", "polyfills", "rxjs", "primefaces", "primeng", "d3", "chart",
-             "highcharts", "select2", "datatables", "knockout", "backbone", "require", "axios",
-             "tinymce", "ckeditor", "fontawesome", "materialize", "foundation", "modernizr",
-             "handlebars", "mustache", "three", "leaflet", "echarts", "swiper", "sweetalert",
-             "toastr", "mojarra", "myfaces", "richfaces", "icefaces", "dojo", "kendo", "telerik",
-             "webresource", "scriptresource", "vendor", "vendors", "hammer", "htmx",
-             "alpine", "stimulus", "turbo", "preact", "svelte", "ember", "jsf", "faces")  # fmt: skip
-JSF_LIBRARIES = {"primefaces", "javax.faces", "jakarta.faces", "omnifaces", "bootsfaces",
-                 "richfaces", "icefaces", "mojarra", "myfaces", "faces"}  # fmt: skip
+# Third-party libraries are named by `labctl.libraries` (shared with the page rules).
 # Hosts that only serve public libraries: named; any other host is never kept.
 PUBLIC_HOSTS = {"cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "code.jquery.com",
                 "ajax.googleapis.com", "stackpath.bootstrapcdn.com", "maxcdn.bootstrapcdn.com",
@@ -412,50 +403,16 @@ def _fetched(rec: Path, hosts: set[str], seen: set) -> list[Res]:
     return out
 
 
-def _version_in(text: str) -> str | None:
-    m = re.search(r"(?<![\d.])v?(\d+\.\d+(?:\.\d+)?(?:[-.](?:rc|beta|alpha)\.?\d*)?)(?![\d])", text)
-    return m.group(1) if m else None
-
-
-def _lib_version(text: str) -> str | None:
-    """A library's version as its own code states it: a banner (`/*! jQuery v3.7.1`), or JSF's
-    `jsf.specversion=23000` (specification 2.3)."""
-    m = re.search(r"specversion\s*=\s*(\d)(\d)(\d{3})\b", text[:200_000])
-    if m:
-        return f"specification {int(m.group(1))}.{int(m.group(2))}"
-    m = re.search(r"/\*[!*]?[^*]{0,200}?\bv?(\d+\.\d+\.\d+)", text[:3000])
-    return m.group(1) if m else None
+def library(res: Res) -> libraries.Library | None:
+    """The third-party library a file is (`labctl.libraries.identify`), None for the
+    application's own file. Its version is read from its content first."""
+    return libraries.identify(res.path, res.text, own=res.own, query=res.query)
 
 
 def library_of(res: Res) -> tuple[str, str | None] | None:
-    """(name, version) when a file is a third-party library: by its host (a public library
-    host), its JSF resource library (`?ln=primefaces&v=12.0.0`), or its file name."""
-    query = dict(parse_qsl(res.query))
-    low = res.path.lower()
-    m = re.search(r"/(?:javax|jakarta)\.faces\.resource/(.+?)(?:\.xhtml|\.jsf|\.faces)?$", low)
-    if m:
-        ln = (query.get("ln") or "").lower()
-        if ln in JSF_LIBRARIES or not ln and m.group(1) in ("jsf.js", "faces.js"):
-            return ln or "javax.faces", query.get("v")
-        return None
-    if not res.own:
-        cdn = re.search(
-            r"/(?:ajax/libs|npm|gh)/(@?[\w.-]+(?:/[\w.-]+)?)[@/]v?(\d+\.\d+[\w.-]*)", low
-        )
-        if cdn:
-            return cdn.group(1), cdn.group(2)
-        cdn = re.search(r"^/(@?[\w.-]+)@(\d+\.\d+[\w.-]*)/", low)
-        if cdn:
-            return cdn.group(1), cdn.group(2)
-    stem = re.sub(r"\.(?:min\.)?(?:m?js|css)$", "", res.name.lower())
-    for lib in LIBRARIES:
-        if stem == lib or re.match(rf"{re.escape(lib)}(?:[.\-_~@]|\d|$)", stem):
-            if lib in ("vendor", "vendors"):
-                return "third-party bundle (libraries not named in its file name)", None
-            return lib, _version_in(stem[len(lib) :]) or query.get("v") or query.get("ver")
-    if not res.own:
-        return "a script or style sheet from another origin", None
-    return None
+    """(name, version) when a file is a third-party library."""
+    lib = library(res)
+    return (lib.name, lib.version) if lib else None
 
 
 # --- reading one script --------------------------------------------------------------------------
@@ -873,6 +830,7 @@ class _HtmlNav(HTMLParser):
         self.title: list[str] | None = None
         self.title_text = ""
         self.handlers: list[str] = []
+        self.widget_at: list[int] = []  # stack depth where a third-party widget's element opened
 
     def handle_starttag(self, tag, attrs):
         a = {k: (v or "") for k, v in attrs}
@@ -894,7 +852,11 @@ class _HtmlNav(HTMLParser):
         if tag == "form" and (a.get("action") is not None or a.get("method")):
             self.forms.append({"method": (a.get("method") or "GET").upper(),
                                "action": a.get("action") or "", "selector": _canon(tag, a, classes)})  # fmt: skip
-        kind = nav_kind(tag, clean, classes, bound)
+        widget = bool(self.widget_at) or sanitize._player(a.get("class", ""))
+        if widget and not self.widget_at and tag not in sanitize.VOID:
+            self.widget_at.append(len(self.stack))  # a third-party widget's container opens
+        # inside a third-party widget (a media player): its own dialogs and menus, not the app's
+        kind = None if widget else nav_kind(tag, clean, classes, bound)
         script = " ".join(v for k, v in a.items() if k.startswith("on"))
         if re.search(r"jsfcljs\(|__doPostBack\(|PrimeFaces\.ab\(|\.submit\(", script):
             kind = "command link (posts the page's form: the server decides what follows)"
@@ -929,6 +891,8 @@ class _HtmlNav(HTMLParser):
                         self.texts_by_id[ident] = " ".join(" ".join(parts).split())[:120]
                     if self.open_text:
                         self.open_text[-1][1].extend(parts)
+                while self.widget_at and self.widget_at[-1] >= len(self.stack):
+                    self.widget_at.pop()
                 break
         if tag == "title" and self.title is not None:
             self.title_text = " ".join(" ".join(self.title).split())
@@ -1008,6 +972,7 @@ class Analysis:
         self.check = checker or Checker(hosts=hosts)
         self.scripts: dict[str, Script] = {}
         self.libraries: dict[tuple[str, str | None], dict] = {}
+        self.library_files: set[str] = set()  # paths of third-party files (never analysed)
         self.routes: list[dict] = []
         self.nav: list[dict] = []
         self.dialogs: list[dict] = []
@@ -1028,10 +993,19 @@ class Analysis:
 
     # -- driver -----------------------------------------------------------------------------------
 
-    def _lib(self, name: str, version: str | None, how: str, path: str | None = None) -> None:
+    def _lib(self, name: str, version: str | None, how: str, path: str | None = None,
+             version_from: str | None = None) -> None:  # fmt: skip
+        """One entry per library and version, listing its files (its style sheet and its
+        script are one library)."""
         key = (name, version)
-        row = self.libraries.setdefault(key, {"name": name, "version": version, "found_by": how,
-                                              "files": []})  # fmt: skip
+        row = self.libraries.get(key)
+        if row is None:
+            row = self.libraries[key] = {"name": name, "version": version}
+            if version:  # the file's own code, or its address (a guess)
+                row["version_from"] = version_from or libraries.CONTENT
+            row["found_by"], row["files"] = how, []
+        elif version and version_from == libraries.CONTENT:
+            row["version_from"] = libraries.CONTENT
         if path and path not in row["files"]:
             row["files"].append(path)
 
@@ -1047,12 +1021,11 @@ class Analysis:
             if r.kind not in ("script", "style sheet", "json configuration", "i18n bundle",
                               "manifest"):  # fmt: skip
                 continue
-            lib = library_of(r)
+            lib = library(r)
             if lib:
-                name, version = lib
-                version = version or _lib_version(r.text or "")
-                self._lib(name, version, "its address" if version or not r.own else "its file name",
-                          _fp(r.path) if r.own else None)  # fmt: skip
+                self._lib(lib.name, lib.version, lib.found_by, _fp(r.path) if r.own else None,
+                          lib.version_from)  # fmt: skip
+                self.library_files.add(r.path)
                 continue
             if r.kind == "script" and r.text and len(r.text) <= MAX_TEXT:
                 self.scripts[r.path] = read_script(r)
@@ -2528,7 +2501,7 @@ def document(an: Analysis, app: str, *, ctxs=None, endpoints: list[dict] | None 
         if ch not in have:
             missing.append({"file": _fp(ch), "routes": sorted(set(rs))})
     nav = _dedupe(an.nav)
-    dialogs = _dedupe(an.dialogs)
+    dialogs = _merge_dialogs(an.dialogs, an.library_files)
     titles = _dedupe(an.titles)
     nav_code = _dedupe(an.nav_code)
     limits = list(LIMITS)
@@ -2546,7 +2519,8 @@ def document(an: Analysis, app: str, *, ctxs=None, endpoints: list[dict] | None 
         "base": an.base,
         "files": _inventory(an),
         "third_party": sorted(
-            an.libraries.values(), key=lambda x: (x["name"].lower(), str(x["version"]))
+            libraries.group(list(an.libraries.values())),
+            key=lambda x: (x["name"].lower(), str(x["version"])),
         ),
         "routes": routes,
         "navigation": nav,
@@ -2560,6 +2534,48 @@ def document(an: Analysis, app: str, *, ctxs=None, endpoints: list[dict] | None 
         "dropped_as_data": an.check.dropped,
         "cannot_be_recovered": limits,
     }
+
+
+def _widget_dialog(row: dict, library_files: set[str]) -> bool:
+    """A dialog of a third-party widget (a media player's own `vjs-modal-dialog`): created by a
+    library's script or marked by the widget's classes. It is the library's, not the
+    application's."""
+    if row.get("file") in {_fp(p) for p in library_files}:
+        return True
+    classes = " ".join(re.findall(r"\.([\w-]+)", str(row.get("selector") or "")))
+    return sanitize._player(classes)
+
+
+def _merge_dialogs(rows: list[dict], library_files: set[str]) -> list[dict]:
+    """Each dialog once, with every route and file it appears on: a page's modal is in each page
+    that includes it, a browser alert in each script that shows it. A third-party widget's own
+    dialogs are left out."""
+    out: dict[str, dict] = {}
+    for r in rows:
+        if _widget_dialog(r, library_files):
+            continue
+        key = json.dumps({k: v for k, v in r.items() if k not in (
+            "routes", "file", "opened_by", "closed_by")}, sort_keys=True, default=str)  # fmt: skip
+        have = out.get(key)
+        if have is None:
+            row = {k: v for k, v in r.items() if k != "file"}
+            row["routes"] = list(r.get("routes") or [])
+            row["files"] = [r["file"]] if r.get("file") else []
+            for side in ("opened_by", "closed_by"):
+                if side in r:
+                    row[side] = list(r[side])
+            out[key] = row
+            continue
+        for route in r.get("routes") or []:
+            if route not in have["routes"]:
+                have["routes"].append(route)
+        if r.get("file") and r["file"] not in have["files"]:
+            have["files"].append(r["file"])
+        for side in ("opened_by", "closed_by"):
+            for who in r.get(side) or []:
+                if who not in have.setdefault(side, []):
+                    have[side].append(who)
+    return list(out.values())
 
 
 def _dedupe(rows: list[dict]) -> list[dict]:
