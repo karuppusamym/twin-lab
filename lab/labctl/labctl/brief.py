@@ -633,6 +633,28 @@ def app_yaml(brief: Brief, repo_root: Path) -> dict:
     }
 
 
+APPROVED_LEVELS = ("owner_approved", "reference_verified")  # tools/guard_ai_changes.py APPROVED
+
+
+def merge_app_yaml(old: dict, new: dict) -> dict:
+    """An `app.yaml` generated again over an existing one: every generated part is the new one
+    (stack, rules, db...), so it never contradicts the brief. Kept from the old file: `run:` (the
+    builder's), a rule level a person approved (`owner_approved`, `reference_verified`, on a rule
+    of the same id) and top-level keys the generator does not write (`lab:` from onboarding)."""
+    out = dict(new)
+    if old.get("run"):
+        out["run"] = old["run"]
+    for key, value in old.items():
+        if key not in out:
+            out[key] = value
+    approved = {str(r.get("id")): r.get("verification") for r in old.get("rules") or []
+                if isinstance(r, dict) and r.get("verification") in APPROVED_LEVELS}  # fmt: skip
+    out["rules"] = [{**r, "verification": approved[str(r.get("id"))]}
+                    if isinstance(r, dict) and str(r.get("id")) in approved else r
+                    for r in new.get("rules") or []]  # fmt: skip
+    return out
+
+
 NOT_IDENTIFIED = "not identified — choose at onboarding"
 
 

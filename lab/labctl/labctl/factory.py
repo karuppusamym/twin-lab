@@ -253,10 +253,14 @@ def generate(
     if not model.stack.desktop:  # the app pipeline builds a container; a desktop app has none
         write_workflow(root, app_id)
     kept = app_file.exists()
-    if not kept:
-        _write(
-            app_file, yaml.safe_dump(brief_mod.app_yaml(result, root), sort_keys=False, width=100)
-        )
+    made = brief_mod.app_yaml(result, root)
+    if kept:  # generated again: only `run:`, approved rule levels and onboarding choices stay
+        try:
+            old = yaml.safe_load(app_file.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            old = {}
+        made = brief_mod.merge_app_yaml(old if isinstance(old, dict) else {}, made)
+    _write(app_file, yaml.safe_dump(made, sort_keys=False, width=100))
     files = [model_file, brief_file, schema_file, app_file]
     if behaviours_file.exists():
         files.append(behaviours_file)

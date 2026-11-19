@@ -236,7 +236,8 @@ def brief(
     result = done.brief
     if done.kept_app_yaml:
         typer.echo(
-            f"kept existing {root / 'apps' / app_id / 'app.yaml'}; rules in the brief may differ from it"
+            f"updated {root / 'apps' / app_id / 'app.yaml'}: generated parts new, its run: and "
+            "approved rule levels kept"
         )
     typer.echo(
         f"{app_id}: {len(result.screens)} screen(s), {len(result.routes)} route(s), "
