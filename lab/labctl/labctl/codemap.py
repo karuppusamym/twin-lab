@@ -2449,8 +2449,15 @@ def document(an: Analysis, app: str, *, ctxs=None, endpoints: list[dict] | None 
                     and "**" not in row["path"]), None)  # fmt: skip
         if row.get("redirect_to") and not row.get("component") and not row.get("lazy_chunk"):
             row["status"] = "redirect"
+        elif hit:
+            row["status"] = "recorded"
+        elif row.get("written") == "a link on a page":
+            # A server page's link to a page nobody opened: only its address and link text are
+            # known, nothing of the page. The navigation map answers it as a link seen, not
+            # visited; it is not reconstructed.
+            row["status"] = "linked from a page, not visited"
         else:
-            row["status"] = "recorded" if hit else "only in code"
+            row["status"] = "only in code"
         if hit:
             row["screen"] = hit
         chunk = row.get("lazy_chunk")
@@ -2662,7 +2669,8 @@ def extend_navigation(nav: dict, code: dict | None) -> dict:
     have = {(m.get("from"), m.get("to"), m.get("selector")) for m in nav.get("transitions") or []}
     added: list[dict] = []
     whole = (code or {}).get("scope", "whole application") == "whole application"
-    code_routes = [r for r in (code or {}).get("routes") or [] if "**" not in r["path"]]
+    code_routes = [r for r in (code or {}).get("routes") or [] if "**" not in r["path"]
+                   and r.get("status") != "linked from a page, not visited"]  # fmt: skip
     for s in screens:
         for link in s.get("links_seen_not_visited") or []:
             target = link.get("target")
@@ -2719,8 +2727,8 @@ def extend_navigation(nav: dict, code: dict | None) -> dict:
                                   "steps": [], "source": "code"})  # fmt: skip
         for n in [*(code.get("navigation") or []), *(code.get("navigation_by_code") or [])]:
             target = n.get("target")
-            if not target or not str(target).startswith("/"):
-                continue
+            if not target or not str(target).startswith("/") or n.get("found_in"):
+                continue  # a link of a downloaded page: the map lists it as a page's link
             froms = [x for x in n.get("routes") or [] if x.startswith("/")] or ["(every screen)"]
             for f in froms:
                 sel = n.get("selector") or n.get("by")
@@ -2804,7 +2812,9 @@ def brief_section(app: str, doc: dict | None, refused: list[str] | None = None) 
                                                  if g.get("sends_refused_visitor_to") else "")
                                for g in r.get("guards") or [])  # fmt: skip
             status = {"recorded": f"yes (`{r.get('screen')}`)", "only in code": "**no: only in "
-                      "code**", "redirect": f"redirect to `{r.get('redirect_to')}`"}[r["status"]]  # fmt: skip
+                      "code**", "redirect": f"redirect to `{r.get('redirect_to')}`",
+                      "linked from a page, not visited": "no: a link on a page leads there "
+                      "(see *Links seen, not visited*)"}[r["status"]]  # fmt: skip
             if r.get("lazy_chunk"):
                 code = f"lazy `{r['lazy_chunk']}`" + ("" if r.get("chunk_downloaded")
                                                        else " (never downloaded)")  # fmt: skip
