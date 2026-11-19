@@ -248,6 +248,45 @@ of the data:
 - The brief's *Scope*: with no automation and no flow written by a person, everything the
   recording shows, in recorded order.
 
+### What the application's code defines
+
+The HAR also holds the code the browser downloaded: the pages, the scripts, the style sheets
+and the JSON files. That code names much more than the recording visited, so `labctl brief`
+reads it, without running any of it, into `apps/<app>/codemap.json` (`labctl/codemap.py`):
+
+- every route of the route table (Angular, React Router, Vue Router; for server-rendered
+  applications such as JSF, the pages and their links), with its guards, lazy chunk, redirect
+  and title, and whether the recording visited it;
+- the menus, links, tabs and dialogs of the templates, with the route each belongs to and the
+  element that opens or closes a dialog where the code says so;
+- every API call the code can make, *called in the recording* or *in code, not called*;
+- the interface texts (translation files), lists of values and titles, each through the same
+  data checks as the snapshots: a text that may be data is dropped;
+- the third-party libraries, named with their version, not analysed.
+
+The brief's *What the application's code defines* tells the builder to build every route at
+least as a reachable page, wired as the code shows, and to report a screen only the code has as
+reconstructed. `navigation.json` lists those screens too, and says of each transition whether
+the recording, a link on a recorded page or the code shows it.
+
+A lazy chunk of a route nobody opened was never downloaded. `labctl evidence fetch-code
+<recording>` lists such files; with `--yes` it fetches them: only `.js`, `.mjs`, `.css` and
+`.json` files of the application's own origin, with GET, never a page or an API address,
+never a redirect, the answer's content type checked, at most one request a second by default
+(`--delay`, at least 0.2 s), stopping at a 429 or 503, and without a session unless the person
+passes the recorder's saved browser state (`--storage-state`). The files stay beside the
+recording (`<recording>/code/`), never in a package; regenerate the brief to use them.
+
+No script is carried in a package, only the map. A value that looks like a secret (a key, a
+token, a password, a private key, a connection string, a session identifier) or a host name
+other than the application's own is never kept: a map that holds one is not written, and
+`labctl build package` refuses one.
+
+What the code cannot tell: what a handler or a service computes beyond its calls and
+navigations; server-side rules and where a server page's command button leads (JSF outcomes are
+in the server's code); names the build minified (a component is then named by its selector);
+addresses and texts built at run time (their variable parts are `{name}`).
+
 ### Field rules and page behaviour
 
 A recording shows only the rules a person happened to trigger. The rest is in the page's HTML

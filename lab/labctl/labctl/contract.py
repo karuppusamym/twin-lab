@@ -166,7 +166,7 @@ def _never_pressed(text: str, nav: dict | None) -> str:
 
 def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None) -> str:
     """After `db/schema.sql` and the seed are written: the carried files, and the brief text."""
-    from labctl import apicatalog, navmap, signin
+    from labctl import apicatalog, codemap, navmap, signin
 
     root = Path(root)
     state = state or {"taken": {}, "tables": False}
@@ -183,7 +183,15 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     if found and state.get("tables"):
         wrote = signin.write(root, app_id, found, state.get("taken") or {},
                              done.get("endpoints") or {})  # fmt: skip
-    nav = navmap.write(root, app_id, brief, ctxs)
+    # What the code the browser downloaded defines (labctl.codemap): codemap.json, and the
+    # routes the recording did not visit in navigation.json.
+    code, refused = None, None
+    try:
+        code = codemap.write(root, app_id, ctxs, done, whole=recorded_scope(root, app_id))
+    except codemap.CodeMapError as exc:
+        refused = exc.places
+    nav = navmap.write(root, app_id, brief, ctxs,
+                       extend=lambda doc: codemap.extend_navigation(doc, code))  # fmt: skip
     # sign-in: one section, in place of the paragraph labctl.stepfacts writes
     text = re.sub(r"\*\*Signing in\.\*\* [^\n]*\n\n?", "", text)
     end = ("## Behaviour seen in the recordings", "## Part of a flow across applications",
@@ -191,7 +199,15 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     text = _insert(text, apicatalog.brief_section(app_id, done), end)
     text = _insert(text, signin.brief_section(app_id, found, wrote), end)
     text = _insert(text, navmap.brief_sections(app_id, nav), end)
-    text = _insert(text, scope_section(root, app_id, brief, ctxs), ("## Stack to pin",))
+    text = _insert(text, codemap.brief_section(app_id, code, refused), end)
+    scope = scope_section(root, app_id, brief, ctxs)
+    if code and any(r.get("status") == "only in code" for r in code.get("routes") or [])             and recorded_scope(root, app_id):  # fmt: skip
+        scope = scope.replace(
+            "What was not recorded is not built:",
+            "Screens the application's code defines and the recording did not visit are built "
+            "too, as reconstructions (*What the application's code defines*). Otherwise, what "
+            "was not recorded is not built:", 1)  # fmt: skip
+    text = _insert(text, scope, ("## Stack to pin",))
     text = _never_pressed(text, nav)
     if wrote and wrote["rows"]:
         text = text.replace(

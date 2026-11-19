@@ -254,6 +254,40 @@ def record_across(
     typer.echo(f"done: labctl evidence build-all {out}")
 
 
+@app.command("fetch-code")
+def fetch_code(
+    recording: Path = typer.Argument(..., help="A recording folder."),
+    yes: bool = typer.Option(False, "--yes", help="Fetch. Without it the files are only listed."),
+    storage_state: Path | None = typer.Option(
+        None, "--storage-state", help="The recorder's saved browser state: send its cookies."
+    ),
+    delay: float = typer.Option(1.0, "--delay", help="Seconds between two requests (min 0.2)."),
+    max_files: int = typer.Option(50, "--max", help="At most this many files."),
+) -> None:
+    """Download the static code (scripts, style sheets, JSON) the recording's code names but the
+    browser never loaded, such as the lazy chunk of a route nobody opened: GET only, the
+    application's own origin only, rate limited, stored beside the recording."""
+    from labctl import codefetch
+
+    try:
+        done = codefetch.fetch(recording, yes=yes, storage_state=storage_state, delay=delay,
+                               max_files=max_files, say=typer.echo)  # fmt: skip
+    except codefetch.FetchError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    for p in done["planned"]:
+        typer.echo(f"{'fetch' if yes else 'would fetch'}: {p['path']} ({p['why']})")
+    for r in done["refused"]:
+        typer.echo(f"refused: {r['path']}: {r['reason']}")
+    if done["stopped"]:
+        typer.echo(f"stopped: {done['stopped']}")
+    if not yes and done["planned"]:
+        typer.echo("nothing fetched: run again with --yes to fetch these files")
+    elif yes:
+        typer.echo(f"fetched {len(done['fetched'])} file(s) into {recording / 'code'}; "
+                   "regenerate the brief to use them")  # fmt: skip
+
+
 @app.command("build-all")
 def build_all(
     recording: Path = typer.Argument(..., help="A recording folder (one or several applications)."),

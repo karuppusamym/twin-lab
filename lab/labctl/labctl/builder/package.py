@@ -115,6 +115,7 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
         f"{app}/app.yaml",
         f"{app}/behaviours.json",
         f"{app}/navigation.json",
+        f"{app}/codemap.json",
         "AGENTS.md",
         "docs/factory-playbook.md",
     ]
@@ -714,6 +715,11 @@ def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
         rows.append(f"`{app}/navigation.json`: every screen, each way in and out, dialogs, tabs, "
                     "frames and popup windows, and every element of each screen with what "
                     "happened when the recording used it.")  # fmt: skip
+    if f"{app}/codemap.json" in have:
+        rows.append(f"`{app}/codemap.json`: what the application's code defines. Build every "
+                    "route in it at least as a reachable page with its menus, tabs and dialogs "
+                    "wired as listed; a route only the code has is reconstructed (say so in "
+                    "BUILD-NOTES.md).")  # fmt: skip
     if f"{app}/rules.json" in have:
         rows.append(f"`{app}/rules.json`: per screen and field, every validation rule with its "
                     "message, level and evidence, rules between fields, what the page does "
@@ -1121,7 +1127,7 @@ person only where section 7 says to stop.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/rules.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/codemap.json`, `{app}/rules.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
@@ -1237,8 +1243,13 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None,
                       PackageWarning, stacklevel=2)  # fmt: skip
     task = prompt(repo_root, app_id, repo).encode("utf-8")
     files = _collect(repo_root, app_id)
-    from labctl import lookfeel  # refuses a look that holds data, or a picture it did not render
+    # The look refuses data or a picture it did not render; the code map a secret or a host.
+    from labctl import codemap, lookfeel
 
+    code_problems = codemap.package_check(repo_root, app_id)
+    if code_problems:
+        raise PackageError(f"cannot package {app_id}: apps/{app_id}/codemap.json failed the "
+                           "privacy check: " + "; ".join(code_problems[:10]))  # fmt: skip
     look_problems = lookfeel.package_check(repo_root, app_id)
     if look_problems:
         raise PackageError(

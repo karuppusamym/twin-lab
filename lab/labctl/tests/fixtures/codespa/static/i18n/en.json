@@ -1,0 +1,7 @@
+{
+  "nav": {"parcels": "Parcels", "depots": "Depots", "admin": "Administration", "help": "Help"},
+  "parcel": {"new": "New parcel", "delete": {"confirm": "Delete this parcel?"}, "empty": "No parcel matches the filter."},
+  "support": {"phone": "Call the desk on 0800 555 0199"},
+  "depot": {"example": "Harbour North"},
+  "status": {"received": "Received", "sorted": "Sorted", "out": "Out for delivery", "delivered": "Delivered"}
+}

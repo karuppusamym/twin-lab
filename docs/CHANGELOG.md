@@ -114,6 +114,40 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   every remaining step passes; the damage is under "Why not pass" and in `compared`, but
   whether it should lower the status is a decision for a person. The replay loop itself was
   not run in a browser for these cases.
+
+## 2026-11-18 — The application's map from its code: every route, menu, tab, dialog and call
+A recording shows the screens a person visited; the code the browser downloaded describes the
+whole application. `labctl.codemap` reads it without running it (`labctl.jstokens`, a small
+tokeniser: strings, regular expressions against division, nested template literals, comments)
+and writes `apps/<app>/codemap.json`:
+- the inventory of the application's own files (pages, scripts and which are lazy chunks, style
+  sheets, JSON configuration, translation files, manifests); third-party libraries are named
+  with their version (file name, JSF resource library, licence banner, `ng-version`, JSF's
+  `specversion`) and not analysed;
+- route tables (Angular, React Router objects and compiled `<Route>`, Vue Router, server pages
+  and their links): path, parent and children, guards and where a refused visitor goes, the lazy
+  chunk and whether it was downloaded, redirects, titles; Angular's compiled templates (attribute
+  arrays and element instructions, `@if` blocks), HTML in scripts and compiled JSX give links,
+  menus, navigation bars, tab sets, tabs, tab panels and dialogs with the component and route
+  they belong to, and who opens and closes a dialog (`showModal()`, `.modal('show')`,
+  `dialog.open(X)`, a signal set by a click handler); JSF command links and ajax updates;
+- API calls (`fetch`, `http.get/post/...`, `axios`, `$.ajax`, `XMLHttpRequest.open`, forms),
+  each marked *called in the recording* (it matches the API catalogue) or *in code, not called*;
+- translation texts, lists of values and titles, each through the data checks; one that may be
+  data is dropped and counted.
+The brief gets *What the application's code defines* (build every route at least as a reachable
+page; a screen only the code has is reconstructed and reported), `navigation.json` gets a screen
+per route only the code has and a `source` per transition (`recording`, `page`, `code`), and the
+package, its index, its reading order, `factory.GENERATED` and the guard carry `codemap.json`.
+No script is carried. `codemap.check_text` finds secrets (keys, tokens, passwords, private keys,
+connection strings, session identifiers) and host names other than the application's own; a map
+that holds one is not written and the package refuses one. `labctl evidence fetch-code
+<recording> --yes` fetches, opt-in, only the static code the recording's code names and the
+browser never loaded (`.js`, `.mjs`, `.css`, `.json`; own origin; GET; no redirect; content type
+checked; rate limited; stops on 429/503; no session unless the saved browser state is given) into
+`<recording>/code/`. Proven on the Angular reference build, the JSF reference application and a
+hand-written fixture (`tests/fixtures/codespa`), whose admin chunk is found, fetched and mapped.
+
 ## 2026-11-18 — Field rules and page behaviour: what each page checks, from its HTML and its JavaScript
 Until now a package knew a rule only when the recording triggered it. `labctl.pagerules`
 writes `apps/<app>/rules.json` and the brief's *Field rules and page behaviour*, per screen and
