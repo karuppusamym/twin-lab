@@ -274,6 +274,42 @@ call was left out as another host's. Fixed, with tests (`test_har.py`, `test_see
   `512x512` is masked as a record number (the logo is not carried); product photos are carried
   or not depending on where else they were shown; a `window.alert` text is not recorded.
 
+## 2026-11-19 — Demoblaze trial: fourteen package defects fixed; public catalogue data on request
+- Interface kept, data masked whole: static files of the application's own origin named by a word
+  keep their file names in the snapshots and the look (`sanitize.mask_asset_url`; the logo
+  `blazemeter-favicon-512x512.png` and `Lumia_1520.jpg` were `999x999`/digits and not carried);
+  a media player's control texts are the library's (video.js: `Play Video`, `Current Time`);
+  capitalised words of prose answers are no names (`Get in Touch`); an answer value shown whole
+  (`Samsung galaxy s6`) is masked whole. Real data next to each stays masked (tests).
+- Browser dialogs keep their message: recorded (masked as any message), carried in the steps,
+  `rules.json` `dialogs` and the brief, read from the application's own scripts when the
+  recording has none (`Product added.`, `Thanks for the message!!`), and compared by the replay.
+- Envelope keys in any case (`{"Items": [...], "LastEvaluatedKey": ...}`); a remote-procedure API
+  gives its tables through POST answers (`entries` read by `/bycat` and `/view`; `cart` from
+  `/viewcart`, `/addtocart`, `/deleteitem`).
+- Synthetic examples keep shapes and meaning (UUIDs, `user=<uuid>` cookies, URLs at
+  `example.test`, the `cat` code list, carried photo file names) and one record has the same
+  values in every endpoint; an empty answer is "empty body".
+- Requests belong to the last step logged up to 150 ms after they started (one rule,
+  `stepfacts.step_at`, the seed plan's), never to a dialog; a page change the click caused is
+  folded into the click's effect (no more `POST /bycat` on a carousel click). This was also the
+  cause of the two intermittent `test_pagerules` failures (under load a select's change event is
+  logged a few ms after the fetch it starts); they pass at c561089 on an idle machine.
+- Cookies by name, setter, attributes, use and value shape in the brief (`labctl.cookies`).
+- Modals: open only when their markup shows it (`behaviour.dom.shown`), with opener, closer and
+  their own title; carousel controls are the carousel's; a sign-in screen needs a shown password
+  field. The screen picture is the fullest snapshot with no dialog open, each dialog the
+  recording showed open has its own picture; gradients and background images are theme tokens;
+  SweetAlert is named by its own file; a regenerated `app.yaml` updates its generated parts
+  (keeps `run:`, approved levels, `lab:`).
+- Public catalogue data (`public-data.yaml`, `labctl evidence public-data` drafts it; off by
+  default, nothing used without `approved_by`): declared endpoints, fields, regions and image
+  prefixes are carried as recorded in pages (not in data cells), API examples, seed rows and the
+  look, and the brief and the task say who approved it; secrets, cookies, e-mail addresses and
+  typed values are refused inside declared data ([06-evidence.md](06-evidence.md), Privacy).
+- Left open: `/deleteitem` answered 16 bytes the page did not read, so its body is described as
+  not recorded (not as empty); a dialog's picture is drawn by opening it in the screen's snapshot.
+
 ## 2026-11-18 — The build package carries the look of the application
 - A rebuilt application did not look like the original: a builder got value-free page snapshots
   and nothing else. Style sheets delivered as files were not carried, no font was named, no
