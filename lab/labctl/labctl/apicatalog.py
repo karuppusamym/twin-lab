@@ -197,7 +197,10 @@ def kept_values(root: Path, app: str, ctxs: list[Ctx]) -> Kept:
     for path in sorted(pages.glob("*.html")) if pages.is_dir() else []:
         tree = domlib.parse_html(path.read_text(encoding="utf-8", errors="replace"))
         for node in domlib._walk(tree):
-            if node.tag == "option" and node.attrs.get("value"):
+            # a facet's or a choice's value is the interface's code, as an option's is
+            kind = (node.attrs.get("type") or "").lower()
+            choice = node.tag == "input" and kind in ("checkbox", "radio")
+            if (node.tag == "option" or choice) and node.attrs.get("value"):
                 value = node.attrs["value"]
                 if not re.fullmatch(r"[^A-Za-z0-9]*[Xx9][Xx9 ._/-]*", value):  # masked: data
                     kept.options.add(value)
@@ -1218,7 +1221,9 @@ def observed_values(ctxs: list[Ctx], kept: Kept) -> set[str]:
                 take(k, v, c)
             for k, v in e.form.items() if e.body is None else []:
                 take(k, v, c)
-            for _, k, v in _leaves(e.body):
+            for path, k, v in _leaves(e.body):
+                if path in _protocol_keys(e.body):  # a GraphQL document, a JSON-RPC method: code
+                    continue
                 take(k, v, c)
             if e.status < 400:
                 for _, k, v in _leaves(e.data):
@@ -1227,6 +1232,17 @@ def observed_values(ctxs: list[Ctx], kept: Kept) -> set[str]:
                 if pat.startswith("{"):
                     take("id", seg, c)
     return out
+
+
+def _protocol_keys(body) -> set[str]:
+    """Paths of a request body that are the protocol's, not data: the document and operation
+    name of a GraphQL request, the method of a JSON-RPC call."""
+    if isinstance(body, dict) and isinstance(body.get("query"), str) and re.match(
+            r"\s*(query|mutation|subscription|fragment|\{)", body["query"]):  # fmt: skip
+        return {"query", "operationName"}
+    if isinstance(body, dict) and "jsonrpc" in body and isinstance(body.get("method"), str):
+        return {"method", "jsonrpc"}
+    return set()
 
 
 def _seed_dates(root: Path, app: str) -> set[str]:
@@ -1260,8 +1276,9 @@ def leaks(root: Path, app: str, ctxs: list[Ctx] | None = None,
     found = []
     for name, text in texts.items():
         try:
-            strings = {str(v) for _, _, v in _leaves(json.loads(text))
-                       if isinstance(v, (str, int, float)) and not isinstance(v, bool)}  # fmt: skip
+            strings = {str(v) for path, _, v in _leaves(json.loads(text))
+                       if isinstance(v, (str, int, float)) and not isinstance(v, bool)
+                       and not path.endswith("required[]")}  # a schema's field names  # fmt: skip
         except ValueError:
             strings = {text}
         for v in sorted(values):
@@ -1283,6 +1300,9 @@ def write(root: Path, app: str) -> dict:
             old.unlink()
     ctxs = load(root, app)
     built = build(root, app, ctxs)
+    from labctl import netfacts  # headers, caching, timing, streams, third parties
+
+    net_problems = netfacts.extend(root, app, ctxs, built)
     if not built["endpoints"]:
         if folder.is_dir() and not any(folder.iterdir()):
             folder.rmdir()
@@ -1290,7 +1310,9 @@ def write(root: Path, app: str) -> dict:
     texts = {INDEX: _dump(built["index"])}
     for name, doc in built["endpoints"].items():
         texts[name] = _dump(doc)
-    problems = list(built["problems"])
+    if built.get("network"):
+        texts[netfacts.FILE] = _dump(built["network"])
+    problems = list(built["problems"]) + net_problems
     bad = leaks(root, app, ctxs, texts)
     if bad:  # never leave a file that holds an observed value
         for name in {b.split(":", 1)[0] for b in bad}:
@@ -1302,7 +1324,8 @@ def write(root: Path, app: str) -> dict:
         (folder / name).write_bytes(text.encode("utf-8"))
         files.append(folder / name)
     return {"files": files, "index": built["index"] if INDEX in texts else None,
-            "endpoints": built["endpoints"], "problems": problems, "ctxs": ctxs}  # fmt: skip
+            "endpoints": built["endpoints"], "problems": problems, "ctxs": ctxs,
+            "network": built.get("network") if netfacts.FILE in texts else None}  # fmt: skip
 
 
 def _dump(doc) -> str:
