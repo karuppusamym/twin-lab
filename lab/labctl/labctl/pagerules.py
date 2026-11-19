@@ -2226,7 +2226,7 @@ LIBRARY_NAMES = [
     (r"jquery[.-]validate[.-]unobtrusive", "jQuery Validation Unobtrusive"),
     (r"jquery[.-]validat", "jQuery Validation"),
     (r"jquery[.-]?mask|jquery[.-]inputmask|inputmask", "Inputmask"),
-    (r"jquery[.-]ui", "jQuery UI"),
+    (r"jquery[.-]ui", "jQuery UI"), (r"sweet-?alert", "SweetAlert"),
     (r"jquery", "jQuery"),
     (r"(^|/)angular(js)?([.-][\d.]+)?(\.min)?\.js$|/angularjs/", "AngularJS"),
     (r"react(-dom)?([.-]production|[.-]development)?(\.min)?\.js$", "React"),
@@ -2248,16 +2248,23 @@ _BANNER = re.compile(r"^\s*/\*[!*]?\s*(?:@license\s+)?([A-Z][\w.]*(?: [A-Z][\w.]
 
 
 def library_name(path: str, text: str | None) -> str | None:
-    """The library a script file is, by its name or its banner (None: the application's own)."""
+    """The library a script file is, by its name or its banner (None: the application's own).
+    The file's own name is read first, then the package folder it is served from, then the rest
+    of its address: `/node_modules/bootstrap-sweetalert/dist/sweetalert.min.js` is SweetAlert,
+    not Bootstrap."""
     low = (path or "").lower()
+    file = low.rsplit("/", 1)[-1]
     for rx, name in LIBRARY_NAMES:
-        if re.search(rx, low):
+        if file and re.search(rx, file):
             return name
     # A file served from a package folder is a package, not the application's own code
     # (`/node_modules/videojs-contrib-hls/dist/...`): named by its package.
     pkg = re.search(r"(?:^|/)(?:node_modules|bower_components)/((?:@[\w.-]+/)?[\w.-]+)/", low)
     if pkg:
         return pkg.group(1)
+    for rx, name in LIBRARY_NAMES:
+        if re.search(rx, low):
+            return name
     head = (text or "")[:600]
     m = _BANNER.match(head)
     if m and not re.search(r"\bapp(lication)?\b", m.group(1), re.IGNORECASE):
