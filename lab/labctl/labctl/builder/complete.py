@@ -49,6 +49,10 @@ def problems(repo_root: Path, app_id: str) -> list[str]:
                        "holds an interactive element)")  # fmt: skip
         if not screen.get("page"):
             out.append(f"screen `{screen.get('path')}` has no page snapshot")
+    pages = list((app / "pages").glob("*.html")) if (app / "pages").is_dir() else []
+    if step_files and pages and not (app / "rules.json").is_file():
+        out.append("rules.json is missing: no field rules or page behaviour (regenerate the "
+                   "brief)")  # fmt: skip
     for target in (nav or {}).get("undefined_targets") or []:
         out.append(f"navigation target undefined: {target}")
     for row in (cat or {}).get("endpoints") or []:
@@ -126,7 +130,13 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
                                  "what it did.",
         app + "api/catalogue.json": "Index of the endpoints the pages called, the list "
                                     "parameters' effects and the field map.",
+        app + "rules.json": "Per screen and field, every validation rule with its message, "
+                            "level (seen, declared, in code) and evidence, rules between fields, "
+                            "behaviour while typing or choosing, state on load, session timers.",
     }  # fmt: skip
+    if rel.startswith(app + "scripts/"):
+        return ("The application's own script, carried on the owner's request (source maps "
+                "stripped, checked for secrets and hosts): reference for its rules.")  # fmt: skip
     if rel in fixed:
         return fixed[rel]
     if rel.startswith(app + "api/"):

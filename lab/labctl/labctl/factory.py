@@ -245,6 +245,10 @@ def generate(
     _write(schema_file, brief_mod.schema(result, root))
     # The API catalogue, the navigation map, sign-in and the scope (labctl.contract).
     text = contract.extend(root, app_id, result, model, text, extras)
+    # Field rules and page behaviour (labctl.pagerules): apps/<app>/rules.json, its brief section.
+    from labctl import pagerules
+
+    text = pagerules.extend(root, app_id, model, text)
     _write(brief_file, text)
     if not model.stack.desktop:  # the app pipeline builds a container; a desktop app has none
         write_workflow(root, app_id)
@@ -342,7 +346,7 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
 
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
              "behaviours.json", "pages", "steps", "look", "api",
-             "navigation.json")  # fmt: skip
+             "navigation.json", "rules.json", "scripts")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:

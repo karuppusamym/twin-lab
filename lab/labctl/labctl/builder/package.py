@@ -158,6 +158,10 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
     from labctl import lookfeel
 
     found.update(lookfeel.package_files(repo_root, app_id))
+    # Field rules (labctl.pagerules): rules.json, and the scripts only on the owner's request.
+    from labctl import pagerules
+
+    found.update(pagerules.package_files(repo_root, app_id))
     shots = repo_root / "evidence" / app_id / "screenshots"
     if shots.is_dir():
         for path in sorted(shots.rglob("*")):
@@ -705,6 +709,13 @@ def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
         rows.append(f"`{app}/navigation.json`: every screen, each way in and out, dialogs, tabs, "
                     "frames and popup windows, and every element of each screen with what "
                     "happened when the recording used it.")  # fmt: skip
+    if f"{app}/rules.json" in have:
+        rows.append(f"`{app}/rules.json`: per screen and field, every validation rule with its "
+                    "message, level and evidence, rules between fields, what the page does "
+                    "while a person types or chooses, its state on load, session timers"
+                    + (f"; `{app}/scripts/`: the application's own scripts, carried on the "
+                       "owner's request, for reference" if any_under(f"{app}/scripts/") else "")
+                    + ".")  # fmt: skip
     if f"{app}/api/catalogue.json" in have:
         rows.append(f"`{app}/api/catalogue.json`, then each `{app}/api/*.json`: one file per "
                     "endpoint, with its parameters, schemas and every recorded call with "
@@ -749,6 +760,10 @@ def _rules_text(app: str, packaged: list[str], browser: bool, seed_loaded: bool)
         + "An element nobody used in the recording is rendered and gets no behaviour the brief "
         "does not state.",
     ]  # fmt: skip
+    if f"{app}/rules.json" in packaged:
+        from labctl import pagerules
+
+        rules.append(pagerules.task_rule(app))
     if browser:
         rules.append("**Data stays where the original keeps it.** That is the browser, as the "
                      "brief's *Browser storage* section says. There is no server database.")  # fmt: skip
@@ -1101,7 +1116,7 @@ person only where section 7 says to stop.
 2. Read `{app}/BRIEF.md`.
    - If `{app}/BRIEF.md` is not on the default branch yet, copy the brief's files from the
      attached package to the same paths, unchanged: `{app}/BRIEF.md`, `{app}/db/schema.sql`,
-     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
+     `{app}/app.yaml`, `{app}/model.yaml`, `{app}/behaviours.json`, `{app}/db/seed.sql`, `{app}/db/seed.json`, `{app}/navigation.json`, `{app}/rules.json`, `{app}/api/*`, `{app}/pages/*.html`{look_files} and `{app}/steps/*` where present. Check each
      against its sha256 in `MANIFEST.json`, and commit them first, on their own, with the
      message `{app_id}: brief {digest} from Twin Lab package`.
 {brief_rule}
@@ -1225,6 +1240,12 @@ def build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None = None,
             f"cannot package {app_id}: the look (apps/{app_id}/look) failed the privacy check: "
             + "; ".join(look_problems[:10])
         )
+    from labctl import pagerules  # refuses scripts that hold a secret, another host or data
+
+    script_problems = pagerules.package_check(repo_root, app_id)
+    if script_problems:
+        raise PackageError(f"cannot package {app_id}: the scripts (apps/{app_id}/scripts) failed "
+                           "the check: " + "; ".join(script_problems[:10]))  # fmt: skip
     entries: list[tuple[str, bytes]] = [(TASK_FILE, task)]
     entries += [(rel, _content(path)) for rel, path in files]
     purposes = [(rel, complete.purpose(rel, app_id, data)) for rel, data in entries]
