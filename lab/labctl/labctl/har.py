@@ -1766,6 +1766,17 @@ def _entity(pattern: str) -> str | None:
     return None
 
 
+def open_dialogs(html: str) -> list[str]:
+    """The dialogs a page snapshot shows open (`behaviour.dom.shown`): `#id` of each, or its
+    tag when it has none."""
+    from labctl.behaviour import dom as domlib
+
+    tree = domlib.parse_html(html)
+    return [f"#{n.id}" if n.id else n.tag for n in domlib._walk(tree)
+            if domlib.is_dialog(n) and domlib.shown(n)
+            and not sanitize._player(n.attrs.get("class") or "")]  # fmt: skip
+
+
 def list_key(data: Any):
     """The key under which an envelope answer holds its list of records (`items`, `Items`,
     `DATA`: `ITEM_KEYS` in any case), or None. `{"Items": [...], "LastEvaluatedKey": {...}}`
@@ -2166,9 +2177,12 @@ def analyse(app: str, path: Path, repo_root: Path, pages_dir: Path | None = None
             el.actions = el.actions + [a for a in actions if a not in el.actions]
         files = []
         if acc.pages and pages_dir is not None:
-            # the fullest snapshot: most ids, then most classes (a list with its rows), then latest
+            # the fullest snapshot with no dialog open (the screen as it is drawn without one:
+            # its picture must not show a modal over it): most ids, then most classes (a list
+            # with its rows), then latest
             best = max(enumerate(acc.pages),
-                       key=lambda p: (len(p[1].ids), len(p[1].classes), p[0]))[1]  # fmt: skip
+                       key=lambda p: (not open_dialogs(p[1].html), len(p[1].ids),
+                                      len(p[1].classes), p[0]))[1]  # fmt: skip
             pages_dir.mkdir(parents=True, exist_ok=True)
             safe_name = re.sub(r"[^A-Za-z0-9.-]+", "-", name).strip("-.")[:80] or "page"
             out = (

@@ -451,6 +451,81 @@ def interface_image(res: Resource, own_hosts: set[str], in_data: bool = False) -
     return None
 
 
+DIALOG_SEP = "--dialog-"  # screens/<screen>--dialog-<id>.png: a dialog drawn open
+_BACKDROP_HIDE = ".modal-backdrop{display:none!important}body.modal-open{overflow:auto!important}"
+
+
+def dialogs_seen_open(recordings: list[Path]) -> dict[str, set[str]]:
+    """Per address pattern, the dialogs (`#id`) some snapshot of the recordings shows open."""
+    from labctl import har
+
+    out: dict[str, set[str]] = {}
+    for path in recordings:
+        try:
+            rec = har.load(path)
+        except (OSError, ValueError):
+            continue
+        for step in rec.steps:
+            if step.dom is None or not step.url.startswith("http"):
+                continue
+            html = step.dom.read_text(encoding="utf-8", errors="replace")
+            pattern = sanitize.route_pattern(urlsplit(step.url).path or "/")
+            found = {d for d in har.open_dialogs(html) if d.startswith("#")}
+            out.setdefault(pattern, set()).update(found)
+    return out
+
+
+def _hide(idents: list[str]) -> str:
+    return "".join('[id="' + d[1:] + '"]{display:none!important}' for d in idents)
+
+
+def without_dialogs(html: str) -> str:
+    """A page snapshot with every open dialog closed (hidden), for the screen's own picture."""
+    from labctl import har
+
+    shut = [d for d in har.open_dialogs(html) if d.startswith("#")]
+    if not shut:
+        return html
+    return _inject(html, "<style>" + _hide(shut) + _BACKDROP_HIDE + "</style>")
+
+
+def with_dialog_open(html: str, ident: str) -> str | None:
+    """A page snapshot with one dialog drawn open (Bootstrap: `show`, displayed, a backdrop),
+    every other dialog closed. None when the page has no element of that id."""
+    from labctl import har
+
+    m = re.search(r'<([A-Za-z][\w-]*)\b[^>]*\bid="' + re.escape(ident.lstrip("#")) + r'"[^>]*>',
+                  html)  # fmt: skip
+    if m is None:
+        return None
+    new = re.sub(r'\saria-hidden="true"', "", m.group(0))
+    if re.search(r'\sclass="', new):
+        new = re.sub(r'\sclass="([^"]*)"', lambda c: f' class="{c.group(1)} show"', new, count=1)
+    if m.group(1).lower() == "dialog" and " open" not in new:
+        new = new[:-1] + " open>"
+    style = "display: block;"
+    if re.search(r'\sstyle="', new):
+        new = re.sub(r'\sstyle="([^"]*)"',
+                     lambda s: ' style="' + re.sub(r"display\s*:\s*none;?", "", s.group(1))
+                     + " " + style + '"', new, count=1)  # fmt: skip
+    else:
+        new = new[:-1] + f' style="{style}">'
+    html = html[: m.start()] + new + html[m.end() :]
+    backdrop = '<div class="modal-backdrop fade show"></div>'
+    html = (
+        html.replace("</body>", backdrop + "</body>", 1) if "</body>" in html else html + backdrop
+    )
+    others = [d for d in har.open_dialogs(html) if d.startswith("#") and d != ident]
+    return _inject(html, "<style>" + _hide(others) + "</style>") if others else html
+
+
+def _inject(html: str, block: str) -> str:
+    head = re.search(r"</head>", html, re.IGNORECASE)
+    if head is not None:
+        return html[: head.start()] + block + html[head.start() :]
+    return block + html
+
+
 def _missing_reason(src: str, found) -> str:
     """Why an image a page snapshot shows has no file: its address was masked in the snapshot
     (a record number, so the file it names is a record's), or the browser never asked for it."""
@@ -744,10 +819,27 @@ LOOK_JS = r"""
     return c ? s + "." + c : s;
   };
   const box = (s, p) => [s[p + "Top"], s[p + "Right"], s[p + "Bottom"], s[p + "Left"]].join(" ");
+  // a background image or gradient: the element's own, else that of a child that covers it
+  // (a footer whose inner row carries the gradient)
+  const bgImage = (el, depth) => {
+    const own = getComputedStyle(el).backgroundImage;
+    if (own && own !== "none") return own;
+    if (depth >= 2) return "";
+    const r = el.getBoundingClientRect();
+    for (const c of Array.from(el.children).slice(0, 8)) {
+      const b = c.getBoundingClientRect();
+      if (r.width * r.height > 0 && b.width * b.height >= 0.9 * r.width * r.height) {
+        const got = bgImage(c, depth + 1);
+        if (got) return got;
+      }
+    }
+    return "";
+  };
   const pick = (el) => {
     const s = getComputedStyle(el);
     return {
-      color: s.color, background: s.backgroundColor, font_family: s.fontFamily,
+      color: s.color, background: s.backgroundColor, background_image: bgImage(el, 0),
+      font_family: s.fontFamily,
       font_size: s.fontSize, font_weight: s.fontWeight, font_style: s.fontStyle,
       line_height: s.lineHeight, letter_spacing: s.letterSpacing,
       text_transform: s.textTransform, text_align: s.textAlign,
@@ -960,12 +1052,22 @@ def _clear(value: str) -> bool:
     return value in ("", "transparent", "rgba(0, 0, 0, 0)")
 
 
+def background_image(value: str) -> str:
+    """A computed `background-image` as a token: gradients with hex colours, an image's address
+    as the path of the carried file (never the rendering's host)."""
+    value = re.sub(r"rgba?\([^)]*\)", lambda m: colour(m.group()), value or "")
+    value = re.sub(r'url\("?' + re.escape(RENDER_HOST) + r'([^")]*)"?\)', r"url(\1)", value)
+    return value.strip()
+
+
 def _style(group: dict) -> dict:
     """One group's computed style, colours as hex, nothing empty."""
     out = {}
     for key, value in (group.get("style") or {}).items():
         if key in ("color", "background"):
             value = "transparent" if _clear(value) else colour(value)
+        elif key == "background_image":
+            value = background_image(value)
         elif key in ("border", "border_bottom"):
             width, _, rest = value.partition(" ")
             kind, _, col = rest.partition(" ")
@@ -1008,8 +1110,9 @@ def _font(variant: dict | None) -> dict | None:
 def _control(variant: dict | None) -> dict | None:
     if not variant:
         return None
-    keys = ("background", "color", "border", "border_bottom", "radius", "padding", "margin",
-            "height", "font_size", "font_weight", "shadow", "text_transform")  # fmt: skip
+    keys = ("background", "background_image", "color", "border", "border_bottom", "radius",
+            "padding", "margin", "height", "font_size", "font_weight", "shadow",
+            "text_transform")  # fmt: skip
     return {k: variant[k] for k in keys if k in variant}
 
 
@@ -1054,6 +1157,10 @@ def theme(looks: dict[str, dict], viewport: dict | None = None) -> dict:
         "menu_link": (first("nav_link") or {}).get("color"),
         "border": ((inp or {}).get("border") or "").split(" ")[-1] or None,
         "header_background": (header or {}).get("background"),
+        "header_background_image": (header or {}).get("background_image"),
+        "footer_background": (first("footer") or {}).get("background"),
+        "footer_background_image": (first("footer") or {}).get("background_image"),
+        "page_background_image": (body or {}).get("background_image"),
         "header_text": (header or {}).get("color"),
         "table_header_background": (th or {}).get("background"),
         "table_row_border": ((td or {}).get("border_bottom") or "").split(" ")[-1] or None,
@@ -1345,7 +1452,19 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
         served[found[url].key] = (found[url].body, found[url].mime or "font/woff2")
         served["/" + rel] = served[found[url].key]
     viewport = _viewport(recordings)
-    rendered, why_not = render({n: (patterns[n], pages[n]) for n in pages}, served, viewport)
+    # Each screen drawn with no dialog open; each dialog the recording showed open on that screen
+    # drawn on its own, open over it.
+    seen_open = dialogs_seen_open(recordings)
+    to_draw = {n: (patterns[n], without_dialogs(pages[n])) for n in pages}
+    dialog_of: dict[str, tuple[str, str]] = {}
+    for n in pages:
+        for ident in sorted(seen_open.get(patterns[n], set())):
+            html = with_dialog_open(pages[n], ident)
+            if html is not None:
+                key = f"{n}{DIALOG_SEP}{_file_name(ident.lstrip('#'), set())}"
+                to_draw[key] = (patterns[n], html)
+                dialog_of[key] = (n, ident)
+    rendered, why_not = render(to_draw, served, viewport)
 
     screens = []
     texts: dict[str, list[dict]] = {}
@@ -1365,8 +1484,23 @@ def write(root: Path, app_id: str, recordings: list[Path] | None = None) -> dict
                          height=size[1] if size else None,
                          sha256=hashlib.sha256(shot.png).hexdigest(),
                          not_loaded=[a for a in shot.asked if not a.endswith((".js", ".mjs"))])  # fmt: skip
+        for key, (screen, ident) in sorted(dialog_of.items()):
+            dshot = rendered.get(key)
+            if screen != name or dshot is None:
+                continue
+            _write(out / "screens" / f"{key}.png", dshot.png)
+            entry.setdefault("dialogs", []).append({
+                "dialog": ident, "picture": f"screens/{key}.png",
+                "sha256": hashlib.sha256(dshot.png).hexdigest(),
+                "drawn": "open over the screen, as the recording showed it"})  # fmt: skip
         screens.append(entry)
-    design = theme({n: r.look for n, r in rendered.items()}, viewport) if rendered else None
+    # tokens from the screens; from a dialog's picture only the dialog's own style
+    looks = {n: r.look for n, r in rendered.items() if n not in dialog_of}
+    for key in dialog_of:
+        if key in rendered:
+            roles = rendered[key].look.get("roles") or {}
+            looks[key] = {"roles": {"dialog": roles.get("dialog") or []}}
+    design = theme(looks, viewport) if rendered else None
     if design is not None:
         _write(out / "theme.json", _json(design))
     _write(out / "texts.json", _json({
@@ -1505,10 +1639,11 @@ def check_files(out: Path, manifest: dict, data: Data,
                     problems.append(f"texts.json ({screen}, {item.get('where')}) holds `{hit}`")
     for screen, shown in sorted((picture_texts or {}).items()):
         hits: set[str] = set()
+        base = screen.split(DIALOG_SEP)[0]  # a dialog's picture: the codes of its screen
         for line in shown.splitlines():
             line = " ".join(line.split())
-            hits.update(data.findings(line, codes.get(screen, set()),
-                                      label=line in labels.get(screen, set())))  # fmt: skip
+            hits.update(data.findings(line, codes.get(base, set()),
+                                      label=line in labels.get(base, set())))  # fmt: skip
         for hit in sorted(hits)[:5]:
             problems.append(f"the picture screens/{screen}.png shows `{hit}`")
     for path in sorted((out / "assets").glob("*.svg")) if (out / "assets").is_dir() else []:
