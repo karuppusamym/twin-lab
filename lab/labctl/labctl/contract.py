@@ -164,6 +164,22 @@ def _never_pressed(text: str, nav: dict | None) -> str:
     return "\n".join(out)
 
 
+def _cookies(ctxs: list) -> str:
+    """The cookies the recordings show (labctl.cookies), as lines of the sign-in section."""
+    from labctl import cookies, har, pagerules
+
+    hars = []
+    for c in ctxs:
+        try:
+            hars.append(har.load(c.part.path).har)
+        except (OSError, ValueError):
+            continue
+    scripts, _ = pagerules.scripts_of(ctxs)
+    own = [(s.path, s.text) for s in scripts if s.own and not s.library]
+    lines = cookies.brief_lines(cookies.observe(hars, own))
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None) -> str:
     """After `db/schema.sql` and the seed are written: the carried files, and the brief text."""
     from labctl import apicatalog, navmap, signin
@@ -189,7 +205,7 @@ def extend(root: Path, app_id: str, brief, model, text: str, state: dict | None)
     end = ("## Behaviour seen in the recordings", "## Part of a flow across applications",
            "## Running in the lab")  # fmt: skip
     text = _insert(text, apicatalog.brief_section(app_id, done), end)
-    text = _insert(text, signin.brief_section(app_id, found, wrote), end)
+    text = _insert(text, signin.brief_section(app_id, found, wrote) + _cookies(ctxs), end)
     text = _insert(text, navmap.brief_sections(app_id, nav), end)
     text = _insert(text, scope_section(root, app_id, brief, ctxs), ("## Stack to pin",))
     text = _never_pressed(text, nav)
