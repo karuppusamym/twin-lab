@@ -187,9 +187,15 @@ _SECRET_PATTERNS = [
     (re.compile(r"\b[a-z][a-z0-9+.-]*://[^/\s:@\"']+:[^@\s/\"']+@"), "a password in an address"),
     (
         re.compile(
-            r"(?i)[\"']?\b(?:api[_-]?key|apikey|client[_-]?secret|secret[_-]?key|access[_-]?"
-            r"token|auth[_-]?token|private[_-]?key|password|passwd|pwd|secret|token)[\"']?"
-            r"\s*[:=]\s*[\"']([^\"'\s,;}]{8,})"
+            r"(?i)\b(?:jsessionid|phpsessid|aspsessionid\w*|sessionid|session_id|sid)=[^\s;&\"'/]{6,}"
+        ),
+        "a session identifier",
+    ),
+    (
+        re.compile(
+            r"(?i)\b(?:api[_-]?key|apikey|client[_-]?secret|secret[_-]?key|access[_-]?"
+            r"token|auth[_-]?token|private[_-]?key|password|passwd|pwd|secret|token)[\\\"']*"
+            r"\s*[:=]\s*[\\\"']*([^\\\"'\s,;}]{8,})"
         ),
         "a credential",
     ),
@@ -349,7 +355,8 @@ def resources(recordings: list[Path], hosts: set[str] | None = None) -> list[Res
             data = {}
         for entry in (data.get("log") or {}).get("entries") or []:
             req, resp = entry.get("request") or {}, entry.get("response") or {}
-            if str(req.get("method", "")).upper() != "GET" or resp.get("status") != 200:
+            method = str(req.get("method", "")).upper()
+            if method not in ("GET", "POST") or resp.get("status") != 200:
                 continue
             url = str(req.get("url") or "")
             parts = urlsplit(url)
@@ -358,9 +365,11 @@ def resources(recordings: list[Path], hosts: set[str] | None = None) -> list[Res
             content = resp.get("content") or {}
             mime = str(content.get("mimeType") or "").split(";")[0].strip().lower()
             kind = kind_of(parts.path, mime)
-            if kind == "other":
+            # a page a form post answered (JSF, ASP.NET) is a page too; nothing else a POST is
+            if kind == "other" or (method == "POST" and kind != "document"):
                 continue
-            key = (parts.netloc.lower(), parts.path, parts.query)
+            key = (parts.netloc.lower(), parts.path, parts.query, method,
+                   len(str(content.get("text") or "")) if method == "POST" else 0)  # fmt: skip
             if key in seen:
                 continue
             seen.add(key)
@@ -397,6 +406,16 @@ def _fetched(rec: Path, hosts: set[str], seen: set) -> list[Res]:
 
 def _version_in(text: str) -> str | None:
     m = re.search(r"(?<![\d.])v?(\d+\.\d+(?:\.\d+)?(?:[-.](?:rc|beta|alpha)\.?\d*)?)(?![\d])", text)
+    return m.group(1) if m else None
+
+
+def _lib_version(text: str) -> str | None:
+    """A library's version as its own code states it: a banner (`/*! jQuery v3.7.1`), or JSF's
+    `jsf.specversion=23000` (specification 2.3)."""
+    m = re.search(r"specversion\s*=\s*(\d)(\d)(\d{3})\b", text[:200_000])
+    if m:
+        return f"specification {int(m.group(1))}.{int(m.group(2))}"
+    m = re.search(r"/\*[!*]?[^*]{0,200}?\bv?(\d+\.\d+\.\d+)", text[:3000])
     return m.group(1) if m else None
 
 
@@ -445,6 +464,7 @@ class Script:
     dynamic: list[tuple[int, str]] = field(default_factory=list)  # (token, path) of import()
     consts: dict[str, str] = field(default_factory=dict)
     ng: list = field(default_factory=list)  # compiled Angular components: (Component, Obj)
+    blocks: set[str] = field(default_factory=set)  # defs that are a class, function or object
 
     @property
     def path(self) -> str:
@@ -529,6 +549,17 @@ def read_script(res: Res) -> Script:
             v = t[i + 2].value
             if v.startswith(("/", "http://", "https://")) and " " not in v and len(v) > 1:
                 sc.consts.setdefault(str(tok.value), v)
+        if name is not None and span is not None:
+            v = t.at(span[0])
+            after = t.at(span[0] + 1)
+            if v is not None and (v.is_n("class", "function", "async") or v.is_p("{") or (
+                    v.kind == "name" and after is not None and after.is_p("=>")) or (
+                    v.is_p("(") and t.at(t.pairs.get(span[0], span[0]) + 1) is not None
+                    and t[t.pairs.get(span[0], span[0]) + 1].is_p("=>"))):  # fmt: skip
+                sc.blocks.add(str(name))
+            elif v is not None and v.is_n("Object") and t.at(span[0] + 2) and t[span[0] + 2].is_n(
+                    "freeze", "assign"):  # fmt: skip
+                sc.blocks.add(str(name))
         if name is not None:
             d = _depth(t, i)
             if name not in best or d < best[name][0]:
@@ -574,15 +605,20 @@ def read_script(res: Res) -> Script:
     return sc
 
 
+def _strip(path: str) -> str:
+    """A path without matrix parameters (`;jsessionid=...`): a session is never part of it."""
+    return "/".join(seg.split(";", 1)[0] for seg in path.split("/"))
+
+
 def _fp(path: str) -> str:
-    """A file's path as the map writes it: record numbers (3 digits or more) masked; a folder
-    name such as `i18n` stays."""
-    return sanitize.mask_identifiers(path)
+    """A file's path as the map writes it: no matrix parameters, record numbers (3 digits or
+    more) masked; a folder name such as `i18n` stays."""
+    return sanitize.mask_identifiers(_strip(path))
 
 
 def _resolve(base: str, ref: str) -> str:
     """A path the code names (`./chunk-x.js`, `/static/a.js`), as a path on the same origin."""
-    return urlsplit(urljoin(base, ref)).path
+    return _strip(urlsplit(urljoin(base, ref)).path)
 
 
 # --- text checks ---------------------------------------------------------------------------------
@@ -618,6 +654,11 @@ class Checker:
             or bool(check_text(s, self.hosts))
             or (names and sanitize.app_text(s, self.data.names, names=True) != s)
         )
+        if not bad:
+            from labctl import lookfeel
+
+            if lookfeel.text_kind(s) != "literal":
+                return False  # a placeholder of the sanitiser (`Xxxx 9999`): nothing to keep
         if bad:
             self.dropped += 1
         return not bad
@@ -680,7 +721,7 @@ def _placeholder(toks: list[js.Tok], consts: dict[str, str]) -> str:
     if names and names[-1] in consts and not any(x.is_p("(") for x in toks):
         return consts[names[-1]]
     name = names[-1] if names else "value"
-    return "{" + (name if len(name) >= 3 else "param") + "}"
+    return "{" + (name if len(name) >= 2 else "param") + "}"
 
 
 def _norm_route(path: str) -> str:
@@ -728,7 +769,8 @@ def path_matches(code: str, other: str) -> bool:
 
 def _canon(tag: str, attrs: dict[str, str], classes: list[str]) -> str:
     def clean(v: str) -> str:
-        return sanitize.mask_identifiers(v)
+        # a row of a server-rendered table: `list:table:3:open` is one element per row
+        return re.sub(r":\d+:", ":{row}:", sanitize.mask_identifiers(v))
 
     if attrs.get("id") and not attrs["id"].startswith("{"):
         return f"{tag}#{clean(attrs['id'])}"
@@ -840,6 +882,11 @@ class _HtmlNav(HTMLParser):
             self.forms.append({"method": (a.get("method") or "GET").upper(),
                                "action": a.get("action") or "", "selector": _canon(tag, a, classes)})  # fmt: skip
         kind = nav_kind(tag, clean, classes, bound)
+        script = " ".join(v for k, v in a.items() if k.startswith("on"))
+        if re.search(r"jsfcljs\(|__doPostBack\(|PrimeFaces\.ab\(|\.submit\(", script):
+            kind = "command link (posts the page's form: the server decides what follows)"
+        elif re.search(r"mojarra\.ab\(|jsf\.ajax\.request\(|faces\.ajax\.request\(", script):
+            kind = "ajax update (posts part of the form; the server re-renders a part)"
         el = None
         if kind:
             el = {"kind": kind, "tag": tag, "selector": _canon(tag, clean, classes), "text": ""}
@@ -963,6 +1010,7 @@ class Analysis:
         self.frameworks: set[str] = set()
         self.nav_code: list[dict] = []  # location.href = ..., window.open(...)
         self.shells: set[tuple[str, str]] = set()  # definitions that hold the router outlet
+        self.server_pages: list[dict] = []  # pages a server rendered (JSF, JSP, ASP.NET ...)
         self._run()
 
     # -- driver -----------------------------------------------------------------------------------
@@ -989,6 +1037,7 @@ class Analysis:
             lib = library_of(r)
             if lib:
                 name, version = lib
+                version = version or _lib_version(r.text or "")
                 self._lib(name, version, "its address" if version or not r.own else "its file name",
                           _fp(r.path) if r.own else None)  # fmt: skip
                 continue
@@ -1024,7 +1073,35 @@ class Analysis:
     # -- documents --------------------------------------------------------------------------------
 
     def _document(self, r: Res) -> None:
-        p = html_nav(r.text or "")
+        raw = html_nav(r.text or "")  # addresses and structure; its texts may be data
+        safe = sanitize.page(r.text or "", self.check.data.names).html
+        texts = {el["selector"]: el.get("text", "") for el in html_nav(safe).found}
+        p = raw
+        for el in p.found:  # the texts as the value-free page has them
+            el["text"] = texts.get(el["selector"], "")
+        p.title_text = html_nav(safe).title_text
+        page = sanitize.route_pattern(r.path)
+        server = not any(m in (r.text or "") for m in ("<app-root", 'id="root"', 'id="app"',
+                                                       "ng-version", "data-reactroot"))  # fmt: skip
+        if server:
+            self.frameworks.add("server pages")
+            row = {"path": page, "file": _fp(r.path), "framework": "server pages",
+                   "written": "a page the server answered"}  # fmt: skip
+            title = p.title_text
+            if title and self.check.ok(title):
+                row["title"] = title
+            self.server_pages.append(row)
+            for el in p.found:
+                tgt = el.get("target")
+                if el["kind"] == "link" and tgt and tgt.startswith("/") or el["kind"] != "link":
+                    nav = {"kind": el["kind"], "selector": el["selector"], "routes": [page],
+                           "file": _fp(r.path), "found_in": "a page the recording downloaded"}  # fmt: skip
+                    if el.get("text") and self.check.ok(el["text"]):
+                        nav["text"] = el["text"]
+                    if tgt:
+                        nav["target"] = sanitize.route_pattern(_resolve(r.path, tgt)) if not (
+                            tgt.startswith("#")) else tgt  # fmt: skip
+                    (self.dialogs if el["kind"] == "dialog" else self.nav).append(nav)
         if p.base:
             self.base = urlsplit(urljoin(r.url, p.base)).path or "/"
         for ref in p.scripts:
@@ -1087,7 +1164,7 @@ class Analysis:
         """The innermost definition (`var X = class ...`, `function X`) around token `i`."""
         best, size = None, None
         for name, (s, e) in sc.defs.items():
-            if s <= i < e and (size is None or e - s < size):
+            if s <= i < e and name in sc.blocks and (size is None or e - s < size):
                 best, size = name, e - s
         return best
 
@@ -1250,6 +1327,10 @@ class Analysis:
             p = parent_of[o]
             if p is not None and rows[o]["framework"] == "a route table":
                 rows[o]["framework"] = rows[p]["framework"]
+        kinds = {r["framework"] for r in rows.values()} - {"a route table"}
+        if len(kinds) == 1:  # one table, one router: a plain `{path, component}` is of its kind
+            for r in rows.values():
+                r["framework"] = next(iter(kinds))
         for o, row in rows.items():
             kids = [rows[c]["path"] for c, p in parent_of.items() if p == o]
             if kids:
@@ -1706,7 +1787,8 @@ class Analysis:
             if tok.kind == "str":
                 html = tok.value
             elif tok.kind == "tmpl":
-                html = "".join(s + ("{" + "value" + "}" if k < len(tok.value.exprs) else "")
+                exprs = tok.value.exprs
+                html = "".join(s + (_placeholder(exprs[k], {}) if k < len(exprs) else "")
                                for k, s in enumerate(tok.value.strings))  # fmt: skip
                 for expr in tok.value.exprs:  # `${'<a href="/x">'}` inside
                     for x in expr:
@@ -1736,10 +1818,10 @@ class Analysis:
                        "file": _fp(sc.path)}  # fmt: skip
                 if label:
                     row["component"] = label
-                if el["kind"] != "dialog" and el.get("text") and "{value}" not in el["text"]                         and self.check.ok(el["text"]):  # fmt: skip
+                if el["kind"] != "dialog" and el.get("text") and "{" not in el["text"]                         and self.check.ok(el["text"]):  # fmt: skip
                     row["text"] = el["text"]
                 if el.get("target"):
-                    row["target"] = self._target(el["target"].replace("{value}", "{param}"), routes)
+                    row["target"] = self._target(el["target"], routes)
                 if el["kind"] == "dialog":
                     if el.get("title") and self.check.ok(el["title"]):
                         row["title"] = el["title"]
@@ -1822,16 +1904,17 @@ class Analysis:
         """For a call at `k` (the `.` before the method): the element it is called on, when the
         code names it: `document.getElementById("x")`, `querySelector("#x")`, `$("#x")`."""
         t = sc.t
-        for j in range(k - 1, max(-1, k - 14), -1):
-            tok = t[j]
-            if tok.kind == "str" and t.at(j - 1) and t[j - 1].is_p("(") and t.at(j - 2):
-                callee = t[j - 2]
-                if callee.is_n("getElementById"):
-                    return f"#{tok.value}"
-                if callee.is_n("querySelector", "$", "jQuery"):
-                    return tok.value
-            if tok.is_p(";", "{", "}"):
-                break
+        end = t.at(k - 1)
+        if end is None or not end.is_p(")") or (k - 1) not in t.pairs:
+            return None
+        o = t.pairs[k - 1]
+        callee, arg = t.at(o - 1), t.at(o + 1)
+        if callee is None or arg is None or arg.kind != "str" or o + 2 != k - 1:
+            return None
+        if callee.is_n("getElementById"):
+            return f"#{arg.value}"
+        if callee.is_n("querySelector", "$", "jQuery", "getOrCreateInstance"):
+            return arg.value
         return None
 
     def _element_var(self, sc: Script, name: str) -> str | None:
@@ -2264,9 +2347,13 @@ class Analysis:
 def _inventory(an: Analysis) -> list[dict]:
     lazy = set(an.dynamic_refs) | {r.get("lazy_chunk") for r in an.routes if r.get("lazy_chunk")}
     out = []
+    listed = set()
     for r in an.res:
         if not r.own and r.kind not in ("script", "style sheet"):
             continue
+        if _fp(r.path) in listed and r.own:
+            continue
+        listed.add(_fp(r.path))
         lib = library_of(r)
         row = {"path": _fp(r.path) if r.own else "(another origin)",
                "kind": r.kind, "bytes": r.size, "source": r.source}  # fmt: skip
@@ -2339,7 +2426,16 @@ def document(an: Analysis, app: str, *, ctxs=None, endpoints: list[dict] | None 
     have = {r.path for r in an.res}
     routes = []
     seen = set()
-    for r in an.routes:
+    pages = {p["path"] for p in an.server_pages}
+    extra = list(an.server_pages)
+    for n in an.nav:  # a server page's link to a page the recording did not download
+        tgt = n.get("target")
+        if n.get("found_in") and tgt and tgt.startswith("/") and tgt not in pages \
+                and not re.search(r"\.(?:js|css|png|jpe?g|gif|svg|ico|pdf|json)$", tgt):  # fmt: skip
+            pages.add(tgt)
+            extra.append({"path": tgt, "file": n["file"], "framework": "server pages",
+                          "written": "a link on a page"})  # fmt: skip
+    for r in [*an.routes, *extra]:
         row = {k: v for k, v in r.items() if not k.startswith("_")}
         key = (
             row["path"],
