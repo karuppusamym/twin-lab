@@ -34,7 +34,7 @@ import yaml
 APPROVED = {"owner_approved", "reference_verified"}
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
              "behaviours.json", "codemap.json", "rules.json", "session.json")  # fmt: skip
-GENERATED_DIRS = ("pages/", "look/", "scripts/")
+GENERATED_DIRS = ("pages/", "look/", "scripts/", "spec/")
 ORACLES = ("automations/", "flows/", "lab/", "conditions/")
 APP_FILE = re.compile(r"^apps/([^/]+)/(.+)$")
 

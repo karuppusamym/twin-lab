@@ -72,6 +72,10 @@ def test_package_holds_exactly_the_build_inputs(tmp_path):
         "apps/demo/app.yaml",
         "apps/demo/pages/1.html",
         "evidence/demo/screenshots/login.png",
+        # the build documents written from these files (labctl.builder.docs)
+        "apps/demo/spec/CONSTITUTION.md",
+        "apps/demo/spec/ARCHITECTURE.md",
+        "apps/demo/spec/BUILD-PLAN.md",
     }
 
 

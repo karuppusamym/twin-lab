@@ -106,6 +106,10 @@ def problems(repo_root: Path, app_id: str) -> list[str]:
             out.append(f"steps/{path.name}: typing step(s) {', '.join(map(str, missing[:12]))}"
                        + (" ..." if len(missing) > 12 else "")
                        + " have no value in the values file")  # fmt: skip
+    # The build documents the package will carry (labctl.builder.docs): a page file per screen.
+    from labctl.builder import docs
+
+    out += docs.gaps(app_id, docs.inputs(Path(repo_root), app_id))
     return out
 
 
@@ -120,8 +124,21 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
                          "completeness check.",
         "AGENTS.md": "The lab's rules for coding agents.",
         "docs/factory-playbook.md": "How a demo application is built and run in the lab.",
-        app + "BRIEF.md": "The specification: scope, screens, API, sign-in, navigation, actions, "
-                          "data, seed, checks. Read it whole.",
+        app + "BRIEF.md": "The full specification: scope, screens, API, sign-in, navigation, "
+                          "actions, data, seed, checks. The reference behind every document "
+                          "under spec/.",
+        app + "session.json": "Sign-in and session as recorded: the call, each attempt, every "
+                              "cookie by name with its attributes and who sets and clears it "
+                              "(never a value or a credential).",
+        app + "spec/CONSTITUTION.md": "The rules of this build that are not negotiable (the same "
+                                      "text as the task's) and what \"done\" means. Read second.",
+        app + "spec/ARCHITECTURE.md": "Stack, layers, route table, API surface, data model, "
+                                      "sign-in, session and cookies, how the app runs. Read "
+                                      "third.",
+        app + "spec/BUILD-PLAN.md": "The build in order, each step with its \"done when\" lines. "
+                                    "Read fourth.",
+        app + "spec/GLOSSARY.md": "Option lists, code lists, the statuses the application "
+                                  "answered and the package's words.",
         app + "model.yaml": "Reference: everything the evidence showed (shapes, timings), which "
                             "the brief is generated from.",
         app + "app.yaml": "The application's lab settings and rules; you change only `run:`.",
@@ -149,6 +166,13 @@ def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
                 "stripped, checked for secrets and hosts): reference for its rules.")  # fmt: skip
     if rel in fixed:
         return fixed[rel]
+    if rel.startswith(app + "spec/PAGES/"):
+        text = data.decode("utf-8", "replace") if data else ""
+        head = text.split("\n", 1)[0].lstrip("# ").strip()
+        return (
+            f"Page file {head or rel.rsplit('/', 1)[-1]}: everything one screen needs, with "
+            "the file each fact comes from. Read the page files in order, one per screen."
+        )
     if rel.startswith(app + "api/"):
         try:
             doc = json.loads(data.decode("utf-8")) if data else {}
@@ -194,5 +218,5 @@ def index_md(app_id: str, files: list[tuple[str, str]], gaps: list[str]) -> str:
     else:
         lines.append("No gap found: every screen has an actions list, every endpoint a schema, "
                      "every navigation target a definition, every table seed rows, every typing "
-                     "step a value.")  # fmt: skip
+                     "step a value, every screen a page file.")  # fmt: skip
     return "\n".join(lines) + "\n"

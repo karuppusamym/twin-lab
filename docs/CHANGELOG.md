@@ -177,6 +177,38 @@ field, from three sources:
   partial update; its validators that were never triggered cannot be recovered: JSF checks on
   the server). The task text, the reading order, the index, the completeness check, the guard
   and `factory.GENERATED` name the new files.
+## 2026-11-18 — Build documents: a constitution, the architecture, a plan, one page file per screen
+A builder working screen by screen had to gather one screen's facts from the brief and six
+machine files. `labctl.builder.docs` now writes, into every web package and only from the
+files it already holds, `apps/<app>/spec/`:
+- **`CONSTITUTION.md`**: the numbered rules and what "done" means. The task's *Rules that are
+  not negotiable* and *done* list are written by the same functions (`docs.rules`,
+  `docs.done_items`), so the two cannot differ. New rules in both: same technology and
+  versions, same look, assumptions written down, done means every check holds.
+- **`ARCHITECTURE.md`**: stack and versions, layers, the route table (every screen, recorded,
+  in a frame or popup, found by the link check, or known only from `codemap.json`), the API
+  surface, tables with keys and relations and the field map, sign-in, session and cookies,
+  ports and environment variables, the flow across applications, a text diagram.
+- **`BUILD-PLAN.md`**: database and seed, sign-in, each screen in order from the entry along
+  the recorded ways, navigation, API, rules, look, self-check, each with "done when" lines
+  that point at the done list and the page files' checks.
+- **`PAGES/<NN>-<screen>.md`**: per screen its address, ways in and out, picture and regions,
+  literal texts, every element, what each action did, rules and behaviour, API calls linked to
+  their files, data and columns, seed rows, acceptance checks, replay steps, sub-views, open
+  questions. Pages not recorded and screens known only from code are marked so.
+- **`GLOSSARY.md`**: option lists, code lists, the statuses the application answered.
+- **Cookies.** Do cookies need capturing? Their values never: a rebuild issues its own, and no
+  value is read into the package. Their facts do: `sanitize.cookie_attributes` reads each
+  `Set-Cookie` (name, `Path` as a pattern, `Domain` relative to the host, `HttpOnly`, `Secure`,
+  `SameSite`, `Partitioned`, lifetime as a duration, cleared or not), `signin` records which
+  response set and cleared each cookie, and `apps/<app>/session.json`, the brief's *Sign-in and
+  session* and `ARCHITECTURE.md` carry them. Tests check that no cookie value from the HAR is in
+  any packaged file.
+- The task's reading order is now task, constitution, architecture, plan, page files, with the
+  brief and the machine files as references; `INDEX.md` and `MANIFEST.json` describe each new
+  file; the completeness check counts a screen without a page file as a gap; the guard and
+  `factory.GENERATED` protect `spec/` and `session.json`. The folder is `spec/` because the
+  repository ignores every `build/` folder.
 ## 2026-11-18 — The build package carries the API, the navigation, every action and the sign-in
 What a coding agent gets was measured on two recordings (the two-application fixture, and a new
 help-desk fixture whose pages are filled by a JSON API), then the gaps were closed.
