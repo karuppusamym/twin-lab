@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:h="http://xmlns.jcp.org/jsf/html"
+      xmlns:f="http://xmlns.jcp.org/jsf/core"
+      xmlns:p="http://primefaces.org/ui">
+<h:head>
+  <title id="ownerPickerHeader">Pick an owner</title>
+  <h:outputStylesheet library="css" name="caseboard.css"/>
+</h:head>
+<h:body styleClass="picker">
+  <!-- Opened by the dialog framework (PrimeFaces.current().dialog().openDynamic("picker")) in an
+       iframe inside a dialog of the workspace; choosing closes it (closeDynamic). -->
+  <h1>Pick an owner</h1>
+  <h:form id="pick">
+    <!-- closeDynamic finds its dialog by this id, from the iframe's address. -->
+    <input type="hidden" name="pfdlgcid" value="#{param.pfdlgcid}"/>
+    <p:dataTable id="owners" var="o" value="#{store.owners}">
+      <p:column headerText="Owner">
+        <h:outputText value="#{o}"/>
+      </p:column>
+      <p:column headerText="" style="width:7rem">
+        <p:commandButton id="choose" value="Choose" action="#{picker.choose(o)}" process="@this"/>
+      </p:column>
+    </p:dataTable>
+  </h:form>
+</h:body>
+</html>

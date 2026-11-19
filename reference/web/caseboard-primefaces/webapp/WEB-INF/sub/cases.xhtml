@@ -1,0 +1,57 @@
+<ui:composition xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:h="http://xmlns.jcp.org/jsf/html"
+                xmlns:f="http://xmlns.jcp.org/jsf/core"
+                xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+                xmlns:p="http://primefaces.org/ui">
+  <h2 id="subTitle">Cases</h2>
+  <!-- A lazy data table: paging, sorting and filtering are ajax calls answered by the server
+       (a partial response that updates main:cases), plus row selection and row expansion. -->
+  <p:dataTable id="cases" widgetVar="casesTable" var="c" value="#{work.model}" lazy="true"
+               paginator="true" rows="5" paginatorPosition="bottom"
+               paginatorTemplate="{FirstPageLink} {PreviousPageLink} {PageLinks} {NextPageLink} {LastPageLink}"
+               selectionMode="single" selection="#{work.selected}" rowKey="#{c.number}"
+               emptyMessage="No cases found">
+    <p:ajax event="rowSelect" listener="#{work.onRowSelect}" update="main:selection main:actions"/>
+    <p:column id="colToggle" style="width:2rem">
+      <p:rowToggler/>
+    </p:column>
+    <p:column id="colNumber" headerText="Number" sortBy="#{c.number}">
+      <h:outputText value="#{c.number}"/>
+    </p:column>
+    <p:column id="colTitle" headerText="Title" filterBy="#{c.title}" filterMatchMode="contains"
+              filterEvent="enter">
+      <h:outputText value="#{c.title}"/>
+    </p:column>
+    <p:column id="colOwner" headerText="Owner" sortBy="#{c.owner}">
+      <h:outputText value="#{c.owner}"/>
+    </p:column>
+    <p:column id="colStatus" headerText="Status">
+      <h:outputText value="#{c.status}"/>
+    </p:column>
+    <p:rowExpansion>
+      <div class="expansion">
+        <span class="label">Priority</span> <h:outputText value="#{c.priority}"/>;
+        <span class="label">Notes</span> <h:outputText value="#{c.noteCount}"/>
+      </div>
+    </p:rowExpansion>
+  </p:dataTable>
+
+  <p:outputPanel id="selection" layout="block" styleClass="selection">
+    <h:outputText value="Selected: #{work.selected.number}" rendered="#{not work.nothingSelected}"/>
+    <h:outputText value="Select a case in the table" rendered="#{work.nothingSelected}"/>
+  </p:outputPanel>
+  <p:outputPanel id="actions" layout="block" styleClass="buttons">
+    <p:commandButton id="openDetail" value="Open" action="#{work.openDetail}" process="@this"
+                     update="main:content" disabled="#{work.nothingSelected}"/>
+    <p:commandButton id="quickNote" value="Quick note" process="@this" update="main:noteDlg"
+                     oncomplete="PF('noteDlg').show()" disabled="#{work.nothingSelected}"/>
+    <p:commandButton id="closeCase" value="Close case" action="#{work.closeSelected}"
+                     process="@this" update="main:content main:growl"
+                     disabled="#{work.nothingSelected}">
+      <p:confirm header="Close case" message="Close the selected case?"/>
+    </p:commandButton>
+    <!-- A full postback that FORWARDS to case.xhtml: the address bar keeps /workspace.xhtml. -->
+    <p:commandButton id="openPage" value="Open case page" action="#{work.openPage}" ajax="false"
+                     disabled="#{work.nothingSelected}"/>
+  </p:outputPanel>
+</ui:composition>

@@ -1,0 +1,31 @@
+<ui:composition xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:h="http://xmlns.jcp.org/jsf/html"
+                xmlns:f="http://xmlns.jcp.org/jsf/core"
+                xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+                xmlns:p="http://primefaces.org/ui">
+  <h2 id="subTitle">Reports</h2>
+  <!-- An accordion whose panels are loaded by ajax when first opened (dynamic). -->
+  <p:accordionPanel id="acc" dynamic="true" cache="true" activeIndex="-1">
+    <p:tab id="byStatus" title="By status">
+      <table class="grid">
+        <ui:repeat value="#{store.countBy('status')}" var="e">
+          <tr><td><h:outputText value="#{e.key}"/></td><td><h:outputText value="#{e.value}"/></td></tr>
+        </ui:repeat>
+      </table>
+    </p:tab>
+    <p:tab id="byOwner" title="By owner">
+      <table class="grid">
+        <ui:repeat value="#{store.countBy('owner')}" var="e">
+          <tr><td><h:outputText value="#{e.key}"/></td><td><h:outputText value="#{e.value}"/></td></tr>
+        </ui:repeat>
+      </table>
+    </p:tab>
+    <p:tab id="byPriority" title="By priority">
+      <table class="grid">
+        <ui:repeat value="#{store.countBy('priority')}" var="e">
+          <tr><td><h:outputText value="#{e.key}"/></td><td><h:outputText value="#{e.value}"/></td></tr>
+        </ui:repeat>
+      </table>
+    </p:tab>
+  </p:accordionPanel>
+</ui:composition>

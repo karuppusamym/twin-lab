@@ -1,0 +1,37 @@
+<ui:composition xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:h="http://xmlns.jcp.org/jsf/html"
+                xmlns:f="http://xmlns.jcp.org/jsf/core"
+                xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+                xmlns:p="http://primefaces.org/ui">
+  <h2 id="subTitle">Case <h:outputText id="detailNumber" value="#{work.detail.number}"/></h2>
+  <!-- A tab view whose tabs are loaded by ajax the first time they are opened (dynamic). -->
+  <p:tabView id="tabs" dynamic="true" cache="true">
+    <p:tab id="summary" title="Summary">
+      <table class="fields">
+        <tr><td>Title</td><td><h:outputText id="detailTitle" value="#{work.detail.title}"/></td></tr>
+        <tr><td>Owner</td><td><h:outputText id="detailOwner" value="#{work.detail.owner}"/></td></tr>
+        <tr><td>Status</td><td><h:outputText id="detailStatus" value="#{work.detail.status}"/></td></tr>
+        <tr><td>Priority</td><td><h:outputText id="detailPriority" value="#{work.detail.priority}"/></td></tr>
+      </table>
+    </p:tab>
+    <p:tab id="notes" title="Notes">
+      <ul class="notes">
+        <ui:repeat value="#{work.detail.notes}" var="n">
+          <li><h:outputText value="#{n}"/></li>
+        </ui:repeat>
+      </ul>
+      <h:outputText value="No notes yet" rendered="#{empty work.detail.notes}" styleClass="note"/>
+    </p:tab>
+    <p:tab id="history" title="History">
+      <ol class="history">
+        <ui:repeat value="#{work.detail.history}" var="h">
+          <li><h:outputText value="#{h}"/></li>
+        </ui:repeat>
+      </ol>
+    </p:tab>
+  </p:tabView>
+  <div class="buttons">
+    <p:commandButton id="backToList" value="Back to the list" actionListener="#{work.show('cases')}"
+                     process="@this" update="main:content"/>
+  </div>
+</ui:composition>

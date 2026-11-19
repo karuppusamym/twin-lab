@@ -48,8 +48,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qsl, urljoin, urlsplit
 
+from labctl import jsfviews, sanitize
 from labctl import jstokens as js
-from labctl import sanitize
 
 FILE = "codemap.json"
 FORMAT = "twinlab-codemap/1"
@@ -2416,7 +2416,11 @@ def build(recordings: list[Path], app: str, *, hosts: set[str] | None = None, ct
     """The code map of an application from its recordings (and the files fetched beside them)."""
     hosts = own_hosts(recordings) if hosts is None else hosts
     an = Analysis(resources(recordings, hosts), hosts, checker)
-    return document(an, app, ctxs=ctxs, endpoints=endpoints, whole=whole)
+    doc = document(an, app, ctxs=ctxs, endpoints=endpoints, whole=whole)
+    found = jsfviews.widgets(recordings)  # PrimeFaces widgets of the pages and partial responses
+    if found:
+        doc["widgets"] = found
+    return doc
 
 
 def document(an: Analysis, app: str, *, ctxs=None, endpoints: list[dict] | None = None,

@@ -36,6 +36,8 @@ from pathlib import Path
 
 import yaml
 
+from labctl import jsfviews
+
 DIR = "spec"  # apps/<app>/spec/
 PAGES = "PAGES"
 CONSTITUTION = "CONSTITUTION.md"
@@ -871,6 +873,12 @@ def page_doc(pkg: Pkg, sc: Screen) -> str:
         w(f"Each opens and closes as recorded, on the same element (`{app}/navigation.json`):")
         w("")
         lines += [_sub_line(v) for v in subs]
+        states = jsfviews.doc_sections(subs)  # JSF: one section per state inside the view
+        if states:
+            w("")
+            w("Each state reached inside this screen, with its own snapshot (rebuild every one):")
+            w("")
+            lines += states
     else:
         w("None recorded on this screen.")
     if sc.host:
