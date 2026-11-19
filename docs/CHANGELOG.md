@@ -75,6 +75,37 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   (their packages are not on this machine). WinForms, WPF and Java Swing have their gates in
   code but were not run: they take the real mouse and need `TWINLAB_DESKTOP_GUI=1`. The React
   entry is NOT RUN in CI, where its vendor files are not built.
+## 2026-11-18 — JSF sub-pages: views, ajax states and partial responses (PrimeFaces reference)
+- Reported from the office: in JSF applications with ajax, sub-pages were not recorded and linked.
+  Reproduced on a new reference, `reference/web/caseboard-primefaces/` (Mojarra 2.3.9 and
+  PrimeFaces 10.0.0, the one new jar, from Maven Central with its pinned SHA-1): sign-in and a
+  case page reached by postback and forward (the address one step behind), four sub-pages swapped
+  by ajax at one address, a tab view and an accordion loaded on first open, a wizard, a dialog,
+  a confirm dialog, a dialog-framework page in an iframe (slow to answer), a lazy data table
+  (paging, sorting, filtering, row expansion and selection) and a remote command.
+- Before, the package had 4 screens, the wrong ones: the workspace was merged into `/login.xhtml`
+  (whose page file and page document showed it), the case page into `/workspace.xhtml`; none of
+  the 3 transitions was right and sign-in was not linked; 11 sub-views, none with an opener (every
+  PrimeFaces dialog and panel "first seen open"); no sub-page, wizard step or table state; 4
+  snapshots. The replay of the recording stopped at step 20 of 56 (18 replayed, 4 failed).
+- Now (`labctl/jsfviews.py`): a step's screen is the view its page shows (the address its JSF
+  forms post to), so the 4 screens are right and the 3 forwards are transitions with `forward`
+  and `address_after`; 26 states inside the workspace, each with its opener, what its partial
+  response re-rendered, its own snapshot (30 snapshots) and a section in the page document; every
+  `<partial-response>` read from the HAR (updates, scripts by name, redirect, error,
+  `validationFailed`), with what is ignored (view state, head resources); PrimeFaces widgets in
+  `codemap.json`. The recording replays on a fresh instance: 56 of 56 steps, 0 failed.
+- Recorder and replay: the settle rule also waits while PrimeFaces holds a request (its queue, a
+  table filter's delay) or a same-origin frame is loading, and briefly for jQuery animations
+  (read-only looks); a PrimeFaces row is found again (its `<tbody>` is the list, `even`/`odd` and
+  `ui-state-*` do not narrow it, a cell is named by its place); pointer classes
+  (`ui-state-hover`, `ui-state-focus`, `ui-state-filled`) are not compared. Tests:
+  `test_jsfviews.py`, `test_recorder_jsf.py`, `test_reference_primefaces.py` (skips without a
+  JDK or the jars).
+- Left open: a typed value is masked wherever the recorder writes it, ids included (a value an
+  id holds changes that id in the evidence); the sanitiser masks some interface words of state
+  titles (a column "Number", a tab "Notes") as data; sub-pages swapped by plain script with no
+  partial response, client-side state saving, file upload and push are not covered.
 ## 2026-11-18 — JSF proven on a real application: the Caseboard reference
 - Detection and capture had rules for JSF but had never met a JSF application. There is one now:
   `reference/web/caseboard-jsf/` (Mojarra 2.3.9 on embedded Jetty 9.4, Facelets pages, classic

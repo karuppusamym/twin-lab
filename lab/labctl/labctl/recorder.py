@@ -146,7 +146,7 @@ LISTENER_JS = r"""
   }
 
   // --- which element: ranked locator candidates, each with how many elements it matched ------
-  const STATE = /^(active|selected|completed|done|editing|checked|disabled|hover|focus|focused|open|opened|closed|show|shown|hidden|current|visible|expanded|collapsed|on|off|(is|has|ng|router-link)-.*)$/i;
+  const STATE = /^(active|selected|completed|done|editing|checked|disabled|hover|focus|focused|open|opened|closed|show|shown|hidden|current|visible|expanded|collapsed|on|off|(is|has|ng|router-link|ui-state)-.*|even|odd|.*[-_](even|odd))$/i;
   const ROW = "li, tr, [role=row], [role=listitem], [role=option], [role=treeitem]";
   const TESTID = ["data-testid", "data-test-id", "data-test", "data-cy", "data-qa"];
   const ROLE_SEL = {
@@ -352,9 +352,17 @@ LISTENER_JS = r"""
       // would pick one by position are left out, so a reordered list blocks instead.
       // The records: the row's list under the nearest identified ancestor, at any depth, so a
       // wrapper added around the list does not lose them.
-      const raSel = anchorOf(row)[1], holder = row.parentElement;
-      const rows = raSel + " " + (holder && holder !== document.body ? seg(holder) + " > " : "") + seg(row);
-      const control = row === el ? "" : pathFrom(row, el);
+      const [ra, raSel] = anchorOf(row), holder = row.parentElement;
+      // the list itself may be the identified ancestor (PrimeFaces: <tbody id="form:table_data">)
+      const rows = raSel + (holder === ra ? " > " : " " + (holder && holder !== document.body ? seg(holder) + " > " : "")) + seg(row);
+      let control = row === el ? "" : pathFrom(row, el);
+      // a cell of a table row (`td`) is one of several alike: its place among them names it
+      let alike = 0;
+      try { alike = control ? row.querySelectorAll(":scope > " + control).length : 0; } catch (e) {}
+      if (alike > 1) {
+        const up = pathFrom(row, el.parentElement);
+        control = (up ? up + " > " : "") + seg(el) + ":nth-child(" + (Array.prototype.indexOf.call(el.parentElement.children, el) + 1) + ")";
+      }
       const title = rowTitle(row);
       let same = 0;
       try { for (const r of document.querySelectorAll(rows)) if (rowTitle(r) === title) same++; } catch (e) {}
@@ -492,13 +500,44 @@ LISTENER_JS = r"""
       return send.apply(this, args);
     };
   } catch (e) {}
+  // Read-only looks at what the page still has to do (no page code is run but these getters):
+  // 2 when a request is queued or held back (PrimeFaces' ajax queue, a data table's filter
+  // waiting out its delay) or a frame of this origin is still loading its page (a dialog-framework
+  // page), 1 while jQuery animates (a dialog or panel opening), else 0. JSF's and PrimeFaces'
+  // requests themselves are XHRs, counted in `inflight`.
+  function busy() {
+    try {
+      const pf = window.PrimeFaces, queue = pf && pf.ajax && pf.ajax.Queue;
+      if (queue && ((queue.requests && queue.requests.length) || (queue.xhrs && queue.xhrs.length)
+          || (typeof queue.isEmpty === "function" && !queue.isEmpty()))) return 2;
+      if (pf && pf.widgets) for (const k in pf.widgets) if (pf.widgets[k] && pf.widgets[k].filterTimeout) return 2;
+    } catch (e) {}
+    try {
+      for (const f of document.querySelectorAll("iframe")) {
+        let d = null;
+        try { d = f.contentDocument; } catch (e) { d = null; }  // another origin's frame: its own
+        const src = f.getAttribute("src") || "";
+        if (d && (d.readyState !== "complete" || (src && !/^(about|javascript):/i.test(src) && d.URL === "about:blank"))) return 2;
+      }
+    } catch (e) {}
+    try {
+      const jq = window.jQuery;
+      if (jq && jq.timers && jq.timers.length) return 1;
+    } catch (e) {}
+    return 0;
+  }
   function quietAgain() {
     if (!TOP) { changed(); return; }
     if (!pending.length) return;
     clearTimeout(timer);
     const waited = Date.now() - first;
-    if (waited > (inflight ? NET_WAIT : MAX_WAIT)) { flush(false, true); return; }
-    timer = setTimeout(() => { if (inflight && Date.now() - first < NET_WAIT) quietAgain(); else flush(false, true); }, SETTLE);
+    if (waited > ((inflight || busy() === 2) ? NET_WAIT : MAX_WAIT)) { flush(false, true); return; }
+    timer = setTimeout(() => {
+      const left = Date.now() - first, b = busy();
+      if ((inflight || b === 2) && left < NET_WAIT) quietAgain();
+      else if (b === 1 && left < MAX_WAIT) quietAgain();
+      else flush(false, true);
+    }, SETTLE);
   }
   let lastPing = 0;
   function changed() {  // a frame's page changed: the top page waits until it settles too

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:h="http://xmlns.jcp.org/jsf/html"
+      xmlns:f="http://xmlns.jcp.org/jsf/core"
+      xmlns:ui="http://xmlns.jcp.org/jsf/facelets"
+      xmlns:p="http://primefaces.org/ui">
+<f:metadata>
+  <f:viewAction action="#{login.guard}"/>
+</f:metadata>
+<h:head>
+  <title>Caseboard PF - Workspace</title>
+  <h:outputStylesheet library="css" name="caseboard.css"/>
+</h:head>
+<h:body>
+  <div class="bar"><span class="brand">Caseboard PF</span></div>
+  <!-- One address for every sub-page: the menu swaps the ui:include inside main:content by
+       ajax (p:commandLink update="main:content"). -->
+  <h:form id="main">
+    <p:growl id="growl" life="60000"/>
+    <div class="layout">
+      <nav id="menu" class="menu">
+        <p:commandLink id="navCases" value="Cases" actionListener="#{work.show('cases')}"
+                       process="@this" update="main:content"/>
+        <p:commandLink id="navNew" value="New case" actionListener="#{work.show('newcase')}"
+                       process="@this" update="main:content"/>
+        <p:commandLink id="navReports" value="Reports" actionListener="#{work.show('reports')}"
+                       process="@this" update="main:content"/>
+        <h:commandLink id="signOut" value="Sign out" action="#{login.signOut}" immediate="true"/>
+      </nav>
+      <div class="main">
+        <h:outputText id="count" styleClass="count" value="#{work.count} cases"/>
+        <!-- p:remoteCommand: a server call made from script, here when the page loads. -->
+        <p:remoteCommand name="refreshCount" process="@this" update="main:count" autoRun="true"/>
+        <p:outputPanel id="content" layout="block" styleClass="content">
+          <ui:include src="#{work.include}"/>
+        </p:outputPanel>
+      </div>
+    </div>
+
+    <p:dialog id="noteDlg" widgetVar="noteDlg" header="Quick note" modal="true" resizable="false">
+      <p:outputLabel for="noteText" value="Note"/>
+      <p:inputTextarea id="noteText" value="#{work.noteText}" rows="3" cols="40"/>
+      <div class="buttons">
+        <p:commandButton id="saveNote" value="Save note" action="#{work.saveNote}"
+                         process="@this noteText" update="main:growl main:content"
+                         oncomplete="PF('noteDlg').hide()"/>
+        <p:commandButton id="cancelNote" value="Cancel" type="button" onclick="PF('noteDlg').hide()"/>
+      </div>
+    </p:dialog>
+
+    <p:confirmDialog id="confirm" global="true">
+      <p:commandButton id="confirmYes" value="Yes" type="button" styleClass="ui-confirmdialog-yes"/>
+      <p:commandButton id="confirmNo" value="No" type="button" styleClass="ui-confirmdialog-no"/>
+    </p:confirmDialog>
+  </h:form>
+</h:body>
+</html>

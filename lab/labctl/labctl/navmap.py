@@ -34,7 +34,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from labctl import sanitize, stepfacts
+from labctl import jsfviews, sanitize, stepfacts
 
 FILE = "navigation.json"
 FORMAT = "twinlab-navigation/1"
@@ -195,8 +195,9 @@ class Pages:
         self.c = ctx
         self.snaps: list[tuple[int, str, str, object, object]] = []  # seq, when, screen, raw, safe
         part = ctx.part
+        views = jsfviews.step_views(part.raw, part.doms)  # JSF: the view, not the address bar
         for s in part.raw:
-            screen = stepfacts._pattern(s.get("url"))
+            screen = views.get(s["seq"]) or stepfacts._pattern(s.get("url"))
             if not screen:
                 continue
             for when, store in (("before", part.befores), ("after", part.doms)):
@@ -639,6 +640,7 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
                     have["closed_by"] += [
                         w for w in view["closed_by"] if w not in have["closed_by"]
                     ]
+        jsf = [v for c in ctxs for v in jsfviews.subviews(c, path, pages_by[c.name])]
         acts = screen_actions(ctxs, pages_by, path, views)
         kinds[path] = {a["selector"]: a for a in acts}
         for a in acts:
@@ -676,7 +678,7 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
             row["note"] = ("shown in " + ", ".join(f"`{sel}` on `{p}`" for p, sel in framed_in)
                            + ": its elements and their use are listed under that screen, with "
                            "the frame's selector in front (`iframe#x >>> ...`)")  # fmt: skip
-        sub = [{k: v for k, v in view.items()} for view in views.values()] + frames
+        sub = jsfviews.merge([dict(view) for view in views.values()], jsf, frames)
         if sub:
             row["subviews"] = sub
         row["elements"] = acts
@@ -751,6 +753,8 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
             if w.get("opened_from") == row["path"]:
                 row.setdefault("subviews", []).append(w)
     entry = None
+    jsf_doc = {"screens": screens, "transitions": moves}
+    jsfviews.annotate(jsf_doc, ctxs)  # JSF: partial requests per use, forwards, the jsf section
     for c in ctxs:
         start = next((s for s in c.steps() if s["action"] == "goto" and not s.get("caused_by")
                       and (s.get("then") or s.get("screen"))), None)  # fmt: skip
@@ -766,6 +770,7 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
         "redirects": redirects(ctxs),
         "windows": wins,
         "undefined_targets": sorted(set(undefined)),
+        **({"jsf": jsf_doc["jsf"]} if "jsf" in jsf_doc else {}),
         **({"link_check": checked.summary,
             "unrecorded_pages": linkcheck.unrecorded_pages(checked, app)} if checked else {}),
     }  # fmt: skip
@@ -778,6 +783,7 @@ def write(root: Path, app: str, brief, ctxs: list, extend=None) -> dict | None:
         path.unlink(missing_ok=True)
         return None
     doc = build(root, app, brief, ctxs)
+    jsfviews.write_snapshots(root, app, doc)
     if extend is not None:
         doc = extend(doc) or doc
     from labctl import linkcheck

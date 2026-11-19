@@ -255,6 +255,59 @@ of the data:
 - The brief's *Scope*: with no automation and no flow written by a person, everything the
   recording shows, in recorded order.
 
+### JSF and PrimeFaces: views, sub-pages and partial responses
+
+Office JSF applications break "one address, one screen". A postback is often answered with the
+next view (a forward, no redirect), so the address bar keeps the page before: the workspace shows
+under `/login.xhtml`. And most of the work happens inside one view: ajax re-renders a region (a
+dynamic `ui:include`), a tab, a wizard step, an accordion panel, a dialog, a dialog-framework page
+in an iframe, or a data table's page, sort, filter, selection and expansion, while the address
+never changes. `labctl/jsfviews.py` reads both from what the recording already holds, running none
+of the page's code:
+
+- **The screen of a step is its view**, not the address: the address its JSF forms post to (a JSF
+  form posts to its own view; frames' documents left out), else PrimeFaces'
+  `PrimeFaces.settings.viewId`; a step without a snapshot takes the view of the last page at the
+  same address. The step list, the screens and their snapshots, the transitions and each call's
+  screen follow it (`stepfacts`, `har.analyse`, `navmap`). `navigation.json` lists the page loads
+  whose address showed another page (`jsf.address_lag`), and marks such a transition
+  `forward: true` with `address_after`: build it the same way, a postback answered with the next
+  view.
+- **Partial responses** (`<partial-response>`, which the HAR holds in full): per ajax request the
+  component that sent it, its event, what it asked to execute and render, and what the answer
+  did: the regions it updated (client ids), the scripts it ran (by the functions they call:
+  `PrimeFaces.openDialog`), a redirect, an error, PrimeFaces' callback arguments
+  (`validationFailed`). `navigation.json` gives them per element use (`jsf_ajax`) and in all
+  (`jsf.partial_actions`); the view state and head resources they also carried are listed as
+  `jsf.ignored` (the rebuilt application makes its own).
+- **States inside a view** are sub-views of their screen: `sub-page (ajax region)` (a region a
+  partial response replaced with new HTML holding a heading; one state per set of components it
+  holds), `tab`, `wizard step`, `accordion panel`, `dialog`, `confirm dialog`,
+  `dialog-framework page (iframe)` (with the page it shows), `table page`, `table sort`,
+  `table result (filter)`, `table row expansion`, `table row selection`. Each has the steps and
+  elements that opened and closed it, what that action re-rendered, and its own value-free
+  snapshot (`apps/<app>/pages/<screen>--NN-<kind>-<title>.html`, sanitised like the screen's page
+  file); the screen's page document has a section per state. PrimeFaces hides a dialog by
+  `aria-hidden` and empties its `role`: both are read.
+- **PrimeFaces widgets** in `codemap.json` (`widgets`): every `PrimeFaces.cw(...)` of the pages and
+  partial responses, by type, widget variable, client id and option names (never their values).
+- **The recorder's settle rule** also waits while PrimeFaces still holds a request (its ajax queue,
+  a data table's filter waiting out its delay) or a frame of the page's origin is still loading
+  (a dialog-framework page), and up to 3 s while jQuery animates. These are read-only looks at the
+  page. The replay waits the same way before it compares.
+- A click on a PrimeFaces table row is named by a record locator that finds the row again: the
+  identified `<tbody>` itself is the list, striping classes (`even`, `odd`) and PrimeFaces' state
+  classes (`ui-state-*`) do not narrow it, and a cell is named by its place in the row. The replay
+  does not compare PrimeFaces' pointer classes (`ui-state-hover`, `ui-state-focus`).
+
+Proven on `reference/web/caseboard-primefaces` (Mojarra 2.3.9, PrimeFaces 10.0.0; its
+`certify_local.py` and `tests/test_reference_primefaces.py`). Not covered: a forward to a view
+with no JSF form on it (the address is then the only clue), sub-pages that no partial response
+replaced (a region swapped by plain script), PrimeFaces' client-side state saving, `p:fileUpload`,
+push (`p:socket`), and the server's navigation rules themselves (`faces-config.xml` outcomes are
+code the HAR does not hold). The recorder takes every typed value out of what it writes, ids and
+attribute values included: a value that an id or a label also holds is masked there too.
+
 ### What the application's code defines
 
 The HAR also holds the code the browser downloaded: the pages, the scripts, the style sheets

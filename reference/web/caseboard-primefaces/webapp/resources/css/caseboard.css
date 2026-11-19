@@ -1,0 +1,19 @@
+body { font-family: Segoe UI, Arial, sans-serif; margin: 0; color: #1f2933; background: #f5f7fa; }
+body.picker { background: #fff; padding: 8px; }
+.bar { background: #243b53; color: #fff; padding: 10px 24px; }
+.bar .brand { font-weight: 600; font-size: 18px; }
+.layout { display: flex; }
+.menu { width: 160px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.main { padding: 16px 24px; flex: 1; max-width: 960px; }
+.count { color: #52606d; }
+h1 { font-size: 22px; }
+h2 { font-size: 19px; }
+.field { margin: 8px 0; }
+.field label, .field .label { display: inline-block; width: 110px; }
+.buttons { margin-top: 12px; display: flex; gap: 10px; }
+.selection { margin-top: 10px; color: #334e68; }
+table.grid { border-collapse: collapse; width: 100%; background: #fff; }
+table.grid td { border: 1px solid #d9e2ec; padding: 4px 10px; }
+table.fields td { padding: 4px 12px 4px 0; vertical-align: top; }
+.note { color: #52606d; }
+.expansion { padding: 6px 12px; }
