@@ -161,6 +161,14 @@ def facts(part: Path) -> Facts:
             row["typed_shape"] = str(s["typed_shape"])[:64]
         if s.get("option_index") is not None:
             row["option_index"] = s["option_index"]
+        dialog = s.get("dialog")
+        if isinstance(dialog, dict) and dialog.get("kind") in ("alert", "confirm", "prompt"):
+            row["dialog"] = {"kind": dialog["kind"], "choice": dialog.get("choice") or "dismiss"}
+            if isinstance(dialog.get("message"), str) and dialog["message"].strip():
+                # the application's text, masked again with what the recording knows as data
+                text = sanitize.mask_message(dialog["message"], known)
+                row["dialog"]["message"] = text
+                row["messages"] = [{"selector": f"browser {dialog['kind']}", "text": text}]
         if reqs:
             row["requests"] = reqs
         if here and here != row["screen"]:
@@ -171,7 +179,8 @@ def facts(part: Path) -> Facts:
             page_before_html = befores.get(s["seq"]) or page_before
             new = sorted(messages(html) - messages(page_before_html))
             if new:
-                row["messages"] = [{"selector": a, "text": b} for a, b in new]
+                row["messages"] = [*row.get("messages", []),
+                                   *({"selector": a, "text": b} for a, b in new)]  # fmt: skip
             page_before = html
         if here:
             screen_before = here
@@ -462,7 +471,9 @@ def write_steps(root: Path, app_id: str) -> tuple[list[Path], list[Facts]]:
             "step number; `global`, when present, the number in the whole recording across "
             "applications that the brief cites. `target`, where the selector is not an element's "
             "own id (it may match several elements), is the ranked locator the replay finds the "
-            "element by. The value the acceptance replay types at each step, when generated, is "
+            "element by. `dialog` is a browser alert, confirm or prompt: its kind, the answer "
+            "given and its message (interface text, data masked). The value the acceptance "
+            "replay types at each step, when generated, is "
             "in `<recording>.values.yaml` beside this file.",
             "steps": f.steps,
         }

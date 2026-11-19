@@ -672,6 +672,24 @@ UNSUPPORTED_ACTIONS = {
 }  # fmt: skip
 
 
+def same_message(recorded: str, shown: str) -> bool:
+    """Whether a dialog's message says what the recorded one said: the same words, where each
+    masked value of the recording (`Order 9999 saved`: a shape of x, X and 9) stands for any one
+    word of the replica (its own synthetic value)."""
+    from labctl import sanitize
+
+    want, got = recorded.split(), sanitize.mask_message(shown).split()
+    if len(want) != len(got):
+        return False
+    for w, g in zip(want, got, strict=True):
+        if w.lower() == g.lower():
+            continue
+        if re.fullmatch(r"[\W_]*[Xx9][Xx9\W_]*", w) and re.search(r"[Xx9]", w):
+            continue
+        return False
+    return True
+
+
 class _Run:
     """One replay: the browser context, its tabs, and how each step is performed."""
 
@@ -736,7 +754,12 @@ class _Run:
 
     def _on_dialog(self, page, dialog) -> None:
         want = self.armed.pop(id(page), None)
-        self.dialogs.append({"kind": dialog.type, "step": want["step"] if want else None})
+        try:
+            message = str(dialog.message or "")
+        except Exception:  # noqa: BLE001 - a driver without the message
+            message = ""
+        self.dialogs.append({"kind": dialog.type, "step": want["step"] if want else None,
+                             "message": message})  # fmt: skip
         try:
             if want is None or want["choice"] != "accept":
                 dialog.dismiss()
@@ -970,6 +993,11 @@ class _Run:
                             f"{d.get('choice')}); the replica showed none")  # fmt: skip
         if d.get("kind") and seen["kind"] != d["kind"]:
             raise _NotShown(f"the source showed a {d['kind']}, the replica a {seen['kind']}")
+        if d.get("message") and not same_message(d["message"], seen.get("message") or ""):
+            from labctl import sanitize
+
+            raise _NotShown(f"the source's {d.get('kind', 'dialog')} said {d['message']!r}, the "
+                            f"replica's {sanitize.mask_message(seen.get('message') or '')!r}")  # fmt: skip
         return f"{seen['kind']} answered {d.get('choice', 'dismiss')}", True
 
     def _download_seen(self, step: RecStep) -> tuple[str, bool]:
