@@ -2662,6 +2662,13 @@ def write(root: Path, app: str, ctxs: list, done: dict | None = None, whole: boo
     endpoints = ((done or {}).get("index") or {}).get("endpoints") or []
     doc = build(recordings, app, hosts=hosts, ctxs=ctxs, endpoints=endpoints, checker=checker,
                 whole=whole)  # fmt: skip
+    from labctl import vendor  # which of the libraries the package carries (apps/<app>/vendor/)
+
+    carried = {(x["name"], x.get("version")): x["folder"]
+               for x in (vendor.load(root, app) or {}).get("libraries") or []}  # fmt: skip
+    for lib in doc.get("third_party") or []:
+        if (lib["name"], lib.get("version")) in carried:
+            lib["carried"] = f"apps/{app}/{carried[(lib['name'], lib.get('version'))]}/"
     text = dump(doc)
     bad = check_text(text, hosts)
     if bad:
@@ -2821,12 +2828,13 @@ def brief_section(app: str, doc: dict | None, refused: list[str] | None = None) 
            f"while recording ({count['script']} script(s), {count['document']} page(s), "
            f"{count['json configuration'] + count['i18n bundle']} JSON file(s)"
            + (f"; {fetched} more fetched afterwards with `labctl evidence fetch-code`" if fetched
-              else "") + "), without running any of it. No script is carried in this package, "
-           "only what was read from it.\n"]  # fmt: skip
+              else "") + "), without running any of it. No script of the application's own is "
+           "carried in this package, only what was read from it.\n"]  # fmt: skip
     libs = doc.get("third_party") or []
     if libs:
-        out.append("Third-party libraries (named, not analysed; use the same ones): "
+        out.append("Third-party libraries (not analysed; use the same ones): "
                    + ", ".join(f"{x['name']}" + (f" {x['version']}" if x.get("version") else "")
+                               + (f" (carried: `{x['carried']}`)" if x.get("carried") else "")
                                for x in libs) + ".\n")  # fmt: skip
     if whole:
         out.append(f"**What to build.** {RULE}\n")

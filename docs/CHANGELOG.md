@@ -2,6 +2,37 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Build packages carry the open-source libraries and web fonts
+The owner's decision ("Carry them"): a blind rebuild of Demoblaze passed every check but set
+its text in a serif fallback, lost the video player's icon font and wrote its own stand-ins for
+Bootstrap's dialogs and carousel, because the libraries were named, not carried. Now the brief
+step carries them by default (`labctl/vendor.py`, `labctl/fontname.py`):
+- **Libraries**: every third-party style sheet and script the browser received, byte for byte,
+  under `apps/<app>/vendor/<library>/<version>/` with the fonts and images its style sheets
+  reference, when `libraries.py` identifies it (a file name alone is not enough), its licence
+  allows redistribution (MIT, BSD, Apache-2.0, ISC, MPL-2.0, OFL-1.1, Unlicense, CC0; from its
+  banner or the known licence of a well-known library) and it holds no key, token or internal
+  host. Anything else is named with the reason. The application's own scripts are never carried
+  by this rule. `vendor/vendor.json` lists every file with its address and sha256 and which page
+  loads it; `TWINLAB_VENDOR=off` switches it off.
+- **Fonts**: the font files of the HAR go into `look/fonts/` when their own `name` table (read
+  without a font package: TrueType, OpenType, WOFF 1; WOFF 2 when a `brotli` module is
+  installed) or a known open family says the licence allows it; the carried style sheets point
+  at them and the pictures are rendered with them. `TWINLAB_LOOK_FONTS` stays an override:
+  `bundle` (every file, with a warning), `off` (none). Fonts embedded in a library's style
+  sheet stay with it (video.js's icons); `@font-face` with a `data:` address is now read.
+- **Notices**: `apps/<app>/THIRD-PARTY-NOTICES.md` (name, version, licence, address, sha256,
+  files, and the licence texts from `labctl/licences/`); purposes in `MANIFEST.json`/`INDEX.md`.
+  The brief (*Client libraries and fonts*), `spec/ARCHITECTURE.md`, the page files, the
+  constitution's *same technology* rule and the task say to use these exact files. The package
+  refuses a `vendor/` file it did not carry. The guard and `factory.GENERATED` protect
+  `vendor/` and the notices. Tests: `test_vendor.py` (fixture `vendorapp`, fonts built in the
+  test).
+- Demoblaze: Bootstrap 4.0.0-alpha.6, jQuery 3.2.1, video.js 7.6.5 and SweetAlert, tether and
+  videojs-contrib-hls (versions not stated in the files) are carried; Lato Regular (OFL-1.1)
+  is in `look/fonts/` and the pictures now show Lato. Open: three libraries have no stated
+  version (`version-unknown`); the Lato weights the recording never loaded are not carried.
+
 ## 2026-11-19 — Demoblaze blind rebuild, round 2: the lab's own replay and judging defects
 The judge's official replay failed only on defects in the lab's tooling; each is fixed with a
 test (`test_replay_empty_fragment.py`, `test_replay_settle.py`,

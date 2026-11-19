@@ -202,7 +202,7 @@ same recordings, and the build package carries it (`labctl/lookfeel.py`):
 | `theme.json` | Design tokens: the colours in use (page, text, links, buttons, borders, messages), the font per role (body, headings, labels, inputs, buttons, table header and cell) with size and weight, padding, border and corner radius of the controls, spacing, the window size and the regions of each screen. |
 | `screens/<screen>.png` | One picture per screen, to compare a built screen with. |
 | `assets/*` | The images of the interface: logo, icons, sprites. |
-| `fonts/*` | Web font files, only with `TWINLAB_LOOK_FONTS=bundle`. |
+| `fonts/*` | The web font files the HAR holds whose licence allows redistribution (see *Open-source libraries and fonts* below); the carried style sheets point at them and the pictures are rendered with them. |
 | `texts.json` | Per screen, every text: `literal` (copy it exactly), `data` (a placeholder) or `mixed`. |
 | `manifest.json` | Every carried file, every font and image with the reason it is or is not carried, and the result of the privacy check. |
 
@@ -223,7 +223,9 @@ How it stays free of data:
   or more digits and names the recording shows as data are masked. Font names are left alone.
 - **Fonts are licensed.** Each font family is named with where it came from (a system font, or
   a web font file seen in the HAR with its path, format and size) and the closest generic
-  fallback. The files are copied only when the owner sets `TWINLAB_LOOK_FONTS=bundle`.
+  fallback. A font file is copied when its licence allows redistribution (the rule below);
+  every other one is named with the reason. `TWINLAB_LOOK_FONTS=bundle` copies every font file
+  the HAR holds (with a warning where the licence is not identified), `off` copies none.
 - **Images.** Only a static file of the application's own origin that the interface uses (a
   style sheet, or an `<img>` or icon outside data cells), with no record number in its path, no
   query but a version (`?v=3`), not under a folder for user content (`uploads`, `avatars`,
@@ -243,6 +245,53 @@ Not carried: styles a page adds through script without a `<style>` element (cons
 adopted style sheets), addresses inside inline `<style>` blocks and `style` attributes (they
 are `url(#)` in the snapshots), hover and focus states (only as the style sheets define them),
 and one picture per screen (the fullest snapshot), not one per state.
+
+### Open-source libraries and fonts
+
+A builder told only "jQuery 3.2.1, Bootstrap 4.0.0-alpha.6, video.js" writes stand-ins for the
+dialogs, the carousel and the video player, and a page in a fallback font. So the brief step
+also carries, by default, the open-source files the browser received (`labctl/vendor.py`):
+
+| In `apps/<app>/` | What it is |
+|---|---|
+| `vendor/<library>/<version>/...` | Each third-party library's style sheets and scripts, byte for byte, with the fonts and images its style sheets reference at the same relative places (so its own `url(...)` references work). A version the file does not state is `version-unknown`. |
+| `vendor/vendor.json` | Every library carried and not carried with the reason, each file's original address, sha256 and size, which page loads which file, the application's own scripts (never carried by this rule), the fonts carried. |
+| `THIRD-PARTY-NOTICES.md` | Name, version, licence, original address, sha256 and files of everything carried, then the standard text of each licence used (short local copies in `lab/labctl/labctl/licences/`, never downloaded; MPL-2.0 and CC0-1.0 as their own short notice forms). |
+| `look/fonts/*` | The web font files (above). |
+
+The brief's section *Client libraries and fonts*, `spec/ARCHITECTURE.md`, the page files and
+the build task say: use these exact files and versions, served at the addresses the pages
+reference or from `vendor/` with the references adjusted; never a stand-in. The *same
+technology* rule names them as available. `MANIFEST.json` and `INDEX.md` give each a purpose.
+
+**The licence rule.** A library file is carried only when all of these hold:
+
+1. `labctl/libraries.py` identifies it as a third-party library (by banner, package folder,
+   public library host or file name). A file named like a library and nothing more (no banner,
+   no version in its content, not from a package folder or a public library host) may be the
+   application's own code and is not carried. The application's own scripts are never carried
+   by this rule; `TWINLAB_PAGE_SCRIPTS=carry` stays the owner's opt-in for those.
+2. Its licence allows redistribution: MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC,
+   MPL-2.0, OFL-1.1, Unlicense or CC0-1.0, read from the file's own licence banner, or, when
+   the banner states none, from the known licence of a well-known library (jQuery MIT,
+   Bootstrap MIT, video.js and videojs-contrib-hls Apache-2.0, tether MIT, SweetAlert MIT,
+   Popper MIT, Font Awesome Free CSS MIT and fonts OFL-1.1, and others in `KNOWN_LIBRARIES`).
+   A banner that names other terms (GPL, proprietary, commercial) wins over the mapping.
+3. It passes the secret and host check: nothing shaped like a key, token, credential or
+   connection string (the code map's patterns), no long random value outside an embedded
+   `data:` file, no internal host name or private address in a string or an address. Public
+   hosts in a library's comments are its code, not a leak.
+
+A file that fails is named in the brief, `vendor.json` and the notices with the reason, as
+before. A font file is carried when its own `name` table (licence record 13, licence address 14;
+copyright 0) names a licence on the list, read without any font package from TrueType,
+OpenType and WOFF 1 (zlib); WOFF 2 needs Brotli, used only when a `brotli` module is installed.
+When the file cannot be read or states nothing, a known open family decides (Lato, Font
+Awesome, the common Google Fonts families: OFL-1.1; VideoJS: Apache-2.0); a font a library's
+style sheet uses takes the library's licence for its fonts. Otherwise it is not carried and the
+manifest says why. `TWINLAB_VENDOR=off` carries no library. `labctl build package` refuses a
+`vendor/` file that `vendor.json` does not list, whose sha256 differs, or that fails the check
+now.
 
 ### What a package says about the API, the navigation and the sign-in
 
@@ -611,6 +660,11 @@ A HAR or a database export from a real system holds customer data, cookies and t
   are replaced by synthetic values of the same shape.
 - Where real-shaped values are needed, they go through the keyed masking from Prod Echo first.
 - Only the model, the brief and the generated schema are committed.
+- Open-source code and fonts are not data: the third-party libraries and web fonts the
+  application delivered are carried when their licence allows redistribution and they hold no
+  key, token or internal host (*Open-source libraries and fonts*); their licences travel in
+  `THIRD-PARTY-NOTICES.md`. The application's own scripts are not carried without the owner's
+  opt-in.
 - Interface, not data, and kept because a builder needs it: the file names of static images,
   style sheets, scripts and fonts of the application's own origin that are named by a word
   (`blazemeter-favicon-512x512.png`; a file named by a number, hash or key prefix, or under a

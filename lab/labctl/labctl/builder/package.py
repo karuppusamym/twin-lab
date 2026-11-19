@@ -208,6 +208,10 @@ def _collect(repo_root: Path, app_id: str) -> list[tuple[str, Path]]:
     from labctl import pagerules
 
     found.update(pagerules.package_files(repo_root, app_id))
+    # The open-source client libraries carried and their licences (labctl.vendor).
+    from labctl import vendor
+
+    found.update(vendor.package_files(repo_root, app_id))
     shots = repo_root / "evidence" / app_id / "screenshots"
     if shots.is_dir():
         for path in sorted(shots.rglob("*")):
@@ -767,6 +771,11 @@ def _reading_order(app: str, app_id: str, packaged: list[str]) -> str:
     else:
         rows.append("The package has no pictures or style sheets of the screens: the styles "
                     "inside the snapshots are the reference.")  # fmt: skip
+    if any_under(f"{app}/vendor/"):
+        rows.append(f"`{app}/vendor/` (`vendor.json` lists every file) and "
+                    f"`{app}/THIRD-PARTY-NOTICES.md`: the application's open-source client "
+                    "libraries, the exact files and versions, with their licences. Use them as "
+                    "they are.")  # fmt: skip
     if f"{app}/navigation.json" in have:
         rows.append(f"`{app}/navigation.json`: every screen, each way in and out, dialogs, tabs, "
                     "frames and popup windows, and every element of each screen with what "
@@ -1067,6 +1076,14 @@ def prompt(repo_root: Path, app_id: str, repo: str | None, state_dir: Path | Non
         public_note = pub.note() + "\n" if pub is not None else ""
     look_section = public_note + look_section
     look_files = f", `{app}/look/**`" if look_section else ""
+    # The open-source libraries and fonts carried (labctl.vendor): the same files, not stand-ins.
+    from labctl import vendor
+
+    look_section += vendor.task_text(repo_root, app_id)
+    carried = vendor.load(repo_root, app_id)
+    if carried and carried.get("libraries"):
+        look_files += f", `{app}/{vendor.DIR}/**`, `{app}/{vendor.NOTICES}`"
+    libraries_text = vendor.rule_text(app, carried)
     look_check = lookfeel.check_step(repo_root, app_id)
     if look_check:
         shots_text = (f" `{app}/look/screens/*.png` are pictures of the screens, rendered "
@@ -1122,7 +1139,7 @@ Rebuild in the **same technology the brief's "Stack to pin" section names**: the
 framework and version, the server technology and the UI library. Do not substitute another
 because it is easier. If that section names none, use the default it states and record that in
 BUILD-NOTES.md. Pin the version of the language, the framework and every library you use, and
-list them in BUILD-NOTES.md. From the brief, as it stands:
+list them in BUILD-NOTES.md.{libraries_text} From the brief, as it stands:
 {stack_block}
 ## Rules that are not negotiable
 
@@ -1300,6 +1317,12 @@ def _build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None,
     if script_problems:
         raise PackageError(f"cannot package {app_id}: the scripts (apps/{app_id}/scripts) failed "
                            "the check: " + "; ".join(script_problems[:10]))  # fmt: skip
+    from labctl import vendor  # refuses a library file it did not carry, or one that fails now
+
+    vendor_problems = vendor.package_check(repo_root, app_id)
+    if vendor_problems:
+        raise PackageError(f"cannot package {app_id}: the libraries (apps/{app_id}/vendor) failed "
+                           "the check: " + "; ".join(vendor_problems[:10]))  # fmt: skip
     entries: list[tuple[str, bytes]] = [(TASK_FILE, task)]
     entries += [(rel, _content(path)) for rel, path in files]
     # The build documents (labctl.builder.docs), written from these entries only.

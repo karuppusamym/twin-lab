@@ -3046,7 +3046,7 @@ def brief_section(app_id: str, doc: dict | None) -> str:
                    for x in scripts.get("libraries") or []})  # fmt: skip
     out.append("**Scripts read:** " + (", ".join(names[:20]) if names else "none of the "
                "application's own") + ". " + ("Named, not analysed: " + ", ".join(libs[:20]) + ". "
-               if libs else "") + "No script is carried" + (
+               if libs else "") + "No script of the application's own is carried" + (
                f" except, on the owner's request, `{app}/{SCRIPTS_DIR}/`" if (
                    scripts.get("carried") or {}).get("files") else "") + ".\n")  # fmt: skip
     refused = (scripts.get("carried") or {}).get("refused")
@@ -3099,6 +3099,11 @@ def extend(root: Path, app_id: str, model, text: str) -> str:
     section = brief_section(app_id, doc)
     if not section:
         return text
+    from labctl import vendor
+
+    if (vendor.load(root, app_id) or {}).get("libraries"):  # the libraries are carried
+        section = section.replace("Named, not analysed: ", "Third-party, not analysed (carried in "
+                                  f"`apps/{app_id}/{vendor.DIR}/`, see *{vendor.HEADING}*): ", 1)  # fmt: skip
     for marker in ("## Behaviour seen in the recordings", "## Part of a flow across applications",
                    "## Running in the lab"):  # fmt: skip
         if marker in text:

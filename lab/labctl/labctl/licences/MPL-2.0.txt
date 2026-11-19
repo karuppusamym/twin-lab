@@ -1,0 +1,6 @@
+Mozilla Public License, version 2.0: the notice the licence itself prescribes (Exhibit A,
+"Source Code Form License Notice"). The full text is not copied here; Exhibit A provides for this
+form when the licence is not distributed with the file.
+
+This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of
+the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.

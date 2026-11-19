@@ -269,6 +269,14 @@ def _generate(root, app_id, system, source, db_engine, force, data) -> Result:
     if look:
         marker = "## Running in the lab"
         text = text.replace(marker, look + marker, 1) if marker in text else f"{text}\n{look}"
+    # The open-source client libraries and fonts, carried (apps/<app>/vendor/, the notices).
+    from labctl import vendor
+
+    vendor.write(root, app_id, [] if model.stack.desktop else None)
+    carried = vendor.brief_section(root, app_id)
+    if carried:
+        marker = "## Running in the lab"
+        text = text.replace(marker, carried + marker, 1) if marker in text else f"{text}\n{carried}"
     _write(schema_file, brief_mod.schema(result, root))
     # The API catalogue, the navigation map, sign-in and the scope (labctl.contract).
     text = contract.extend(root, app_id, result, model, text, extras)
@@ -399,7 +407,8 @@ def write_behaviours(app_id: str, recordings: list[Path], path: Path) -> list[st
 GENERATED = ("BRIEF.md", "model.yaml", "db/schema.sql", "db/seed.sql", "db/seed.json",
              "behaviours.json", "pages", "steps", "look", "api",
              "navigation.json", "codemap.json", "rules.json",
-             "scripts", "session.json", "templates.json", "static")  # fmt: skip
+             "scripts", "session.json", "templates.json", "static", "vendor",
+             "THIRD-PARTY-NOTICES.md")  # fmt: skip
 
 
 def backup(root: Path, app_id: str) -> Path | None:
