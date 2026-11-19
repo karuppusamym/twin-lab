@@ -137,6 +137,124 @@ def cookie_names(entry: dict) -> set[str]:
     return {n for n in names if COOKIE_NAME.match(n)}
 
 
+COOKIE_FLAGS = {"httponly": "http_only", "secure": "secure", "partitioned": "partitioned"}
+
+
+def _duration(seconds: int) -> str:
+    """`3600` -> `1 hour (3600 s)`: how long a cookie lives, never a date."""
+    for size, word in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if seconds >= size and seconds % size == 0:
+            n = seconds // size
+            return f"{n} {word}{'s' if n != 1 else ''} ({seconds} s)"
+    return f"{seconds} s"
+
+
+def _cookie_domain(domain: str, host: str) -> str:
+    """Where a cookie's `Domain` points, relative to the application's own host. The host
+    itself is never written: a real hostname is not carried."""
+    d = domain.strip().lstrip(".").lower()
+    h = host.split(":", 1)[0].lower()
+    if not d:
+        return "not set: the cookie belongs to the application's own host only"
+    if d == h:
+        return "the application's own host"
+    if h.endswith("." + d):
+        return "a parent domain of the application's host: shared with its sibling hosts"
+    return "another domain than the application's host"
+
+
+def cookie_attributes(entry: dict) -> list[dict]:
+    """The cookies a response set, by name, with their attributes and NEVER their value: `Path`
+    (as an address pattern), `Domain` relative to the application's host, `HttpOnly`, `Secure`,
+    `SameSite`, `Partitioned`, and the lifetime as a duration (`Max-Age`, or `Expires` measured
+    from the response's own date): a session cookie, a persistent one, or one being cleared.
+
+    Read from the response's `Set-Cookie` headers; a HAR that holds only the parsed `cookies`
+    list (some recorders) is read from that. The value part of each header is dropped unread."""
+    from email.utils import parsedate_to_datetime
+
+    req, resp = entry.get("request") or {}, entry.get("response") or {}
+    host = urlsplit(str(req.get("url") or "")).netloc
+    when = None
+    for h in resp.get("headers") or []:
+        if str(h.get("name", "")).lower() == "date":
+            try:
+                when = parsedate_to_datetime(str(h.get("value") or ""))
+            except (TypeError, ValueError):
+                when = None
+    if when is None and entry.get("startedDateTime"):
+        from datetime import datetime
+
+        try:
+            when = datetime.fromisoformat(str(entry["startedDateTime"]).replace("Z", "+00:00"))
+        except ValueError:
+            when = None
+
+    def lifetime(max_age: str | None, expires: str | None) -> dict:
+        seconds = None
+        if max_age is not None and re.fullmatch(r"-?\d{1,12}", max_age.strip()):
+            seconds = int(max_age)
+        elif expires and when is not None:
+            try:
+                at = parsedate_to_datetime(expires)
+            except (TypeError, ValueError):
+                try:
+                    from datetime import datetime
+
+                    at = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+                except ValueError:
+                    at = None
+            if at is not None and at.tzinfo is not None and when.tzinfo is not None:
+                seconds = int((at - when).total_seconds())
+        if max_age is None and not expires:
+            return {"lifetime": "session: no Max-Age or Expires, it ends when the browser closes"}
+        if seconds is None:
+            return {"lifetime": "persistent: its expiry could not be read"}
+        if seconds <= 0:
+            return {"lifetime": "cleared: Max-Age 0 or an expiry in the past (the browser "
+                                "deletes it)", "clears": True}  # fmt: skip
+        return {"lifetime": f"persistent: {_duration(seconds)}", "max_age_seconds": seconds}
+
+    out: dict[str, dict] = {}
+    for h in resp.get("headers") or []:
+        if str(h.get("name", "")).lower() != "set-cookie":
+            continue
+        for line in str(h.get("value") or "").splitlines():
+            first, _, rest = line.partition(";")
+            name = first.split("=", 1)[0].strip()
+            if "=" not in first or not COOKIE_NAME.match(name):
+                continue
+            row: dict = {"name": name}
+            attrs: dict[str, str | None] = {}
+            for part in rest.split(";"):
+                key, eq, val = part.partition("=")
+                key = key.strip().lower()
+                if key:
+                    attrs[key] = val.strip() if eq else None
+            row["path"] = route_pattern(attrs["path"]) if attrs.get("path") else "not set"
+            row["domain"] = _cookie_domain(attrs.get("domain") or "", host)
+            for flag, field in COOKIE_FLAGS.items():
+                row[field] = flag in attrs
+            same = (attrs.get("samesite") or "").capitalize()
+            row["same_site"] = same if same in ("Lax", "Strict", "None") else "not set"
+            row.update(lifetime(attrs.get("max-age"), attrs.get("expires")))
+            out[name] = row
+    for c in resp.get("cookies") or []:  # only when the headers did not hold the cookie
+        name = str(c.get("name") or "")
+        if name in out or not COOKIE_NAME.match(name):
+            continue
+        same = str(c.get("sameSite") or "").capitalize()
+        row = {"name": name,
+               "path": route_pattern(str(c["path"])) if c.get("path") else "not set",
+               "domain": _cookie_domain(str(c.get("domain") or ""), host),
+               "http_only": bool(c.get("httpOnly")), "secure": bool(c.get("secure")),
+               "partitioned": False,
+               "same_site": same if same in ("Lax", "Strict", "None") else "not set"}  # fmt: skip
+        row.update(lifetime(None, str(c["expires"]) if c.get("expires") else None))
+        out[name] = row
+    return [out[n] for n in sorted(out)]
+
+
 # --- values ----------------------------------------------------------------------------------------
 
 

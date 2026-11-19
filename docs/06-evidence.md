@@ -243,8 +243,15 @@ of the data:
 - `apps/<app>/navigation.json`: every screen, each way in and out, dialogs, in-page tabs,
   frames and popup windows, links seen and not visited, and every interactive element with
   what happened when the recording used it, or "seen, not used".
-- The brief's *Sign-in and session*: what was observed, by name only, and the tables
-  `app_users` and `app_sessions` the rebuilt application keeps users and sessions in.
+- The brief's *Sign-in and session* and `apps/<app>/session.json`: what was observed, by name
+  only, and the tables `app_users` and `app_sessions` the rebuilt application keeps users and
+  sessions in. Every cookie a response set is listed by name with the response that set it
+  (request, status, step, screen), its attributes (`Path` as an address pattern, `Domain`
+  relative to the application's host, `HttpOnly`, `Secure`, `SameSite`, `Partitioned`, the
+  lifetime as a duration: session or persistent) and the response that cleared it, read from
+  the HAR's `Set-Cookie` headers (`sanitize.cookie_attributes`). A cookie's value is never read
+  into the package and is not needed: the rebuilt application issues its own. Neither is the
+  host name a `Domain` names.
 - The brief's *Scope*: with no automation and no flow written by a person, everything the
   recording shows, in recorded order.
 
@@ -391,9 +398,31 @@ What a package still cannot say, found by the blind rebuild of the help-desk fix
   have no column for their parent in the inferred schema; the endpoint file says so.
 - Rules beyond what was recorded and what the HTML and scripts state (see *Field rules and
   page behaviour*): server-side validation never triggered, paging at the edges, what an
-  unknown identifier answers, cookie attributes.
+  unknown identifier answers.
 - Which row a click on a repeated element took is given (`record` in `navigation.json`), but
   the replay's own `bindings.yaml` still needs that record named by a person.
+
+### The build documents: one file per screen
+
+The brief is one long document; a builder who works screen by screen would collect one screen's
+facts from the brief, `navigation.json`, `rules.json`, `api/`, `look/` and `steps/`. So the
+packaging step (`labctl.builder.docs`) writes, under `apps/<app>/spec/` and only from the files
+the package already holds:
+
+| File | What it holds |
+|---|---|
+| `CONSTITUTION.md` | The rules that are not negotiable, numbered, and what "done" means: the same text as the task's (one function writes both) |
+| `ARCHITECTURE.md` | The stack and versions, the layers, the route table (every screen, recorded or not), the API surface, the data model (tables, keys, relations, field map), sign-in, session and every cookie's attributes, ports and environment variables, the flow across applications, a text diagram |
+| `BUILD-PLAN.md` | The build in order (database and seed, sign-in, each screen from the entry along the recorded ways, navigation, API, rules, look, self-check), each step with its "done when" lines |
+| `PAGES/<NN>-<screen>.md` | One per screen, recorded screens first in recorded order, then pages the link check found (marked: not built) and screens known only from the code map (`codemap.json`, marked: reconstructed). Each holds the address, the ways in and out, the picture and regions to match, every element with selector, text and type, what each action did, the screen's rules and behaviour, its API calls with links to their files, the data and the table and column it maps to, the seed rows the recorded flow needs, the acceptance checks, the replay steps, its dialogs, tabs, frames and popup windows, and its open questions |
+| `GLOSSARY.md` | Option lists, code lists, the statuses the application answered with its own messages, the package's words |
+
+Every statement names the file it comes from; what the package does not hold is written as
+*unknown*, with where it would come from. The folder is `spec/`, not `build/`, because the
+repository ignores every `build/` folder. The completeness check counts a screen without a
+page file as a gap. What the documents cannot say is what the package cannot: the purpose of a
+screen beyond its title and heading, the body of an answer the page never read, what an unused
+control does, a version nothing in the evidence shows.
 
 ## Privacy
 
@@ -401,7 +430,8 @@ A HAR or a database export from a real system holds customer data, cookies and t
 
 - Raw evidence lives in an evidence store outside the repository (`evidence/`, ignored by Git, or
   a shared location with access control). Analysers run where it is.
-- Parsing drops cookies, `Authorization` and other credential headers at once.
+- Parsing drops cookies, `Authorization` and other credential headers at once. Of a cookie only
+  its name and its attributes are read; its value never.
 - The model keeps shapes, not values: field names, types, lengths, code lists. Example values
   are replaced by synthetic values of the same shape.
 - Where real-shaped values are needed, they go through the keyed masking from Prod Echo first.
