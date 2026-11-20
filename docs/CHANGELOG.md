@@ -16,6 +16,13 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
 - `workstation/preflight.py` and `labctl workstation preflight`: "Ready" only when every check
   passes. Open: a frozen build must call `multiprocessing.freeze_support()` in its entry point.
 
+## 2026-11-20 — Portal: the business outcome is shown for every app
+The session page showed the business outcome only inside the database change check, so a
+browser-only app (no server database) never showed it. The outcome now has its own card
+(`id="outcome"`) after the change check, for every kind of app, once; without outcome checks
+it says "no outcome checks defined". The view already judged the outcome on both paths; only
+the template changed (`portal/templates/session.html`, tests in `test_outcome_portal.py`).
+
 ## 2026-11-20 — Recorder: the robot's log, targets from the workflow, modern Windows apps
 - The UiPath robot's execution log (Verbose) is read beside a session: activities and which UI
   activities left no recorded step (`workstation/robot.py`, `robot/coverage.json`).
