@@ -20,9 +20,10 @@ TYPED = {
     "email": "ingrid.solberg@fixture-mail.test",
     "phone": "+47 912 34 567",
     "ref": "kq48zt",
-    "start": "2026-12-01",
-    "bad_end": "2026-11-20",
-    "end": "2026-12-31",
+    # Dates long past: the package carries the day it was made, so a typed date must never be today.
+    "start": "1998-12-01",
+    "bad_end": "1998-11-20",
+    "end": "1998-12-31",
     "plate": "EL48213",
     "notes": "Visitor parking near the north gate",
 }

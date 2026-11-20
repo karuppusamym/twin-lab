@@ -57,7 +57,7 @@ def _controls(tree: dict, model_screen) -> list[dict]:
     out = []
     for node, anc, idx in locator.walk(tree):
         t = node.get("type")
-        if not anc or (t not in INPUTS and t != "Button"):
+        if not anc or (t not in INPUTS and t not in ("Button", "Image", "DataGrid", "Table")):
             continue
         if any(a.get("type") in ("DataItem", "ListItem", "DataGrid", "Table", "TitleBar",
                                  "ComboBox") for a in anc):  # fmt: skip
@@ -71,6 +71,15 @@ def _controls(tree: dict, model_screen) -> list[dict]:
             if w32.get("default_button"):
                 item["default_button"] = True
                 out.append(item)
+            continue
+        if t == "Image":
+            if w32.get("icon"):
+                item["icon"] = w32["icon"]
+                out.append(item)
+            continue
+        if t in ("DataGrid", "Table"):
+            item["grid"] = _grid(node)
+            out.append(item)
             continue
         item["on_open"] = {k: v for k, v in (("enabled", node.get("enabled", True)),
                                              ("visible", node.get("visible", True)),
@@ -92,6 +101,51 @@ def _controls(tree: dict, model_screen) -> list[dict]:
     return out
 
 
+def _grid(node: dict) -> dict:
+    """What a grid's tree shows about its behaviour: whether its cells can be edited, whether
+    its column headers can be clicked. Sorting and how many rows can be selected are not in the
+    tree (they come from recorded steps, else they are not known)."""
+    cells = [n for n, _a, _i in locator.walk(node) if n.get("type") == "DataItem"]
+    ro = {bool(c.get("readonly")) for c in cells if "readonly" in c}
+    heads = [n for n, _a, _i in locator.walk(node) if n.get("type") in ("Header", "HeaderItem")]
+    return {"cells_read_only": (ro == {True}) if ro else "not seen",
+            "headers_clickable": any("invoke" in (h.get("patterns") or []) for h in heads)
+            if heads else "no column headers seen",
+            "sorting": "not observed (no header was clicked in the recordings)",
+            "selection": "not observed"}  # fmt: skip
+
+
+def _focused(tree: dict) -> str | None:
+    """The locator of the control with the keyboard focus in a window tree. A grid's current
+    cell reports the focus too (WinForms) even when another control has it: a control outside
+    a grid wins."""
+    found = [(node, anc, idx) for node, anc, idx in locator.walk(tree)
+             if node.get("focused") and anc]  # fmt: skip
+    outside = [f for f in found if not any(a.get("type") in ("DataGrid", "Table") for a in f[1])]
+    for node, anc, idx in outside or found:
+        return locator.build(tree, node, anc, idx)["selector"]
+    return None
+
+
+def _icon(tree: dict) -> str | None:
+    for node, _a, _i in locator.walk(tree):
+        if node.get("type") == "Image" and (node.get("win32") or {}).get("icon"):
+            return node["win32"]["icon"]
+    return None
+
+
+UNKNOWN = [
+    "what the application checks that no recorded action showed (no message box, no change "
+    "seen); the application was not decompiled",
+    "which button is a window's default (Enter) button when the toolkit draws its buttons "
+    "itself (WinForms FlatStyle Standard): Win32 does not say; it is listed only when a "
+    "recorded Enter key pressed it; the pictures show the default button's border",
+    "how a search matches (start or anywhere, which columns, case): only the row counts of the "
+    "recorded searches are known (steps/*.json `rows_after`; the seed is made to give them)",
+    "grid sorting and selection mode, unless a recorded step clicked a header or selected rows",
+]
+
+
 def build(recs, model) -> dict:
     wins = dlook.collect(recs)
     screens = {(s.desktop or {}).get("window", {}).get("selector"): s for s in model.screens}
@@ -103,6 +157,11 @@ def build(recs, model) -> dict:
         entry = {"window": key, "id": dlook.slug(win.window, win.kind), "kind": win.kind,
                  "controls": _controls(tree, screens.get(key)), "validation": [],
                  "keys": []}  # fmt: skip
+        seen = any(n.get("focused") for _r, _s, t, _p in win.snaps
+                   for n, _a, _i in locator.walk(t))  # fmt: skip
+        entry["focus_on_open"] = _focused(tree) or (
+            "none of its controls" if seen else
+            "not recorded (the recorder did not read the keyboard focus)")  # fmt: skip
         windows.append(entry)
     by_key = {w["window"]: w for w in windows}
     for rec in recs:
@@ -138,6 +197,8 @@ def build(recs, model) -> dict:
                                             if nd.get("type") == "Text"
                                             and nd.get("name_is") == "message")  # fmt: skip
                             answer = {"message_box": t.get("name") or "", "text": text}
+                            if _icon(t):
+                                answer["icon"] = _icon(t)
                         break
                     if m.get("action") in ("click", "type", "key", "menu", "select", "toggle"):
                         break
@@ -168,9 +229,17 @@ def build(recs, model) -> dict:
             t = None if s.get("tree_late") else rec.tree(s.get("tree"))
             if t is not None and key and s.get("action") not in ("window_close", "menu_open"):
                 last_tree[key] = t
-    return {"format": "twinlab-desktop-rules/1", "windows": windows,
-            "unknown": "what the application checks that no recorded action showed (no message "
-                       "box, no change seen) is not known; the application was not decompiled"}  # fmt: skip
+    for rec in recs:  # a header clicked or rows selected in a grid
+        for s in rec.steps:
+            key = (s.get("window") or {}).get("selector")
+            for c in (by_key.get(key) or {}).get("controls") or []:
+                if "grid" not in c:
+                    continue
+                if s.get("action") == "select" and s.get("container") == c["selector"]:
+                    c["grid"]["selection"] = "a row can be selected (seen)"
+                if s.get("action") == "click" and "ControlType=Header" in str(s.get("selector")):
+                    c["grid"]["sorting"] = f"a header was clicked at step {s.get('seq')}"
+    return {"format": "twinlab-desktop-rules/1", "windows": windows, "unknown": UNKNOWN}
 
 
 def write(root: Path, app_id: str, model, recs=None) -> dict | None:
@@ -211,6 +280,16 @@ def _flags(c: dict) -> str:
         out.append("items " + ", ".join(f"`{i}`" for i in c["items"]))
     if c.get("default_button"):
         out.append("default button (Enter)")
+    if c.get("icon"):
+        out.append(f"the system's {c['icon']} icon")
+    g = c.get("grid")
+    if g:
+        out.append("cells read-only" if g.get("cells_read_only") is True else
+                   "cells editable" if g.get("cells_read_only") is False else
+                   "cell editing not seen")  # fmt: skip
+        if g.get("headers_clickable") is True:
+            out.append("column headers can be clicked (sorting not observed)"
+                       if str(g.get("sorting", "")).startswith("not") else g["sorting"])  # fmt: skip
     return "; ".join(out)
 
 
@@ -221,11 +300,16 @@ def brief_section(doc: dict | None, app: str) -> str:
              f"From `{app}/{FILE}`. Reproduce each; a rule not listed was not observed (the "
              "application was not decompiled): keep the toolkit's default and list it as an "
              "assumption.\n"]  # fmt: skip
+    lines += [f"- Not known: {u}." for u in doc.get("unknown") or []] + [""]
     for w in doc["windows"]:
         rows = [(c["selector"], _flags(c)) for c in w["controls"] if _flags(c)]
-        if not rows and not w["validation"]:
+        focus = w.get("focus_on_open")
+        if not rows and not w["validation"] and not focus:
             continue
         lines.append(f"### `{w['id']}`\n")
+        if focus:
+            lines.append("- keyboard focus when it opens: "
+                         + (f"`{focus}`" if focus.startswith("uia:") else focus))  # fmt: skip
         for sel, f in rows:
             lines.append(f"- `{sel}`: {f}")
         for v in w["validation"]:
@@ -236,8 +320,9 @@ def brief_section(doc: dict | None, app: str) -> str:
                 for k, x in v["fields"].items() if "shape" in x or x.get("toggle") or "item" in x
             )  # fmt: skip
             out = v["outcome"]
-            what = (f'message box "{out["message_box"]}": {out["text"]}' if isinstance(out, dict)
-                    else out)  # fmt: skip
+            what = (f'message box "{out["message_box"]}"'
+                    + (f" ({out['icon']} icon)" if out.get("icon") else "")
+                    + f": {out['text']}" if isinstance(out, dict) else out)  # fmt: skip
             lines.append(f"- step {v['step']}: {v['action']} `{v['action_on']}` with {fields or 'no fields'}"
                          f" → {what}")  # fmt: skip
         lines.append("")

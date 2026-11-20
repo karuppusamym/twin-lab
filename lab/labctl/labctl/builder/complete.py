@@ -113,9 +113,54 @@ def problems(repo_root: Path, app_id: str) -> list[str]:
     return out
 
 
-def purpose(rel: str, app_id: str, data: bytes | None = None) -> str:
-    """One line on what a packaged file is for."""
+def _desktop_purpose(rel: str, app: str) -> str | None:
+    """What a file of a desktop application's package is for (windows, not pages)."""
+    fixed = {
+        app + "BRIEF.md": "The full specification: scope, windows, controls, menus, navigation, "
+                          "field rules, data, seed, checks. The reference behind every document "
+                          "under spec/.",
+        app + "navigation.json": "Every window (main windows, dialogs, message boxes with their "
+                                 "icon and buttons), what opened and closed each, modality, "
+                                 "menus with their items, and every move between windows.",
+        app + "rules.json": "Per window: each input's state on open, limits and styles, the "
+                            "keyboard focus on open, default buttons, grids' behaviour, every "
+                            "validation message seen with the fields' shapes, and what is not "
+                            "known.",
+        app + "look/windows.json": "Per window: frame, client size, DPI, and every control's "
+                                   "bounds, font, colours, docking seen and grid geometry.",
+        app + "look/texts.json": "Every text per window, verbatim: labels, buttons, menus with "
+                                 "access keys and shortcuts, tooltips, message box texts.",
+        app + "look/theme.json": "The machine's display settings when recorded (DPI, system "
+                                 "fonts, theme) and the common colours.",
+        app + "look/manifest.json": "The look files and pictures with their sha256.",
+        app + "spec/ARCHITECTURE.md": "Toolkit, windows, data model, how the application starts "
+                                      "and reads its data. Read third.",
+        app + "model.yaml": "Reference: everything the recordings showed (windows, controls, "
+                            "shapes), which the brief is generated from.",
+    }  # fmt: skip
+    if rel in fixed:
+        return fixed[rel]
+    if rel.startswith(app + "look/screens/"):
+        return ("A picture of one window (or one of its open menus) without data: every place "
+                "that showed data is painted over and its shape drawn there.")  # fmt: skip
+    if rel.startswith(app + "spec/WINDOWS/"):
+        return ("Window file: everything one window needs (frame, menus, every control with "
+                "bounds, font, colours and rules, texts, validation, recorded steps).")  # fmt: skip
+    if rel.startswith(app + "steps/") and rel.endswith(".json"):
+        return ("The recorded steps in order: action, control, window, typed shape, rows after, "
+                "message box, picture.")  # fmt: skip
+    if rel.startswith(app + "steps/") and rel.endswith(".png"):
+        return "The window after one recorded step, without data (the step's `picture`)."
+    return None
+
+
+def purpose(rel: str, app_id: str, data: bytes | None = None, desktop: bool = False) -> str:
+    """One line on what a packaged file is for (`desktop`: a desktop application's package)."""
     app = f"apps/{app_id}/"
+    if desktop:
+        found = _desktop_purpose(rel, app)
+        if found:
+            return found
     fixed = {
         "BUILD_TASK.md": "The task: what to build, the rules, the reading order, how to check. "
                          "Start here.",

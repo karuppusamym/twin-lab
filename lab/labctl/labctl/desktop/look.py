@@ -218,6 +218,8 @@ def _controls(tree: dict, img) -> list[dict]:
         w32 = node.get("win32") or {}
         if w32.get("font"):
             item["font"] = w32["font"]
+        if w32.get("icon"):
+            item["icon"] = f"the system's {w32['icon']} icon"
         colours = _sample(img, rect)
         if colours:
             item["colours"] = colours

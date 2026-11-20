@@ -21,7 +21,7 @@ A recording is a folder (under `evidence/<app>/`, Git-ignored):
 |---|---|
 | `desktop.json` | format, times, each process recorded (executable name, the toolkit detected and the signals behind it), what was listened to, polled or hooked, notes |
 | `steps.jsonl` | one line per user action (below) |
-| `trees/<seq>.json` | the value-free control tree of the step's window after the action; the window's `frame` (outer size, client area in the window, DPI, border, minimise/maximise boxes, where it opened) and, for each control with a window of its own, `win32` (font, maximum length, multi-line, digits only, combo box style, default button) |
+| `trees/<seq>.json` | the value-free control tree of the step's window after the action; the window's `frame` (outer size, client area in the window, DPI, border, minimise/maximise boxes, where it opened) and, for each control with a window of its own, `win32` (font, maximum length, multi-line, digits only, combo box style, default button; for a message box's icon, which of the four system icons it is, found by drawing each one where the icon is and comparing the pixels); `focused` on the control that had the keyboard focus (UI Automation `HasKeyboardFocus`, the Java bridge's `focused` state) |
 | `pictures/<seq>.png` | a picture of that window **without data** (on by default; `--no-pictures`): every place the tree shows data painted over in its own background and its shape drawn there, in the control's font |
 | `pictures.json` | how the pictures were checked: each one read with OCR when the recording ends, while the data values seen are still in memory; a picture that shows one, or that could not be checked, is deleted and listed (by step, never by value) |
 | `screens/<seq>.png` | a picture of that window only, **with data**, when asked for (`--screenshots`; off by default): stays on this machine, never packaged |
@@ -172,7 +172,7 @@ agent needs to rebuild the application exactly, and `labctl build package` carri
 | `look/texts.json` | clean trees | every interface word per window, with the access key as the toolkit writes it (`E&xit`), shortcuts, tooltips, message box texts |
 | `look/theme.json` | `desktop.json` | DPI, system fonts, theme; font names with why they are not carried (Windows and Java fonts are not redistributable and are on the machine) |
 | `navigation.json` | steps | windows (main, dialog, message box), which step opened and closed each, modal (seen when the window under it was read disabled), menus and items, menus never opened, tabs, MDI containers |
-| `rules.json` | trees, steps | per input: state on open, Win32 limits and styles, drop-down items, default button; validation: every message box after an action with the field shapes then (typed shapes win over a late snapshot) and the same action accepted later; "X is required" makes X required |
+| `rules.json` | trees, steps | per window: the keyboard focus when it opened; per input: state on open, Win32 limits and styles, drop-down items, default button; per grid: cells read-only, headers clickable, sorting and selection when a step showed them; per message box: its icon; `unknown`: what the recordings cannot say (default buttons the toolkit draws itself, how a search matches, sorting); validation: every message box after an action with the field shapes then (typed shapes win over a late snapshot) and the same action accepted later; "X is required" makes X required |
 | `steps/<recording>.json`, `steps/<recording>/<n>.png` | steps, trees, pictures | every step in order with the rows each grid showed after it, a message box's text and a picture after it |
 | `db/seed.sql`, `db/seed.json`, `steps/<recording>.values.yaml` | grids, steps | synthetic rows in each grid's shapes and codes, made with the replay values so the recorded outcomes happen again: a search key that finds as many rows as recorded; a refused and an accepted password with an `app_users` row |
 | `spec/CONSTITUTION.md`, `ARCHITECTURE.md`, `BUILD-PLAN.md`, `WINDOWS/<window>.md` | all of the above | the web set of build documents, one document per window |
@@ -230,7 +230,7 @@ outside the repository (`desktop-trial\`).
 | Grid rows after each step | 0 | 0 |
 | Pictures above 1 % | main window 3.65–4.98 % (6 steps), case window 1.27 % (2 steps) | none (largest 0.84 %; 7 of 16 identical; the original app itself: largest 0.76 %) |
 | Verdict | FAIL | **PASS WITHIN DECLARED SCOPE, VERIFIED COMPLETE** |
-| Package gaps found | grid header (UI Automation height, not the property); label access keys; why `txtCaseNo` is named "Customer"; SQLite offline | none failing; reported: icon of a message box not listed, a combo box's inner parts, default buttons per window, the search rule |
+| Package gaps found | grid header (UI Automation height, not the property); label access keys; why `txtCaseNo` is named "Customer"; SQLite offline | none failing; reported: icon of a message box not listed, a combo box's inner parts, default buttons per window, the search rule (all closed or stated as unknown afterwards, see below) |
 | Builder mistakes | none found (menu underlines under the replay, cause not found) | none |
 | Lab tooling | recorder snapshot lag (two steps; the original fails one of them too) | fixed (`tree_late`) |
 
@@ -239,6 +239,15 @@ of the certification matrix is **CERTIFIED** on it. Both builders kept the data 
 (SQLite needs a NuGet package) and built framework-dependent (a self-contained publish needs
 runtime packs from NuGet): stated in their notes, accepted by the task. Not done: a rebuild of
 the WPF or Swing application, and a judge run on another machine or DPI.
+
+After round 2 the gaps its builder reported were closed where the recordings can show them:
+the message box icon (recognised from the pixels: CaseDesk's two message boxes show the warning
+icon), the keyboard focus when each window opens, a combo box's drop-down button kept as
+structure (it had been masked as data), a grid's read-only cells and clickable headers, the
+message box's buttons and owner in `navigation.json`, and desktop wording in the package's
+`INDEX.md`. What they cannot show is listed in `rules.json` `unknown` and the brief: which
+button is the default when WinForms draws its buttons itself, how a search matches, grid
+sorting and selection.
 
 ## Recording and verifying
 
