@@ -123,7 +123,15 @@ def test_desktop_labels_keep_ids_and_structure_names_only():
     doc = _desk(
         "uia:AutomationId=btnSave;ControlType=Button", title="Smith letter - Writer", wid=None
     )
-    assert flow.label_step(doc, 1)["screen"] == "Writer"
+    assert "screen" not in flow.label_step(doc, 1)  # the title names the document
+    assert flow.label_step(doc, 1, {"display": "Writer"})["screen"] == "Writer"
+    record = _desk(
+        "uia:AutomationId=btnSave;ControlType=Button", title="Writer - Jane Doe", wid=None
+    )
+    assert flow.label_step(record, 1, {"display": "Writer"})["screen"] == "Writer"
+    for sel in ("uia:Name=Jane Doe;ControlType=TabItem", "uia:Name=Jane Doe;ControlType=Window",
+                "uia:Name=Delete the record of Jane;ControlType=Button"):  # fmt: skip
+        assert "label" not in flow.label_step(_desk(sel), 1), sel
 
 
 def test_web_labels_and_route_templates():
@@ -139,7 +147,11 @@ def test_web_labels_and_route_templates():
         {"action": "type", "selector": 'input[name="custName"]', "url": "http://h/"}, 1
     )
     assert n["label"] == "custName"
-    assert flow.route_template("/a/" + "x" * 30 + "/b") == "/a/{id}/b"
+    assert flow.route_template("/a/" + "x" * 30 + "/b") == "/a/{id}/{id}"
+    assert flow.route_template("/customers/jane-doe/edit") == "/customers/{id}/edit"
+    aria = flow.label_step({"action": "click", "selector": '[aria-label="Delete Jane Doe"]',
+                            "url": "http://h/"}, 1)  # fmt: skip
+    assert "label" not in aria
 
 
 # --- timeline -----------------------------------------------------------------------------------

@@ -63,7 +63,7 @@ def _streams(folder: Path) -> tuple[list[dict], dict]:
     pid_key: dict[int, str] = {}
     web_targets = {t["origin"]: t for t in meta.get("targets") or [] if t.get("origin")}
     levels = {o: t.get("level", FULL) for o, t in web_targets.items()}
-    rows: list[list[tuple]] = [[], [], []]
+    rows: list[list[tuple]] = [[], [], [], []]
     for i, j in enumerate(journal):
         kind = j.get("kind")
         if kind == "app":
@@ -95,7 +95,11 @@ def _streams(folder: Path) -> tuple[list[dict], dict]:
                                                 "seq": s.get("seq"), "action": s.get("action"),
                                                 "_step": s}))  # fmt: skip
     last_web = None
-    for k, s in enumerate(read_jsonl(folder / "web" / "steps.jsonl")):
+    parts = [folder / "web"] + sorted(
+        (p for p in folder.glob("web-*") if p.name[4:].isdigit()), key=lambda p: int(p.name[4:])
+    )
+    web_steps = [dict(s, _part=p.name) for p in parts for s in read_jsonl(p / "steps.jsonl")]
+    for k, s in enumerate(web_steps):
         origin = origin_of(str(s.get("url") or ""))
         if not origin:
             if str(s.get("action") or "").startswith("tab-") and last_web:
@@ -112,9 +116,19 @@ def _streams(folder: Path) -> tuple[list[dict], dict]:
             if isinstance(t.get("app_id"), int):
                 apps[key]["app_id"] = t["app_id"]
         rows[2].append((_t(s.get("ts")), 2, k, {"ts": s.get("ts"), "app": key, "surface": "web",
-                                                "level": level, "recording": "web",
+                                                "level": level, "recording": s["_part"],
                                                 "seq": s.get("seq"), "action": s.get("action"),
                                                 "_step": dict(s, surface="web")}))  # fmt: skip
+    for k, s in enumerate(read_jsonl(folder / "mainframe" / "steps.jsonl")):
+        key = s.get("app")
+        if not key:
+            continue
+        if key not in apps:
+            apps[key] = {"key": key, "surface": "mainframe", "level": FULL, "display": key[10:]}
+        row = {"ts": s.get("ts"), "app": key, "surface": "mainframe",
+               "level": apps[key].get("level") or FULL, "recording": "mainframe",
+               "seq": s.get("seq"), "action": s.get("action"), "_step": s}  # fmt: skip
+        rows[3].append((_t(s.get("ts")), 3, k, row))
     merged = [r[3] for r in heapq.merge(*rows, key=lambda r: (r[0], r[1], r[2]))]
     meta["apps"] = apps
     return merged, meta
@@ -155,7 +169,9 @@ def outbox(meta: dict, rows: list[dict]) -> dict:
         step = row.get("_step")
         if step is None or row.get("level") not in (FULL, STEPS):
             continue
-        flows.setdefault(row["app"], []).append(flow.label_step(step, row["global_seq"]))
+        flows.setdefault(row["app"], []).append(
+            flow.label_step(step, row["global_seq"], (meta.get("apps") or {}).get(row["app"]))
+        )
     apps = []
     for key, facts in (meta.get("apps") or {}).items():
         if facts.get("level") not in (FULL, STEPS) or key not in flows:

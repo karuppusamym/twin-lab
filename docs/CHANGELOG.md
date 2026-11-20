@@ -20,6 +20,15 @@ A session records the applications a person or a robot uses on one PC, in one go
   applications and their step labels (ids and the application's own words, never a value, a
   shape, a title or a presence application's name). A session left unfinished is recovered.
 - The portal side and the portable recorder are in TwinLab2 (`registry.py`, `agent/`).
+- **Mainframe**: a TN3270 proxy in the session (`workstation/tn3270.py`, a target
+  `tn3270://host:port`): the terminal connects to `127.0.0.1:23270`; screens, fields by label and
+  keys are recorded, values as shapes, non-display fields not at all. A synthetic host and
+  terminal to try it: `reference/mainframe/demo_host.py`.
+- **Recording a robot**: COM set up so UI Automation events arrive in a fresh process; the web
+  recording survives closed tabs and browsers; a kept browser profile (UiPath's extension) or
+  attaching by DevTools address; Edge or Chrome; values set without the keyboard focus recorded;
+  processes admitted on their first input; notes for demoted targets and elevated applications;
+  stricter portal labels; credential headers removed from a session's HAR.
 - Open: clipboard hand-offs, split and build-all on a session, steps level for web, signing,
   mainframe (designed in the appendix of `docs/11-session-recorder.md`).
 

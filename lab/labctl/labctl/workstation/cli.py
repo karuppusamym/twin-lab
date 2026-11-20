@@ -12,7 +12,8 @@ app = typer.Typer(no_args_is_help=True,
                   help="Record one session across web and desktop applications.")  # fmt: skip
 
 
-def _targets(file: Path | None, exe: list[str], origin: list[str], steps: list[str]):
+def _targets(file: Path | None, exe: list[str], origin: list[str], steps: list[str],
+             tn3270: list[str] | None = None):  # fmt: skip
     from labctl.workstation.levels import Targets
 
     items: list[dict] = []
@@ -23,6 +24,7 @@ def _targets(file: Path | None, exe: list[str], origin: list[str], steps: list[s
         deny = list(doc.get("deny_keys") or [])
     items += [{"exe": e} for e in exe] + [{"origin": o} for o in origin]
     items += [{"exe": e, "level": "steps"} for e in steps]
+    items += [{"tn3270": m} for m in tn3270 or []]
     try:
         return Targets.from_list(items, deny)
     except ValueError as exc:
@@ -43,15 +45,26 @@ def record(
     ),
     name: str = typer.Option("", help="A name for the session."),
     minutes: float = typer.Option(240, help="Stop after this many minutes."),
+    tn3270: list[str] = typer.Option([], help="A mainframe target: host:port (TN3270)."),
+    browser_profile: Path | None = typer.Option(
+        None, help="Keep the session browser's profile here (for an extension such as UiPath's)."
+    ),
+    cdp: str | None = typer.Option(
+        None, help="Attach to a running browser's DevTools address instead of starting one."
+    ),
 ) -> None:
     """Record until Ctrl+C, or until a file named `stop` appears in the session folder."""
     from labctl.workstation.session import Session, recover_all
 
-    t = _targets(targets, exe, origin, steps_exe)
+    t = _targets(targets, exe, origin, steps_exe, tn3270)
     for done in recover_all(out):
         typer.echo(f"recovered an unfinished session: {done}")
-    s = Session(out, t, name=name, max_seconds=minutes * 60)
+    s = Session(out, t, name=name, max_seconds=minutes * 60, browser_profile=browser_profile,
+                cdp=cdp)  # fmt: skip
     typer.echo(f"recording session {s.id} in {s.folder} (Ctrl+C or a 'stop' file ends it)")
+    for i, m in enumerate(t.mainframes()):
+        port = m.listen if m.listen is not None else 23270 + i
+        typer.echo(f"mainframe {m.tn3270}: point the terminal at 127.0.0.1:{port}")
     try:
         folder = s.run()
     except KeyboardInterrupt:

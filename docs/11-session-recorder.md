@@ -21,7 +21,8 @@ only the fact that other applications were used.
 | Portal | TwinLab2's portal (on OpenShift): machines, sessions, applications, recordings, automations. It maps each recording to its applications |
 | New applications | Registered in the portal as `discovered` when a session recorded them, and the recording is mapped to them |
 | Capture detail | Per application: **full** for the session's targets, **steps** for applications opted in, **presence** for everything else; a deny list is always presence |
-| Out of scope | Citrix, remote desktop. Mainframe is designed (*Appendix*) and not built |
+| Mainframe | A TN3270 proxy in the session: the terminal (UiPath's direct connection, an emulator) connects to `127.0.0.1:23270`, the proxy forwards to the host (*Mainframe*) |
+| Out of scope | Citrix, remote desktop |
 
 ## What exists in Twin Lab, and what the session adds
 
@@ -219,7 +220,7 @@ Cut from the first delivery, in this order of value: clipboard hand-offs and pro
 `crossapp` links; split and build-all reading a session (`desktop/split.py` and `split.py`
 already split each part; a session-level proposal delegates to both); upload to GitHub or S3;
 code signing; Electron as web; the Java Access Bridge in a session; portal-initiated stop;
-mainframe (*Appendix*).
+HLLAPI capture for an emulator whose host cannot be changed; 5250; the mainframe build target.
 
 ## Delivery
 
@@ -260,7 +261,32 @@ Not built or not checked:
 - The window (Tk) was opened and looked at once; its flows were exercised through the same
   functions by the command line and the tests, not by clicking the window.
 
-## Appendix: mainframe (designed, not built)
+### Second review: recording a UiPath robot (2026-11-19)
+
+A second deep review (a higher model) looked at recording a UiPath robot across web, desktop
+and mainframe. Fixed and checked:
+
+| Finding | Fix | Checked by |
+|---|---|---|
+| In the built program the desktop recorder ran in a single-threaded COM apartment with no message pump: no UI Automation events (typing, selections) reached it; the tests imported UI Automation first and never saw this | the session loads `labctl.desktop.win` (which sets COM to multithreaded) before anything else; a note when the apartment is not multithreaded | `test_a_fresh_process_hears_ui_automation_events` (a fresh process); the built program now records 37 CaseDesk steps where it recorded 28 |
+| Web recording ended when the first tab closed (UiPath closes its tab at the end of a scope) | the web recorder waits on any tab, and for the next tab while the browser lives (`keep_open`); a browser closed during the session is opened again with the same profile and port, recorded into `web-2`, `web-3`... | live tests |
+| The robot's browser is not the session's: no UiPath extension in a throwaway profile; Edge only | a kept profile (`browser_profile`, port 9333) where UiPath's extension is installed once, and UiPath's *CustomFolder* user data folder pointing at it; attaching by DevTools address; Edge or Chrome | `test_attach_to_a_running_browser_and_keep_a_profile` |
+| Pictures of desktop windows held in memory until the end | off by default in the recorder program (`--pictures` to turn on) | — |
+| Labels could carry data (title parts, tab and window names, aria-labels, route segments) | stricter rules (`flow.py`): identifiers only, a title part only when it is the application's name, route words from a fixed list | `test_workstation.py` |
+| UiPath's Simulate typing sets values without the keyboard focus, which the recorder ignored | robot input: such value changes are steps (on in the recorder program) | the fresh-process test (the CaseDesk script types through the Value pattern) |
+| A target was picked up by a 250 ms poll; a robot acts sooner | the desktop recorder asks the session about a process the moment its first input or event arrives (`admit`) | the no-portal run (CaseDesk started outside the session, recorded from its first step) |
+| Targets demoted silently (hosts, browsers, `C:\Windows`, not replicated); applications running as administrator | a note for each, once; notes shown in the recorder's review and by `show` | — |
+| Failures invisible in the window | each run's output in `logs\<session>.log`; an error exit is shown | — |
+| HAR kept tokens in headers | in a session, headers that may carry a credential keep their name only | — |
+| Ctrl+C, a closed window, a crash between pictures and their check | Ctrl+C joins the recorders; the session stops when the window that started it is gone; recovery deletes unchecked pictures | — |
+
+Not done from that review: re-installing input hooks that Windows removed after a slow
+callback; streaming the HAR to disk with a body size cap; pairing off the window's thread; the
+robot's own log (`%LOCALAPPDATA%\UiPath\Logs`) as a fourth stream aligned to the steps
+(`labctl/botlog/robotlog.py` reads it); proposing targets from the workflow's XAML
+(`labctl/analyse/uipath.py`).
+
+## Mainframe
 
 A 3270 screen is a grid of fields; the user types into unprotected fields and presses an AID
 key (Enter, PF1–PF24, PA1–PA3, Clear), which sends the changed fields.
@@ -273,14 +299,25 @@ key (Enter, PF1–PF24, PA1–PA3, Clear), which sends the changed fields.
 | click / submit | AID key |
 | HAR | the 3270 data stream, structure only |
 
-- **Capture**: a TN3270 proxy the emulator connects to (`localhost`), forwarding to the host;
-  HLLAPI as fallback where the session profile cannot change.
-- **Screen id**: the BMS map name when known; otherwise a signature of the protected text at
-  fixed positions, rows that look like dates, times or counts left out.
-- **Privacy**: protected fields are structure; unprotected fields are data (shape only);
-  non-display fields keep nothing. Telling protected *data* (a name shown on a screen) from
-  labels needs a new rule (for example, text that differs between two visits to the same screen);
-  `desktop/privacy.py` has no such rule today.
-- **Identity**: `mainframe:<host application id>`.
-- **Build target**: a small TN3270 server serving the recorded screens; a plan item of its own.
-- 5250 (IBM i) has the same shape.
+Built (`labctl/workstation/tn3270.py`; a target `{"tn3270": "host:port"}`, `tn3270s://` for
+TLS to the host):
+
+- **Capture**: a TN3270 proxy in the session, one per mainframe target, on `127.0.0.1:23270`
+  (23271... for more; a free port, said in the session's notes, when that one is taken). Every
+  byte is forwarded first and read after, so recording never delays the terminal. TN3270 and
+  TN3270E, terminal models 2 to 5, Write, Erase/Write (Alternate), Write Structured Field,
+  Erase All Unprotected; the orders SBA, SF, SFE, MF, SA, IC, PT, RA, EUA, GE.
+- **Steps**: `screen` (the first after connecting and the answer to each key), `type` (each
+  field the terminal sent: label, shape; `secret` for a non-display field), `aid` (the key and the
+  cursor). `screens/<seq>.json` keeps the field table.
+- **Screen id**: a hash of the field layout (positions, lengths, protected or not): the same map
+  with another record's data is the same screen. Title: the first row with protected text.
+- **Privacy**: protected text with every token holding a digit masked and every value typed
+  earlier in the session masked; unprotected values as shapes; non-display fields keep nothing.
+  A protected field that shows data without a digit (a name) stays in the local screen file as
+  shown; it becomes a label only when it stands right before an input field on the same row.
+- **Identity**: `mainframe:<host>:<port>` (the host application id is not on the wire before
+  sign-on).
+- **Checked** with a synthetic host and terminal (`reference/mainframe/demo_host.py`), not with a
+  real mainframe or emulator.
+- Not built: HLLAPI, 5250, the build target (a TN3270 server serving the recorded screens).

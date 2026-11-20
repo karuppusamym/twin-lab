@@ -41,7 +41,7 @@ DENY_EXE = [
     "acrobat.exe", "acrord32.exe", "acrocef.exe", "adobe*.exe",
     "outlook.exe", "olk.exe", "ms-teams.exe", "msteams.exe", "teams.exe", "lync.exe",
     "1password.exe", "keepass.exe", "keepassxc.exe", "bitwarden.exe", "lastpass.exe",
-    "dashlane.exe", "twinlabrecorder.exe",
+    "dashlane.exe", "twinlabrecorder.exe", "uipath*.exe", "uirobot.exe", "uiexplorer.exe",
 ]  # fmt: skip
 DENY_DIRS = ["c:\\windows\\"]
 DENY_ORIGINS = [
@@ -94,6 +94,21 @@ def origin_of(url: str) -> str:
     return f"{parts.scheme}://{netloc}"
 
 
+def tn3270_address(text: str) -> tuple[str, int] | None:
+    """`host:port` (or `tn3270://host:port`, `[v6]:port`) of a mainframe target; port 23 when
+    none is given."""
+    text = (text or "").strip()
+    if text.lower().startswith(("tn3270://", "tn3270s://")):
+        text = text.split("://", 1)[1]
+    text = text.rstrip("/")
+    m = re.fullmatch(r"\[([0-9A-Fa-f:.]+)\](?::(\d{1,5}))?|([A-Za-z0-9.\-]+)(?::(\d{1,5}))?", text)
+    if not m:
+        return None
+    host = (m.group(1) or m.group(3) or "").lower()
+    port = int(m.group(2) or m.group(4) or 23)
+    return (host, port) if host and 0 < port < 65536 else None
+
+
 def web_identity(url: str) -> dict:
     origin = origin_of(url)
     return {"key": f"web:{origin}" if origin else "web:", "surface": "web", "origin": origin,
@@ -125,6 +140,9 @@ class Target:
     start: str | None = None  # a web target's start address, or a desktop target's program
     allow_denied: bool = False
     app_id: int | None = None  # the portal's catalog id, when the target came from it
+    tn3270: str | None = None  # a mainframe host, host:port: the session's proxy forwards to it
+    listen: int | None = None  # the proxy's port on 127.0.0.1 (the terminal connects to it)
+    tls: bool = False  # TLS from the proxy to the host
 
     @classmethod
     def from_dict(cls, d: dict) -> Target:
@@ -137,14 +155,26 @@ class Target:
         key = str(d["key"]) if d.get("key") else None
         if key and key.startswith("web:") and not origin:
             origin = origin_of(key[4:])
+        tn3270 = None
+        mainframe = d.get("tn3270") or (key[10:] if key and key.startswith("mainframe:") else None)
+        if mainframe:
+            addr = tn3270_address(str(mainframe))
+            if addr is None:
+                raise ValueError(f"a mainframe target is host:port, not {mainframe!r}")
+            tn3270 = f"{addr[0]}:{addr[1]}"
+            key = f"mainframe:{tn3270}"
+            level = FULL
         if not (key or d.get("exe") or origin):
-            raise ValueError("a target needs key, exe or origin")
+            raise ValueError("a target needs key, exe, origin or tn3270")
         app_id = d.get("app_id")
+        listen = d.get("listen")
         return cls(key=key, exe=str(d["exe"]).lower() if d.get("exe") else None, origin=origin,
                    level=level, name=_clean(d.get("name")) or None,
                    start=str(d["start"]) if d.get("start") else None,
                    allow_denied=bool(d.get("allow_denied")),
-                   app_id=int(app_id) if isinstance(app_id, int) else None)  # fmt: skip
+                   app_id=int(app_id) if isinstance(app_id, int) else None, tn3270=tn3270,
+                   listen=int(listen) if isinstance(listen, int) and 0 <= listen < 65536 else None,
+                   tls=bool(d.get("tls")) or str(mainframe or "").startswith("tn3270s://"))  # fmt: skip
 
     def matches(self, ident: dict) -> bool:
         if self.key and ident.get("key") == self.key:
@@ -170,6 +200,8 @@ class Targets:
         target = self.target_of(ident)
         if ident.get("key") in self.deny_keys and not (target and target.allow_denied):
             return PRESENCE
+        if ident.get("surface") == "mainframe":
+            return target.level if target else PRESENCE
         if ident.get("surface") == "web":
             if not ident.get("origin"):
                 return PRESENCE
@@ -186,6 +218,9 @@ class Targets:
 
     def origins(self) -> set[str]:
         return {t.origin for t in self.targets if t.origin}
+
+    def mainframes(self) -> list[Target]:
+        return [t for t in self.targets if t.tn3270]
 
     def web_start(self) -> str | None:
         for t in self.targets:

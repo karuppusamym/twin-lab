@@ -2146,6 +2146,19 @@ class _Har:
         # kept when its own origin is a target.
         self.origins = {o.lower() for o in origins} if origins is not None else None
 
+    SECRET_HEADER = ("authorization", "cookie", "token", "secret", "api-key", "apikey", "session",
+                     "csrf", "xsrf", "auth", "password", "signature")  # fmt: skip
+
+    def _headers(self, headers: dict) -> list[dict]:
+        """Headers as HAR rows; in a workstation session a header that may carry a credential
+        keeps its name only."""
+        rows = []
+        for k, v in headers.items():
+            if self.origins is not None and any(w in k.lower() for w in self.SECRET_HEADER):
+                v = "[removed]"
+            rows.append({"name": k, "value": v})
+        return rows
+
     def _wanted(self, request) -> bool:
         if self.origins is None:
             return True
@@ -2183,7 +2196,7 @@ class _Har:
                 "method": request.method,
                 "url": request.url,
                 "httpVersion": "HTTP/1.1",
-                "headers": [{"name": k, "value": v} for k, v in request.headers.items()],
+                "headers": self._headers(request.headers),
                 "queryString": [],
                 "cookies": [],
                 "headersSize": -1,
@@ -2203,10 +2216,7 @@ class _Har:
                 "status": response.status if response else 0,
                 "statusText": response.status_text if response else "",
                 "httpVersion": "HTTP/1.1",
-                "headers": [
-                    {"name": k, "value": v}
-                    for k, v in (response.headers if response else {}).items()
-                ],
+                "headers": self._headers(response.headers if response else {}),
                 "cookies": [],
                 "content": self._content(response),
                 "redirectURL": "",
@@ -2392,6 +2402,7 @@ def attach(
     stop: Callable[[], bool] | None = None,
     origins: set[str] | None = None,
     outside: Callable | None = None,
+    keep_open: bool = False,
 ) -> Path:
     """Record a browser that is already running (a robot's Chrome or Edge started with
     `--remote-debugging-port=9222`): pass its address, for example `http://127.0.0.1:9222`.
@@ -2453,9 +2464,18 @@ def attach(
                         break
                     pages = [p for p in context.pages if not p.is_closed()]
                     if not pages:
-                        break
+                        if not keep_open:
+                            break
+                        try:  # a session waits for the next tab while the browser lives
+                            context.wait_for_event("page", timeout=500)
+                        except Exception:  # noqa: BLE001 - no tab yet, or the browser closed
+                            pass
+                        continue
                     steps.drain()
-                    pages[0].wait_for_timeout(500)
+                    try:
+                        pages[-1].wait_for_timeout(500)
+                    except Exception:  # noqa: BLE001 - that tab closed (a robot ends its scope)
+                        continue
             except KeyboardInterrupt:
                 pass
             for page in context.pages:

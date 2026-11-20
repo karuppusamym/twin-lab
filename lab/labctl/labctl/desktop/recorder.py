@@ -327,7 +327,9 @@ class Recorder:
     def __init__(self, out_dir: Path, pids: set[int], *, screenshots: bool = False,
                  settle_ms: int = 400, max_seconds: float = 1800, hooks: bool = True,
                  stop: Callable[[], bool] | None = None, pictures: bool = True,
-                 session: bool = False, levels: dict[int, str] | None = None) -> None:  # fmt: skip
+                 session: bool = False, levels: dict[int, str] | None = None,
+                 admit: Callable[[int], str | None] | None = None,
+                 unfocused_values: bool = False) -> None:  # fmt: skip
         require()
         from labctl.desktop import win
 
@@ -341,6 +343,13 @@ class Recorder:
         self.session = session
         self.levels: dict[int, str] = dict(levels or {})
         self.adding: queue.Queue = queue.Queue()
+        # admit(pid) -> "full" | "steps" | None: a process the session records, decided the
+        # moment its first input or event arrives (a robot acts before any poll would see it).
+        self.admit = admit
+        self.refused: set[int] = set()
+        # A robot (UiPath's Simulate input) sets values without the keyboard focus: in a session
+        # recording one, such a change is a step too.
+        self.unfocused_values = unfocused_values
         self.screenshots = screenshots
         # Pictures without data (labctl.desktop.pictures); what data was seen stays in memory.
         self.pictures = pictures
@@ -390,16 +399,34 @@ class Recorder:
             except queue.Empty:
                 return
             self.levels[pid] = level
-            if pid not in self.pids:
-                self.pids.add(pid)
+            self.pids.add(pid)
+            if pid not in self.processes:
                 self._process(pid)
+
+    def _wanted(self, pid: int) -> bool:
+        """Is this process recorded? Asks the session about one it has not seen yet."""
+        if pid in self.pids:
+            return True
+        if self.admit is None or not pid or pid in self.refused:
+            return False
+        try:
+            level = self.admit(pid)
+        except Exception:  # noqa: BLE001 - the hook must answer at once
+            level = None
+        if level in ("full", "steps"):
+            self.levels[pid] = level
+            self.pids.add(pid)
+            self.adding.put((pid, level))
+            return True
+        self.refused.add(pid)
+        return False
 
     def _level(self, pid: int | None) -> str:
         return self.levels.get(pid, "full") if pid is not None else "full"
 
     def _ours(self, el) -> bool:
         try:
-            return el.CurrentProcessId in self.pids
+            return self._wanted(el.CurrentProcessId)
         except Exception:  # noqa: BLE001
             return False
 
@@ -433,7 +460,7 @@ class Recorder:
                         secret = bool(sender.CurrentIsPassword)
                         # Only what the user changes: a value the application fills in (a
                         # dialog loading its record) changes controls without keyboard focus.
-                        if not sender.CurrentHasKeyboardFocus:
+                        if not sender.CurrentHasKeyboardFocus and not rec.unfocused_values:
                             return
                         if sender.CurrentControlType == 50003:
                             return  # a combo box: its selection event says what was chosen
@@ -511,7 +538,7 @@ class Recorder:
                     el = win.click_target(win.element_from_point(x, y))
                     return el, win.describe_now(el, hwnd or 0)
 
-                hooks = _Hooks(self.q, lambda pid: pid in self.pids, resolve)
+                hooks = _Hooks(self.q, self._wanted, resolve)
                 hooks.start()
                 hooks.ready.wait(5)
                 if hooks.failed:
