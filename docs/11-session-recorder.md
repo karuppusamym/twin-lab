@@ -105,6 +105,60 @@ What changed in the recorders, and nothing else:
   `--no-first-run`) and attaches to it; the profile folder is deleted when the session ends.
 - **Version resource**: `exe_info` also reads `CompanyName`.
 
+### Isolated collectors, failures that are said, preflight
+
+Each channel runs in a process of its own (`labctl.workstation.supervisor`, multiprocessing
+spawn): `web` (the session browser through Playwright/CDP), `desktop` (UI Automation, the input
+hooks and the watcher of the window in front) and `mainframe` (the TN3270 proxies). A UI
+Automation call into a hung application stalls only the desktop process; the browser goes on
+recording. The children send their journal rows and notes to the session, which alone writes the
+journal. `TWINLAB_COLLECTORS=threads` runs them in one process as before (for debugging).
+
+- **Heartbeats**: every second, with how long ago the collector's main loop last asked whether
+  to stop. No heartbeat, or no progress, for 30 s (`heartbeat_timeout`) marks the channel
+  failed, with the reason and the time; the process is terminated. It is started once more when
+  that is safe: web (a new part, `web-2`...; the browser it started is ended first) and desktop
+  (`Recorder(resume=True)` goes on after the steps already written); not the mainframe proxy
+  (it would drop the terminal's connection and renumber its screens).
+- **Never silent**: every failure, restart, early end and cut-off is a `channel` row in the
+  journal (`event`: started, ready, failed, restarted, ended, ended_early, cut_off, gap,
+  warning), a note of the session and a gap of the channel.
+- **Bounded shutdown**: the collectors are asked to stop and given 90 s (web), 120 s (desktop:
+  the pictures' data check) or 15 s (mainframe); what is still running is terminated and the
+  channel recorded as cut off, when, and that what it had not written is lost.
+- **Status** (`Session.channel_status()`, also `channels.json` in the session folder, written at
+  each change): per channel `{"status": complete|interrupted|missing|not_requested, "gaps":
+  [{"from", "to", "reason"}], "notes": [...], "details": {state, ready_at, restarts, failures,
+  mode, inaccessible}}`. `missing`: never ready; `interrupted`: ready, with a gap. It is the
+  session's `channel_status` hook: `completeness.manifest` merges it with what the capture
+  journals say (the worse status wins). Each collector process opens and closes its own capture
+  journals (`capture/<channel>.jsonl`); a collector that is killed leaves its journal unclosed,
+  which the manifest reads as interrupted with the loss window. The preflight result is passed
+  as the session's `preflight` and goes into `session.json` and the outbox.
+- **Browser modes**: `controlled` (the default and the recommended one): the recorder starts the
+  browser with a profile of its own (Edge, else Chrome, else Playwright's Chromium) and attaches
+  to it. `attach` (`--cdp`, qualified): a browser already running with a DevTools port;
+  Chromium-based only, lower fidelity (pages and closed shadow roots opened before the recorder
+  attached are not fully recorded; the browser's own extensions and settings change what is
+  seen; it is not opened again if it closes). Its warning is printed at the start and kept in the
+  session's notes and the web channel's notes.
+- **Preflight** (`labctl.workstation.preflight`, `labctl workstation preflight`, and before
+  `record` unless `--no-preflight`): `{"checks": [{"name", "ok", "detail"}], "ready"}` for the
+  recorder's format and contract against the portal's, free disk space (1 GB), the browser
+  (installed, or answering and Chromium in attach mode), each web target's host, UI Automation
+  and an unlocked desktop, each mainframe host and its proxy port. "Ready" is shown only when
+  `ready` is true; nothing is recorded and no window opened.
+
+**What a portable recorder that is not administrator cannot capture**, and how it says so:
+
+| Surface | Why | Reported as |
+|---|---|---|
+| Windows of a program run as administrator | Windows does not let a lower process read them (UIPI) | a desktop note and `inaccessible` entry (`elevated`) for a target |
+| The locked desktop, sign-in screen, UAC prompts | they are the secure desktop | a desktop gap from lock to unlock; preflight fails while locked |
+| Citrix, RDP, VNC and other remote or virtual desktops | what runs inside is pixels on this machine | a desktop note (`remote_surface`), without the client's name |
+| Custom-drawn controls, canvases, owner-drawn grids | UI Automation sees no element, or a Pane/Custom with no name or automation id | a desktop note with the count and an `inaccessible` entry per step (up to 50) |
+| Games, video, DirectX surfaces | no accessibility tree | as custom-drawn |
+
 ### One timeline
 
 The two recorders finalise their steps differently (the web recorder renumbers at close; the

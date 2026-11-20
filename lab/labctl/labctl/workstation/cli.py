@@ -50,17 +50,34 @@ def record(
         None, help="Keep the session browser's profile here (for an extension such as UiPath's)."
     ),
     cdp: str | None = typer.Option(
-        None, help="Attach to a running browser's DevTools address instead of starting one."
+        None,
+        help="Attach to a running browser's DevTools address instead of starting one "
+        "(qualified mode: Chromium only, lower fidelity).",
     ),
+    preflight: bool = typer.Option(True, help="Check every channel can start before recording."),
+    min_free_mb: float = typer.Option(1024, help="Free disk space needed, in MB."),
 ) -> None:
     """Record until Ctrl+C, or until a file named `stop` appears in the session folder."""
     from labctl.workstation.session import Session, recover_all
+    from labctl.workstation.supervisor import CDP_WARNING
 
     t = _targets(targets, exe, origin, steps_exe, tn3270)
+    if cdp:
+        typer.echo(f"warning: {CDP_WARNING}", err=True)
+    got = None
+    if preflight:
+        from labctl.workstation.preflight import preflight as run_preflight
+
+        got = run_preflight(t, out=out, cdp=cdp, min_free_mb=min_free_mb)
+        _show_checks(got)
+        if not got["ready"]:
+            typer.echo("not ready: fix the checks above (or --no-preflight)", err=True)
+            raise typer.Exit(2)
+        typer.echo("Ready")
     for done in recover_all(out):
         typer.echo(f"recovered an unfinished session: {done}")
     s = Session(out, t, name=name, max_seconds=minutes * 60, browser_profile=browser_profile,
-                cdp=cdp)  # fmt: skip
+                cdp=cdp, preflight=got)  # fmt: skip
     typer.echo(f"recording session {s.id} in {s.folder} (Ctrl+C or a 'stop' file ends it)")
     for i, m in enumerate(t.mainframes()):
         port = m.listen if m.listen is not None else 23270 + i
@@ -74,6 +91,43 @@ def record(
     typer.echo(f"applications recorded: {len(box['apps'])}")
     for a in box["apps"]:
         typer.echo(f"  {a['level']:8} {a['key']}  {len(box['flows'].get(a['key'], []))} step(s)")
+    completeness = box.get("completeness") or {}
+    for name, st in (completeness.get("channels") or {}).items():
+        if st["status"] != "not_requested":
+            typer.echo(f"channel {name}: {st['status']}")
+            for g in st["gaps"]:
+                typer.echo(f"  gap {g['from']} .. {g['to']}: {g['reason']}")
+
+
+def _show_checks(got: dict) -> None:
+    for c in got["checks"]:
+        typer.echo(f"  {'ok  ' if c['ok'] else 'FAIL'} {c['name']}: {c['detail']}")
+
+
+@app.command("preflight")
+def preflight_cmd(
+    out: Path = typer.Option(Path("recordings"), help="Folder that holds the session folders."),
+    targets: Path | None = typer.Option(None, help="YAML: targets: [...] (as for record)."),
+    exe: list[str] = typer.Option([], help="A desktop target by executable name."),
+    origin: list[str] = typer.Option([], help="A web target by origin."),
+    tn3270: list[str] = typer.Option([], help="A mainframe target: host:port (TN3270)."),
+    cdp: str | None = typer.Option(None, help="Attach mode: the browser's DevTools address."),
+    min_free_mb: float = typer.Option(1024, help="Free disk space needed, in MB."),
+    portal_contract: str | None = typer.Option(None, help="The contract the portal needs."),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON."),
+) -> None:
+    """Check that a session can record: browser, targets, disk, contract, each channel."""
+    from labctl.workstation.preflight import preflight
+
+    got = preflight(_targets(targets, exe, origin, [], tn3270), out=out, cdp=cdp,
+                    min_free_mb=min_free_mb, portal_contract=portal_contract)  # fmt: skip
+    if as_json:
+        typer.echo(json.dumps(got, indent=1))
+    else:
+        _show_checks(got)
+        typer.echo("Ready" if got["ready"] else "not ready")
+    if not got["ready"]:
+        raise typer.Exit(2)
 
 
 @app.command("finalize")

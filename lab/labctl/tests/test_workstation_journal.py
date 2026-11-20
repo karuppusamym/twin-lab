@@ -335,18 +335,20 @@ from pathlib import Path
 from labctl.workstation.levels import Targets
 from labctl.workstation.session import Session
 
-root, port, demo_path = Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
-spec = importlib.util.spec_from_file_location("demo_host", demo_path)
-demo = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(demo)
+if __name__ == "__main__":
+    root, port, demo_path = Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+    spec = importlib.util.spec_from_file_location("demo_host", demo_path)
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
 
 def script(session):
     demo.flow(session.mainframe[0].listen)
     print("flowed", flush=True)
     time.sleep(120)
 
-Session(root, Targets.from_list([{"tn3270": f"127.0.0.1:{port}", "listen": 0}]),
-        max_seconds=300).run(script=script)
+if __name__ == "__main__":  # the session's collector processes import this file too
+    Session(root, Targets.from_list([{"tn3270": f"127.0.0.1:{port}", "listen": 0}]),
+            max_seconds=300).run(script=script)
 """
 
 

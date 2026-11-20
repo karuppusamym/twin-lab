@@ -348,7 +348,8 @@ class Recorder:
                  stop: Callable[[], bool] | None = None, pictures: bool = True,
                  session: bool = False, levels: dict[int, str] | None = None,
                  admit: Callable[[int], str | None] | None = None,
-                 unfocused_values: bool = False, journal=None) -> None:  # fmt: skip
+                 unfocused_values: bool = False, journal=None,
+                 resume: bool = False) -> None:  # fmt: skip
         require()
         from labctl.desktop import win
 
@@ -402,7 +403,17 @@ class Recorder:
         self.fg = 0
         self.processes: dict[int, dict] = {}
         self.notes: list[str] = []
-        self.file = (self.out / "steps.jsonl").open("w", encoding="utf-8")
+        # resume: a workstation collector started again after a failure goes on with the steps
+        # already written (and their numbers), instead of writing over them.
+        steps_file = self.out / "steps.jsonl"
+        if resume and steps_file.is_file():
+            for line in steps_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    self.seq = max(self.seq, int(json.loads(line).get("seq") or 0))
+                except (ValueError, AttributeError, TypeError):
+                    pass
+            self.notes.append(f"started again after a failure, after step {self.seq}")
+        self.file = steps_file.open("a" if resume else "w", encoding="utf-8")
         self.started = _now()
         self._handlers: list = []
         # A workstation session's capture journal (labctl.workstation.journal): an action's

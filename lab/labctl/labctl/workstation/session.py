@@ -174,6 +174,11 @@ class Session:
         self.mainframe: list = []  # the TN3270 proxies (labctl.workstation.tn3270.Proxy)
         self._journal = None
         self.started = None
+        # Each channel (web, desktop, mainframe) runs in a process of its own, watched by
+        # labctl.workstation.supervisor; TWINLAB_COLLECTORS=threads runs them in this process.
+        self.isolated = os.environ.get("TWINLAB_COLLECTORS", "processes") != "threads"
+        self.supervisor = None
+        self.web_part = 0  # web parts already recorded (a restarted web collector goes on)
 
     # -- journal ---------------------------------------------------------------------------------
 
@@ -372,14 +377,14 @@ class Session:
                           "start the session again; web targets not recorded")  # fmt: skip
                 return
         cdp = f"http://127.0.0.1:{port}"
-        part = 0
+        part = self.web_part
         gone_at: str | None = None  # when the browser closed, until it records again
         try:
             # The browser lives as long as the session: a robot closing its tab, or the whole
             # browser, does not end the web recording. A browser closed is opened again with the
             # same profile and port (a robot opening the same profile then lands in it), and
             # recorded into the next part (web, web-2, ...).
-            while not self.stopping() and part < 20:
+            while not self.stopping() and part < self.web_part + 20:
                 part += 1
                 out = self.folder / ("web" if part == 1 else f"web-{part}")
                 proc = subprocess.Popen([exe, f"--remote-debugging-port={port}",
@@ -387,7 +392,8 @@ class Session:
                                          "--no-default-browser-check", "--disable-sync",
                                          "--disable-features=msEdgeStartupBoost,Translate",
                                          "--edge-skip-compat-layer-relaunch", "--new-window",
-                                         start if part == 1 else "about:blank"])  # fmt: skip
+                                         start if part == self.web_part + 1
+                                         else "about:blank"])  # fmt: skip
                 self.edge_pid = proc.pid
                 try:
                     if not _wait_cdp(cdp, 30, self.stopping):
@@ -468,14 +474,17 @@ class Session:
         self.folder.mkdir(parents=True, exist_ok=False)
         self.started = _now()
         self._journal = capture.Journal(self.folder / "journal.jsonl", ticks=False)
-        self.capture = {ch: capture.Journal(capture.path_of(self.folder, ch), ch)
-                        for ch in self.requested_channels()}  # fmt: skip
+        # Isolated collectors open their own capture journals (labctl.workstation.supervisor).
+        self.capture = {} if self.isolated else {
+            ch: capture.Journal(capture.path_of(self.folder, ch), ch)
+            for ch in self.requested_channels()}  # fmt: skip
         _write_json(self.folder / "session.json", self._meta("recording"))
         threads = []
         desktop_targets = [t for t in self.targets.targets if not t.origin and not t.tn3270]
         started_procs = []
+        sup = None
         try:
-            if sys.platform == "win32":
+            if sys.platform == "win32" and not self.isolated:
                 # labctl.desktop.win first: it sets COM to multithreaded before comtypes loads,
                 # in this thread (the desktop recorder runs here). UI Automation calls its event
                 # handlers on its own threads; a single-threaded apartment without a message
@@ -485,22 +494,31 @@ class Session:
                 if _apartment() not in (None, 1) and self.targets.targets:
                     self.note("COM is single-threaded in the recording thread: UI Automation "
                               "events (typing, selections) may be missed")  # fmt: skip
-            self._start_mainframes()
+            if self.isolated:
+                from labctl.workstation.supervisor import Supervisor
+
+                sup = self.supervisor = Supervisor(self)
+                if self.channel_status is None:
+                    self.channel_status = sup.channel_status
+            else:
+                self._start_mainframes()
             for t in desktop_targets:
                 if t.start:
                     started_procs.append(subprocess.Popen([t.start]))
-            if sys.platform == "win32":
+            if sys.platform == "win32" and not (sup is not None and sup.runs("desktop")):
                 threads.append(threading.Thread(target=self._watch, name="tl-watch", daemon=True))
-            if self.targets.origins():
+            if self.targets.origins() and sup is None:
                 threads.append(threading.Thread(target=self._web, name="tl-web", daemon=True))
             for th in threads:
                 th.start()
+            if sup is not None:
+                sup.start()  # the collectors are ready (or said why not) before a script runs
             failure: list[BaseException] = []
             if script is not None:
                 threading.Thread(target=self._script, args=(script, failure), daemon=True,
                                  name="tl-script").start()  # fmt: skip
             try:
-                if desktop_targets and sys.platform == "win32":
+                if sup is None and desktop_targets and sys.platform == "win32":
                     self._run_desktop()
                 else:
                     end = time.monotonic() + self.max_seconds
@@ -509,6 +527,8 @@ class Session:
             except KeyboardInterrupt:
                 self.note("stopped with Ctrl+C")
             self.stop()
+            if sup is not None:
+                sup.shutdown()
             for th in threads:
                 try:
                     th.join(300)
@@ -518,6 +538,8 @@ class Session:
                 self.note(f"the script failed: {type(failure[0]).__name__}: {failure[0]}"[:300])
         finally:
             self.stop()
+            if sup is not None:
+                sup.shutdown()
             for proxy in self.mainframe:
                 proxy.stop()
                 proxy.join(10)
