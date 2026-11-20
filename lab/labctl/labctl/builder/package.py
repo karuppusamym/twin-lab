@@ -1339,14 +1339,15 @@ def _build(repo_root: Path, app_id: str, out_dir: Path, repo: str | None,
     if leaked:
         raise PackageError(f"cannot package {app_id}: a value the recording holds as data is in "
                            "the code map or the build documents: " + "; ".join(leaked[:10]))  # fmt: skip
-    purposes = [(rel, complete.purpose(rel, app_id, data)) for rel, data in entries]
+    desktop = any(rel == f"apps/{app_id}/look/windows.json" for rel, _d in entries)
+    purposes = [(rel, complete.purpose(rel, app_id, data, desktop)) for rel, data in entries]
     purposes += [(complete.INDEX_FILE, complete.purpose(complete.INDEX_FILE, app_id)),
                  (MANIFEST_FILE, complete.purpose(MANIFEST_FILE, app_id))]  # fmt: skip
     index = complete.index_md(app_id, purposes, gaps).encode("utf-8")
     entries.insert(1, (complete.INDEX_FILE, index))
     listing = [
         {"path": rel, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
-         "purpose": complete.purpose(rel, app_id, data)}
+         "purpose": complete.purpose(rel, app_id, data, desktop)}
         for rel, data in entries
     ]  # fmt: skip
     combined = hashlib.sha256(

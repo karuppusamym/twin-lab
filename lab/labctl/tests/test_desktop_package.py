@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 from labctl import factory
@@ -75,6 +77,34 @@ def test_a_caption_drawn_inside_a_kept_control_is_kept() -> None:
     btn, grid = clean["children"]
     assert btn["children"][0]["name"] == "_Search" and btn["children"][0]["name_is"] == "structure"
     assert grid["children"][0]["children"][0]["name_is"] == "data"
+
+
+def test_a_combo_box_drop_button_is_structure() -> None:
+    raw = {"type": "Window", "name": "Case", "children": [
+        {"type": "Text", "aid": "lblStatus", "name": "Status"},
+        {"type": "ComboBox", "aid": "cboStatus", "name": "Status", "value": "Waiting on vendor",
+         "children": [{"type": "Text", "name": "Waiting on vendor"},
+                      {"type": "Button", "name": "Open"}]}]}  # fmt: skip
+    combo = privacy.clean(raw, set())["children"][1]
+    text, button = combo["children"]
+    assert button["name"] == "Open" and button["name_is"] == "structure"
+    assert text["name_is"] == "data"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="draws the system icons with GDI")
+def test_the_icon_of_a_message_box_is_recognised() -> None:
+    from labctl.desktop import winlook
+
+    size, w, h = 48, 120, 100
+    for name in winlook.ICONS:
+        icon = winlook._icon_pixels(name, size, 0xFFFFFF)  # noqa: SLF001
+        px = bytearray(b"\xff\xff\xff\xff" * w * h)
+        for y in range(size):
+            row = ((20 + y) * w + 30) * 4
+            px[row : row + size * 4] = icon[y * size * 4 : (y + 1) * size * 4]
+        assert winlook.message_icon((w, h, bytes(px)), [30, 20, size, size]) == name
+    blank = (w, h, b"\xff\xff\xff\xff" * w * h)
+    assert winlook.message_icon(blank, [30, 20, size, size]) is None
 
 
 # --- the package ------------------------------------------------------------------------------
@@ -169,6 +199,45 @@ def test_brief_writes_the_desktop_package(tmp_path: Path) -> None:
         assert f"apps/casedesk/{rel}" in names, rel
     task = package.prompt(root, "casedesk", None)
     assert "look/" in task and "seed.sql" in task and "values.yaml" in task
+
+
+def test_focus_icon_and_grid_behaviour_reach_the_package(tmp_path: Path) -> None:
+    root = _lab(tmp_path)
+    rec = root / "evidence" / "casedesk" / "flow-1"
+    # What a recorder that reads the keyboard focus and the message box icon writes.
+    for name, mark in (("0001.json", "txtUser"), ("0005.json", None), ("0026.json", None)):
+        path = rec / "trees" / name
+        tree = json.loads(path.read_text(encoding="utf-8"))
+        for node in tree.get("children") or []:
+            if mark and node.get("aid") == mark:
+                node["focused"] = True
+            if node.get("type") == "Image":
+                node["win32"] = {"icon": "warning"}
+        path.write_text(json.dumps(tree), encoding="utf-8")
+    factory.generate(root, "casedesk", "CaseDesk")
+    app = root / "apps" / "casedesk"
+    rules = json.loads((app / "rules.json").read_text(encoding="utf-8"))
+    wins = {w["id"]: w for w in rules["windows"]}
+    assert wins["LoginForm"]["focus_on_open"] == "uia:AutomationId=txtUser;ControlType=Edit"
+    assert wins["MainForm"]["focus_on_open"].startswith("not recorded")
+    grid = next(c for c in wins["MainForm"]["controls"] if c.get("grid"))["grid"]
+    assert grid["cells_read_only"] is True and grid["headers_clickable"] is True
+    assert grid["sorting"].startswith("not observed")
+    refused = next(v for v in wins["CaseDetailForm"]["validation"]
+                   if isinstance(v["outcome"], dict))  # fmt: skip
+    assert refused["outcome"]["icon"] == "warning"
+    assert any("search" in u for u in rules["unknown"])
+    nav = json.loads((app / "navigation.json").read_text(encoding="utf-8"))
+    box = next(w for w in nav["windows"] if w["id"] == "msgbox-case")
+    assert box["icon"] == "warning" and box["buttons"] == ["OK (default)"]
+    brief = (app / "BRIEF.md").read_text(encoding="utf-8")
+    assert "keyboard focus when it opens: `uia:AutomationId=txtUser;ControlType=Edit`" in brief
+    assert "(warning icon)" in brief and "- Not known: how a search matches" in brief
+    zipped = package.build(root, "casedesk", tmp_path / "out")
+    purposes = {f["path"]: f["purpose"] for f in package.read_manifest(zipped)["files"]}
+    assert purposes["apps/casedesk/spec/WINDOWS/MainForm.md"].startswith("Window file")
+    assert "window" in purposes["apps/casedesk/look/windows.json"].lower()
+    assert "page" not in purposes["apps/casedesk/steps/flow-1.json"]
 
 
 def test_package_refuses_a_picture_the_recorder_did_not_keep(tmp_path: Path) -> None:

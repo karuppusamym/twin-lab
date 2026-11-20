@@ -234,7 +234,7 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
                 out[key] = n[key]
         if n.get("help"):
             out["help"] = keep_text(str(n["help"])[:120], known, struct)
-        for key in ("enabled", "visible", "focusable", "readonly", "selected"):
+        for key in ("enabled", "visible", "focusable", "readonly", "selected", "focused"):
             if key in n and n[key] is not None:
                 out[key] = bool(n[key])
         # How it looks and what it accepts (labctl.desktop.winlook): fonts, frame, limits.
@@ -262,7 +262,9 @@ def clean(raw: dict, known: set[str] = frozenset(), structure: set[str] | None =
             out["items_are"] = "code-list" if kept else "data"
             kids = []
             for c in children:
-                kids.append(walk(c, not kept, kept))
+                # The drop-down button ("Open"/"Close" in WinForms) is the toolkit's, not data.
+                button = c.get("type") == "Button" and not c.get("children")
+                kids.append(walk(c, False, False) if button else walk(c, not kept, kept))
             out["children"] = kids
             return out
         kept_caption = n.get("name") if out.get("name_is") in ("structure", "message") else None

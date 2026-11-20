@@ -1389,6 +1389,12 @@ def replay(
                     _shoot(run.tabs.get(run.current) or current, artifacts, step.seq, step_shots)
                     continue
                 except Exception as exc:  # noqa: BLE001 - reported as the step's failure
+                    if _closed_its_own_window(exc, step, run, rec.steps):
+                        # the action closed its window, as the recording's next step in that
+                        # tab says: the driver can report it before the click returns
+                        report.outcome = "replayed"
+                        reached.add(step.seq)
+                        continue
                     report.status, report.outcome = "fail", "failed"
                     check = "url" if isinstance(exc, _WrongAddress) else "action"
                     report.differences.append(
@@ -1780,6 +1786,19 @@ def _record_title(step: RecStep, values: dict[int, str], bnd: bindings_mod.Bindi
     if cand is not None and isinstance(cand.get("text_from_outside"), dict):
         return bnd.from_outside(cand["text_from_outside"])
     return None
+
+
+def _closed_its_own_window(exc: Exception, step: RecStep, run, steps: list[RecStep]) -> bool:
+    """True when an action failed only because its own window closed under it (a lookup
+    window whose button calls `window.close()`), the window is closed now, and the recording's
+    next step in that tab is its `tab-close`."""
+    if type(exc).__name__ != "TargetClosedError" or not step.tab:
+        return False
+    page = run.tabs.get(step.tab)
+    if page is not None and not page.is_closed():
+        return False
+    later = [s for s in steps if s.seq > step.seq and s.tab == step.tab]
+    return bool(later) and later[0].action == "tab-close"
 
 
 def _act(page, step: RecStep, base_url: str | None, values: dict[int, str],

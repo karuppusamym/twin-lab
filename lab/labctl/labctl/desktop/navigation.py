@@ -121,6 +121,19 @@ def build(recs) -> dict:
     for key, w in windows.items():
         if w["kind"] == "message box":
             w["modal"] = True
+            tree = wins[key].snaps[0][2] if key in wins and wins[key].snaps else {}
+            buttons = []
+            for node, _a, _i in locator.walk(tree):
+                if node.get("type") == "Image" and (node.get("win32") or {}).get("icon"):
+                    w["icon"] = node["win32"]["icon"]
+                if node.get("type") == "Button" and node.get("name_is") == "structure" and not any(
+                        a.get("type") == "TitleBar" for a in _a):  # fmt: skip
+                    buttons.append(node["name"] + (" (default)" if (node.get("win32") or {}).get(
+                        "default_button") else ""))  # fmt: skip
+            if buttons:
+                w["buttons"] = buttons
+            w["note"] = ("a standard message box (MessageBox.Show with its owner): UI Automation "
+                         "lists it as a child of the window that owns it")  # fmt: skip
             continue
         owners = {o["window"] for o in w["opened_by"] if o.get("window") and o["window"] != key}
         blocked = None
@@ -191,7 +204,9 @@ def brief_section(doc: dict | None, app: str) -> str:
         opened = "the application starts with it" if w.get("first") and not w["opened_by"] else (
             refs(w["opened_by"]) or "-")  # fmt: skip
         modal = "yes" if w.get("modal") is True else str(w.get("modal") or "-")
-        lines.append(f"| `{w['id']}` ({', '.join(w['titles'])}) | {w['kind']} | {modal} | "
+        kind = w["kind"] + (f" ({w['icon']} icon; {', '.join(w.get('buttons') or [])})"
+                            if w.get("icon") else "")  # fmt: skip
+        lines.append(f"| `{w['id']}` ({', '.join(w['titles'])}) | {kind} | {modal} | "
                      f"{opened} | {refs(w['closed_by']) or '-'} |")  # fmt: skip
     lines.append("")
     for m in doc["menus"]:
