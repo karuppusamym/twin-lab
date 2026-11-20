@@ -2231,8 +2231,9 @@ class _Har:
             entry["pageref"] = pageref
         self.entries.append(entry)
 
-    @staticmethod
-    def _content(response) -> dict:
+    MAX_BODY = 2_000_000  # in a workstation session, a body larger than this keeps its size only
+
+    def _content(self, response) -> dict:
         import base64
 
         if response is None:
@@ -2242,6 +2243,9 @@ class _Har:
             body = response.body()
         except Exception:  # noqa: BLE001 - redirects and aborted loads have no body
             return {"size": 0, "mimeType": mime}
+        if self.origins is not None and len(body) > self.MAX_BODY:
+            return {"size": len(body), "mimeType": mime, "comment": "body not kept: larger than "
+                    f"{self.MAX_BODY} bytes"}  # fmt: skip
         try:
             return {"size": len(body), "mimeType": mime, "text": body.decode("utf-8")}
         except UnicodeDecodeError:
@@ -2403,6 +2407,7 @@ def attach(
     origins: set[str] | None = None,
     outside: Callable | None = None,
     keep_open: bool = False,
+    on_ready: Callable[[], None] | None = None,
 ) -> Path:
     """Record a browser that is already running (a robot's Chrome or Edge started with
     `--remote-debugging-port=9222`): pass its address, for example `http://127.0.0.1:9222`.
@@ -2457,6 +2462,8 @@ def attach(
                             pass
             import time
 
+            if on_ready is not None:  # every listener is in place: actions from now are recorded
+                on_ready()
             started = time.monotonic()
             try:
                 while browser.is_connected() and time.monotonic() - started < max_seconds:

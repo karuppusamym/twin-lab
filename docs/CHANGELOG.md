@@ -2,6 +2,17 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-20 — Recorder: the robot's log, targets from the workflow, modern Windows apps
+- The UiPath robot's execution log (Verbose) is read beside a session: activities and which UI
+  activities left no recorded step (`workstation/robot.py`, `robot/coverage.json`).
+- `labctl workstation propose <project>`: targets proposed from a UiPath project's XAML.
+- Modern Windows apps (Calculator and other UWP/WinUI apps) are recorded behind their
+  ApplicationFrameHost frame.
+- The session's browser is announced only once the web recorder listens; hooks are renewed every
+  20 s; HAR bodies over 2 MB keep their size only in a session.
+- Checked: a real recording of the public Selenium web form, Windows Calculator and the synthetic
+  mainframe with the built recorder through the TwinLab2 portal.
+
 ## 2026-11-20 — Replay: a click that closes its own window
 On newer Playwright a click whose window closes itself (`window.close()` in the handler) can
 be reported as 'target closed' before it returns. Replay now counts that click as done when

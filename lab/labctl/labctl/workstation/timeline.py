@@ -154,6 +154,11 @@ def build(folder: Path) -> dict:
             f.write(json.dumps({k: v for k, v in row.items() if not k.startswith("_")},
                                ensure_ascii=False) + "\n")  # fmt: skip
     box = outbox(meta, out)
+    cov = folder / "robot" / "coverage.json"
+    if cov.is_file():  # the robot's own log was read beside the session: its counts only
+        c = json.loads(cov.read_text(encoding="utf-8"))
+        box["robot"] = {"activities": c.get("activities", 0), "ui_activities": c.get("ui_activities", 0),
+                        "covered": c.get("covered", 0), "gaps": len(c.get("gaps") or [])}  # fmt: skip
     (folder / "portal-outbox.json").write_text(json.dumps(box, indent=1, ensure_ascii=False),
                                                encoding="utf-8")  # fmt: skip
     return box

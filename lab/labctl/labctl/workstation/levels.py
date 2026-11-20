@@ -70,6 +70,7 @@ def desktop_identity(path: str | None, exe: dict | None = None) -> dict:
         "key": key, "surface": "desktop", "exe": name, "company": company or None,
         "product": product or None, "version": _clean(exe.get("product_version"), 40) or None,
         "display": product or _clean(exe.get("description")) or ntpath.splitext(name)[0],
+        "description": _clean(exe.get("description")) or None,
         "host": name.lower() in HOSTS, "browser": name.lower() in BROWSERS,
     }  # fmt: skip
 

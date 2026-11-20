@@ -269,3 +269,53 @@ def test_a_fresh_process_hears_ui_automation_events(tmp_path):
     assert len(typed) >= 4, [s["action"] for s in steps]
     meta = json.loads((folder / "session.json").read_text(encoding="utf-8"))
     assert not [n for n in meta["notes"] if "single-threaded" in n], meta["notes"]
+
+
+def test_a_modern_windows_app_behind_its_frame(tmp_path):
+    """Windows Calculator (UWP): its window belongs to ApplicationFrameHost.exe, its content to
+    CalculatorApp.exe. A target by the app's executable is recorded through its frame."""
+    from labctl.desktop import win
+    from labctl.desktop.drive import Driver
+    from labctl.workstation.levels import Targets
+    from labctl.workstation.session import Session
+
+    if not shutil.which("calc.exe"):
+        pytest.skip("no Windows Calculator")
+    subprocess.run(["taskkill", "/F", "/IM", "CalculatorApp.exe"], capture_output=True)
+    time.sleep(1)
+
+    def script(session):
+        subprocess.Popen(["calc.exe"])
+        end = time.monotonic() + 20
+        pids: set[int] = set()
+        while time.monotonic() < end and not win.pids_by_name("CalculatorApp.exe"):
+            time.sleep(0.3)
+        time.sleep(2.5)
+        pids = set(win.pids_by_name("CalculatorApp.exe")) | set(
+            win.pids_by_name("ApplicationFrameHost.exe")
+        )
+        d = Driver(pids, pause=0.5)
+        w = d.window("uia:Name=Calculator;ControlType=Window;ClassName=ApplicationFrameWindow")
+        win.user32.SetForegroundWindow(w.CurrentNativeWindowHandle)
+        time.sleep(0.8)
+        for aid in ("clearButton", "num7Button", "plusButton", "num5Button", "equalButton"):
+            d.click(w, f"uia:AutomationId={aid};ControlType=Button")
+        time.sleep(1.0)
+
+    try:
+        t = Targets.from_list([{"exe": "CalculatorApp.exe"}])
+        folder = Session(tmp_path / "rec", t, max_seconds=120, robot=True).run(script=script)
+    finally:
+        subprocess.run(["taskkill", "/F", "/IM", "CalculatorApp.exe"], capture_output=True)
+    box = json.loads((folder / "portal-outbox.json").read_text(encoding="utf-8"))
+    key = "desktop:Microsoft Corporation/Microsoft Calculator"
+    assert [a["key"] for a in box["apps"]] == [key]
+    clicks = [s for s in box["flows"][key] if s["action"] == "click"]
+    assert [s.get("label") for s in clicks] == [
+        "clearButton",
+        "Seven",
+        "plusButton",
+        "Five",
+        "equalButton",
+    ]
+    assert any(s.get("screen") == "Calculator" for s in box["flows"][key])
