@@ -308,7 +308,7 @@ def exe_info(path: str | None) -> dict:
         raw = ctypes.string_at(ptr, n.value)
         langs = [struct.unpack_from("<HH", raw, i) for i in range(0, len(raw) - 3, 4)]
     langs = langs or [(0x0409, 0x04B0)]
-    keys = {"FileDescription": "description", "ProductName": "product",
+    keys = {"FileDescription": "description", "ProductName": "product", "CompanyName": "company",
             "ProductVersion": "product_version", "FileVersion": "file_version",
             "OriginalFilename": "original_file"}  # fmt: skip
     lang, cp = langs[0]

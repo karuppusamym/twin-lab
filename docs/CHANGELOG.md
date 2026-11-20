@@ -17,6 +17,36 @@ Twin Lab is licensed under the Apache License 2.0 (`LICENSE`, `NOTICE`, `license
 and issue templates under `.github/`. Open: private vulnerability reporting must be switched
 on in the repository settings for the Security tab's button to appear.
 
+## 2026-11-19 — One recording across applications: the workstation session
+A session records the applications a person or a robot uses on one PC, in one go
+(`labctl/workstation/`, `labctl workstation record`; design and delivery in
+`docs/11-session-recorder.md`):
+- **Levels**: the session's targets (an executable, a company and product, a web origin) are
+  recorded in full; an application opted in at *steps* gets its steps without trees or pictures;
+  every other application only as having been used (executable and time, on the PC only). Windows
+  itself, Adobe, Outlook, Teams and password managers stay at that level, as do browsers the
+  person opened and host processes (`java.exe`, `python.exe`...).
+- **Collectors**: the desktop recorder takes processes while it runs (`add_process`) and stops
+  only when the session does; the web recorder, attached to an Edge the session starts with a
+  profile of its own (deleted at the end), writes nothing of an origin that is not a target, and
+  its HAR keeps only what target pages requested.
+- **One timeline**: `session.jsonl` merges the journal and both recordings by time, with
+  `app-switch` rows; `portal-outbox.json` holds the references a portal may receive: the target
+  applications and their step labels (ids and the application's own words, never a value, a
+  shape, a title or a presence application's name). A session left unfinished is recovered.
+- The portal side and the portable recorder are in TwinLab2 (`registry.py`, `agent/`).
+- **Mainframe**: a TN3270 proxy in the session (`workstation/tn3270.py`, a target
+  `tn3270://host:port`): the terminal connects to `127.0.0.1:23270`; screens, fields by label and
+  keys are recorded, values as shapes, non-display fields not at all. A synthetic host and
+  terminal to try it: `reference/mainframe/demo_host.py`.
+- **Recording a robot**: COM set up so UI Automation events arrive in a fresh process; the web
+  recording survives closed tabs and browsers; a kept browser profile (UiPath's extension) or
+  attaching by DevTools address; Edge or Chrome; values set without the keyboard focus recorded;
+  processes admitted on their first input; notes for demoted targets and elevated applications;
+  stricter portal labels; credential headers removed from a session's HAR.
+- Open: clipboard hand-offs, split and build-all on a session, steps level for web, signing,
+  mainframe (designed in the appendix of `docs/11-session-recorder.md`).
+
 ## 2026-11-19 — Windows opened across applications keep their link, and how a script opened one
 When application A's button or link opened application B in a new window, splitting the
 recording gave B's part a tab nobody opened and A's part a click that did nothing

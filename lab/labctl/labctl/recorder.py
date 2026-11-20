@@ -1354,9 +1354,19 @@ class _Secrets(TypedValues):
 class _Steps:
     """Receives captures from the page and writes `steps.jsonl`, `dom/` and `screens/`."""
 
-    def __init__(self, out_dir: Path, screenshots: bool = True):
+    def __init__(
+        self,
+        out_dir: Path,
+        screenshots: bool = True,
+        origins: set[str] | None = None,
+        outside: Callable | None = None,
+    ):
         self.out_dir = out_dir
         self.seq = 0
+        # A workstation session records only the pages of its target origins: an action, tab
+        # step or download elsewhere is not numbered or written; `outside(origin, ts)` hears of it.
+        self.origins = {o.lower() for o in origins} if origins is not None else None
+        self.outside = outside
         self.screenshots = screenshots
         self.file = (out_dir / "steps.jsonl").open("w", encoding="utf-8")
         # Steps wait here for their picture: Playwright cannot be called from inside the binding
@@ -1387,6 +1397,21 @@ class _Steps:
         self.replaced: list[tuple[int, list[str]]] = []  # (double click, the clicks it replaces)
 
     LOAD_CAUSES = ("click", "submit", "keypress", "dblclick")
+
+    def recorded(self, url: str, ts: str | None = None) -> bool:
+        """Is this address recorded? Always, outside a session; in one, only a target origin
+        (a page with no web origin yet, about:blank, is kept: it carries no data)."""
+        if self.origins is None:
+            return True
+        origin = _origin(url or "").lower()
+        if not origin or origin in self.origins:
+            return True
+        if self.outside is not None:
+            try:
+                self.outside(origin, ts or _now())
+            except Exception:  # noqa: BLE001 - the session's bookkeeping never stops a recording
+                pass
+        return False
 
     def _loaded_by(self, tab: str | None, event: dict) -> int | None:
         """The step that loaded a new document in this tab: a page load that comes within a few
@@ -1470,8 +1495,10 @@ class _Steps:
         if not dot:
             stem, ext = name, ""
         ext = ext.lower() if ext.isalnum() and len(ext) <= 8 else ""
-        self.seq += 1
         url = _safe_url(page)
+        if not self.recorded(url):
+            return
+        self.seq += 1
         step = {"seq": self.seq, "ts": _now(), "url": url, "action": "download", "selector": None,
                 "dom": None, "dom_before": None, "screenshot": None,
                 "download": {"name_shape": (_shape(stem) + (f".{ext}" if ext else ""))[:64],
@@ -1486,6 +1513,8 @@ class _Steps:
         self.waiting.append((step, None))
 
     def _tab_step(self, action: str, info: dict, url: str = "", ts: str | None = None) -> None:
+        if not self.recorded(url, ts):
+            return
         self.seq += 1
         step = {"seq": self.seq, "ts": ts or _now(), "url": url, "action": action, "selector": None,
                 "dom": None, "dom_before": None, "screenshot": None, "tab": info["tab"]}  # fmt: skip
@@ -1744,6 +1773,8 @@ class _Steps:
         info = self.tabs.get(_guid(page)) if page is not None else None
         self._announce(info, event.get("at") if isinstance(event.get("at"), str) else None)
         url = event.get("url") if isinstance(event.get("url"), str) else ""
+        if not self.recorded(url, event.get("at") if isinstance(event.get("at"), str) else None):
+            return
         if info is not None and url:
             info["first_url"] = info["first_url"] or url
             info["last_url"] = url
@@ -2107,12 +2138,42 @@ class _Har:
     """A HAR 1.2 log built from network events, for a browser Twin Lab did not start (an
     existing context cannot be told to record a HAR). Bodies are embedded as text or base64."""
 
-    def __init__(self) -> None:
+    def __init__(self, origins: set[str] | None = None) -> None:
         self.entries: list[dict] = []
         self.pages: list[dict] = []  # one HAR page per tab, as Playwright's own HAR has
+        # In a workstation session: only requests made by pages of a target origin are kept
+        # (their CDN and API calls included); a request with no page (a service worker) is
+        # kept when its own origin is a target.
+        self.origins = {o.lower() for o in origins} if origins is not None else None
+
+    SECRET_HEADER = ("authorization", "cookie", "token", "secret", "api-key", "apikey", "session",
+                     "csrf", "xsrf", "auth", "password", "signature")  # fmt: skip
+
+    def _headers(self, headers: dict) -> list[dict]:
+        """Headers as HAR rows; in a workstation session a header that may carry a credential
+        keeps its name only."""
+        rows = []
+        for k, v in headers.items():
+            if self.origins is not None and any(w in k.lower() for w in self.SECRET_HEADER):
+                v = "[removed]"
+            rows.append({"name": k, "value": v})
+        return rows
+
+    def _wanted(self, request) -> bool:
+        if self.origins is None:
+            return True
+        try:
+            page_url = request.frame.page.url
+        except Exception:  # noqa: BLE001
+            page_url = request.url
+        origin = _origin(page_url or "").lower()
+        return bool(origin) and origin in self.origins
 
     def on_finished(self, request) -> None:
         from datetime import UTC, datetime
+
+        if not self._wanted(request):
+            return
 
         try:
             response = request.response()
@@ -2135,7 +2196,7 @@ class _Har:
                 "method": request.method,
                 "url": request.url,
                 "httpVersion": "HTTP/1.1",
-                "headers": [{"name": k, "value": v} for k, v in request.headers.items()],
+                "headers": self._headers(request.headers),
                 "queryString": [],
                 "cookies": [],
                 "headersSize": -1,
@@ -2155,10 +2216,7 @@ class _Har:
                 "status": response.status if response else 0,
                 "statusText": response.status_text if response else "",
                 "httpVersion": "HTTP/1.1",
-                "headers": [
-                    {"name": k, "value": v}
-                    for k, v in (response.headers if response else {}).items()
-                ],
+                "headers": self._headers(response.headers if response else {}),
                 "cookies": [],
                 "content": self._content(response),
                 "redirectURL": "",
@@ -2342,6 +2400,9 @@ def attach(
     max_seconds: float = 1800,
     screenshots: bool = True,
     stop: Callable[[], bool] | None = None,
+    origins: set[str] | None = None,
+    outside: Callable | None = None,
+    keep_open: bool = False,
 ) -> Path:
     """Record a browser that is already running (a robot's Chrome or Edge started with
     `--remote-debugging-port=9222`): pass its address, for example `http://127.0.0.1:9222`.
@@ -2349,13 +2410,17 @@ def attach(
     Every page of its first context is recorded until the browser closes, `stop()` returns
     true, `max_seconds` pass, or Ctrl+C. Nothing is changed in the browser except the listener
     added to its pages; it is left running.
+
+    `origins` (a workstation session, labctl.workstation): only pages of these origins are
+    recorded; an action elsewhere is not written, `outside(origin, ts)` is told of it, and the
+    HAR keeps only the requests that pages of these origins made.
     """
     from playwright.sync_api import sync_playwright
 
     out_dir = Path(out_dir)
     (out_dir / "dom").mkdir(parents=True, exist_ok=True)
-    steps = _Steps(out_dir, screenshots)
-    har = _Har()
+    steps = _Steps(out_dir, screenshots, origins=origins, outside=outside)
+    har = _Har(origins)
     scripts = steps.scripts = _init_scripts(settle_ms)
     try:
         with sync_playwright() as pw:
@@ -2399,9 +2464,18 @@ def attach(
                         break
                     pages = [p for p in context.pages if not p.is_closed()]
                     if not pages:
-                        break
+                        if not keep_open:
+                            break
+                        try:  # a session waits for the next tab while the browser lives
+                            context.wait_for_event("page", timeout=500)
+                        except Exception:  # noqa: BLE001 - no tab yet, or the browser closed
+                            pass
+                        continue
                     steps.drain()
-                    pages[0].wait_for_timeout(500)
+                    try:
+                        pages[-1].wait_for_timeout(500)
+                    except Exception:  # noqa: BLE001 - that tab closed (a robot ends its scope)
+                        continue
             except KeyboardInterrupt:
                 pass
             for page in context.pages:

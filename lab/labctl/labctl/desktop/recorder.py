@@ -326,7 +326,10 @@ class Recorder:
 
     def __init__(self, out_dir: Path, pids: set[int], *, screenshots: bool = False,
                  settle_ms: int = 400, max_seconds: float = 1800, hooks: bool = True,
-                 stop: Callable[[], bool] | None = None, pictures: bool = True) -> None:  # fmt: skip
+                 stop: Callable[[], bool] | None = None, pictures: bool = True,
+                 session: bool = False, levels: dict[int, str] | None = None,
+                 admit: Callable[[int], str | None] | None = None,
+                 unfocused_values: bool = False) -> None:  # fmt: skip
         require()
         from labctl.desktop import win
 
@@ -334,6 +337,19 @@ class Recorder:
         self.out = Path(out_dir)
         (self.out / "trees").mkdir(parents=True, exist_ok=True)
         self.pids = set(pids)
+        # In a workstation session (labctl.workstation) the recorder starts with the processes
+        # it has (maybe none), is given more by add_process(), and stops only on stop(). A
+        # process at level "steps" gets its steps, without tree files or pictures.
+        self.session = session
+        self.levels: dict[int, str] = dict(levels or {})
+        self.adding: queue.Queue = queue.Queue()
+        # admit(pid) -> "full" | "steps" | None: a process the session records, decided the
+        # moment its first input or event arrives (a robot acts before any poll would see it).
+        self.admit = admit
+        self.refused: set[int] = set()
+        # A robot (UiPath's Simulate input) sets values without the keyboard focus: in a session
+        # recording one, such a change is a step too.
+        self.unfocused_values = unfocused_values
         self.screenshots = screenshots
         # Pictures without data (labctl.desktop.pictures); what data was seen stays in memory.
         self.pictures = pictures
@@ -372,9 +388,45 @@ class Recorder:
 
     # -- events from UI Automation (their threads) ------------------------------------------------
 
+    def add_process(self, pid: int, level: str = "full") -> None:
+        """Record this process too, from now on (any thread; the recorder's loop takes it)."""
+        self.adding.put((int(pid), level))
+
+    def _take_added(self) -> None:
+        while True:
+            try:
+                pid, level = self.adding.get_nowait()
+            except queue.Empty:
+                return
+            self.levels[pid] = level
+            self.pids.add(pid)
+            if pid not in self.processes:
+                self._process(pid)
+
+    def _wanted(self, pid: int) -> bool:
+        """Is this process recorded? Asks the session about one it has not seen yet."""
+        if pid in self.pids:
+            return True
+        if self.admit is None or not pid or pid in self.refused:
+            return False
+        try:
+            level = self.admit(pid)
+        except Exception:  # noqa: BLE001 - the hook must answer at once
+            level = None
+        if level in ("full", "steps"):
+            self.levels[pid] = level
+            self.pids.add(pid)
+            self.adding.put((pid, level))
+            return True
+        self.refused.add(pid)
+        return False
+
+    def _level(self, pid: int | None) -> str:
+        return self.levels.get(pid, "full") if pid is not None else "full"
+
     def _ours(self, el) -> bool:
         try:
-            return el.CurrentProcessId in self.pids
+            return self._wanted(el.CurrentProcessId)
         except Exception:  # noqa: BLE001
             return False
 
@@ -408,7 +460,7 @@ class Recorder:
                         secret = bool(sender.CurrentIsPassword)
                         # Only what the user changes: a value the application fills in (a
                         # dialog loading its record) changes controls without keyboard focus.
-                        if not sender.CurrentHasKeyboardFocus:
+                        if not sender.CurrentHasKeyboardFocus and not rec.unfocused_values:
                             return
                         if sender.CurrentControlType == 50003:
                             return  # a combo box: its selection event says what was chosen
@@ -486,7 +538,7 @@ class Recorder:
                     el = win.click_target(win.element_from_point(x, y))
                     return el, win.describe_now(el, hwnd or 0)
 
-                hooks = _Hooks(self.q, lambda pid: pid in self.pids, resolve)
+                hooks = _Hooks(self.q, self._wanted, resolve)
                 hooks.start()
                 hooks.ready.wait(5)
                 if hooks.failed:
@@ -504,7 +556,8 @@ class Recorder:
                         break
                     if now >= next_poll:
                         next_poll = now + POLL_S
-                        if not any(win.alive(p) for p in self.pids):
+                        self._take_added()
+                        if not self.session and not any(win.alive(p) for p in self.pids):
                             break
                         self._poll_windows()
                     self._drain()
@@ -1109,7 +1162,9 @@ class Recorder:
                               for k in ("selector", "title", "props")}  # fmt: skip
             if step["window"].get("selector"):
                 self.last_window = dict(step["window"])  # the window the menu belongs to
-        if tree_snap is not None:
+        if tree_snap is not None and self._level(pid) == "steps":
+            step["level"] = "steps"  # a workstation session's steps-only process: no tree
+        elif tree_snap is not None:
             rel = f"trees/{seq:04d}.json"
             clean = json.loads(json.dumps(tree_snap[1]))
             (self.out / rel).write_text(json.dumps(clean, ensure_ascii=False), encoding="utf-8")
@@ -1233,8 +1288,10 @@ class Recorder:
             tech = detect.detect(sig)
             sig["framework_ids"] = sorted(sig["framework_ids"])
             sig["classes"] = sorted(sig["classes"])
-            procs.append({"process": p["process"], "pid": p["pid"], "technology": tech,
-                          "signals": sig})  # fmt: skip
+            row = {"process": p["process"], "pid": p["pid"], "technology": tech, "signals": sig}
+            if self.session:
+                row["level"] = self._level(p["pid"])
+            procs.append(row)
         if self.effects_unplaced:
             self.notes.append(f"{self.effects_unplaced} selection(s) the application made by "
                               "itself, after the step before them was written: not recorded")  # fmt: skip
