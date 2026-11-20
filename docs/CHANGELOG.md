@@ -2,6 +2,14 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-20 — Replay: a click that closes its own window
+On newer Playwright a click whose window closes itself (`window.close()` in the handler) can
+be reported as 'target closed' before it returns. Replay now counts that click as done when
+the window is closed and the recording's next step in that tab is its `tab-close`; any other
+error, a window still open, or no recorded close stays a failure
+(`fidelity._closed_its_own_window`). The form fixture's typed dates are now in 1998, so none
+can be the day a package is made.
+
 ## 2026-11-19 — Open-source licence and community files
 Twin Lab is licensed under the Apache License 2.0 (`LICENSE`, `NOTICE`, `license` in
 `pyproject.toml`). `CONTRIBUTING.md` (ground rules, setup, checks, review and merge),
