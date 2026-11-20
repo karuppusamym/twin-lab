@@ -25,6 +25,13 @@ class Ambiguous(DriveError):
 
 
 class Driver:
+    # How long a check that depends on other windows waits before refusing: the foreground (a
+    # background driver must first win it from the foreground lock), the window under a point (a
+    # toast, a window still closing) and a combo box's items (a list slow to fill).
+    FOREGROUND_S = 3.0
+    UNCOVERED_S = 3.0
+    ITEMS_S = 3.0
+
     def __init__(self, pids: set[int], pause: float = 0.6):
         require()
         from labctl.desktop import win
@@ -33,6 +40,36 @@ class Driver:
 
     def pause(self, seconds: float | None = None) -> None:
         time.sleep(self.pause_s if seconds is None else seconds)
+
+    def _owns_foreground(self) -> bool:
+        fg = self.win.foreground()
+        return bool(fg) and self.win.window_pid(fg) in self.pids
+
+    def _to_front(self, top: int) -> bool:
+        """Put the driven window `top` in the foreground, waiting up to FOREGROUND_S. Windows
+        refuses SetForegroundWindow to a process that did not send the last input event, so each
+        try first sends a zero-pixel mouse move (win.nudge_input), which moves and clicks nothing.
+        True when a window of the driven process owns the foreground."""
+        end = time.monotonic() + self.FOREGROUND_S
+        while True:
+            if self._owns_foreground():
+                return True
+            if not top or time.monotonic() > end:
+                return False
+            self.win.nudge_input()
+            self.win.user32.SetForegroundWindow(top)
+            time.sleep(0.2)
+
+    def _uncovered(self, x: int, y: int) -> bool:
+        """True when the window under (x, y) is the driven process's, waiting up to UNCOVERED_S
+        for something else on top there to go. It never clicks to make it go."""
+        end = time.monotonic() + self.UNCOVERED_S
+        while True:
+            if self.win.window_pid(self.win.window_at(x, y)) in self.pids:
+                return True
+            if time.monotonic() > end:
+                return False
+            time.sleep(0.2)
 
     def windows(self) -> list:
         out = []
@@ -93,8 +130,7 @@ class Driver:
         el = self.control(window, selector)
         top = self.win.root_window(window.CurrentNativeWindowHandle or 0) or 0
         if top and self.win.foreground() != top:
-            self.win.user32.SetForegroundWindow(top)
-            time.sleep(0.3)
+            self._to_front(top)
         el.SetFocus()
         self.win.set_value(el, "")
         time.sleep(0.2)
@@ -118,18 +154,17 @@ class Driver:
         """A real mouse click (SendInput) in the middle of the control, as a person's hand would
         make it, so the recorder's mouse hook sees it. Only when the driven process owns the
         foreground window and the window under that point; the cursor is put back afterwards.
-        Raises DriveError rather than click anywhere else."""
+        Each of those is waited for a little (FOREGROUND_S, UNCOVERED_S), then DriveError rather
+        than click anywhere else."""
         el = self.control(window, selector)
         rect = el.CurrentBoundingRectangle
         x, y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
         top = self.win.root_window(window.CurrentNativeWindowHandle or 0) or 0
         if top and self.win.foreground() != top:
-            self.win.user32.SetForegroundWindow(top)
-            time.sleep(0.3)
-        fg = self.win.foreground()
-        if not fg or self.win.window_pid(fg) not in self.pids:
+            self._to_front(top)
+        if not self._owns_foreground():
             raise DriveError("the driven application is not in the foreground; not clicking")
-        if self.win.window_pid(self.win.window_at(x, y)) not in self.pids:
+        if not self._uncovered(x, y):
             raise DriveError(f"{selector}: another window covers it; not clicking")
         self.win.mouse_click(x, y)
         self.pause()
@@ -140,7 +175,8 @@ class Driver:
         self.pause()
 
     def choose(self, window, selector: str, item: str) -> None:
-        """Pick `item` in a combo box: expand, select the item by name, collapse."""
+        """Pick `item` in a combo box: expand, select the item by name, collapse. A drop-down
+        list that is still filling is waited for (ITEMS_S) while the item is not there yet."""
         combo = self.control(window, selector)
         try:
             combo.SetFocus()
@@ -148,7 +184,12 @@ class Driver:
             pass
         self.win.expand(combo, True)
         self.pause(0.4)
-        found = self.win.find_all(combo, locator.format({"Name": item, "ControlType": "ListItem"}))
+        sel = locator.format({"Name": item, "ControlType": "ListItem"})
+        end = time.monotonic() + self.ITEMS_S
+        found = self.win.find_all(combo, sel)
+        while not found and time.monotonic() < end:
+            time.sleep(0.2)
+            found = self.win.find_all(combo, sel)
         if len(found) != 1:
             raise DriveError(f"{selector}: item {item!r} found {len(found)} time(s)")
         self.win.select(found[0])
@@ -189,7 +230,14 @@ class Driver:
 
     def click_menu(self, window, *names: str) -> None:
         """Open a menu path with real mouse clicks (`click_menu(w, "Case", "Refresh")`): the
-        first item in the window's menu bar, the rest in the menu windows that open."""
+        first item in the window's menu bar, the rest in the menu windows that open. Like
+        click(): only in the foreground and where no other window covers the item, each waited
+        for a little, else DriveError."""
+        top = self.win.root_window(window.CurrentNativeWindowHandle or 0) or 0
+        if top and self.win.foreground() != top:
+            self._to_front(top)
+        if not self._owns_foreground():
+            raise DriveError("the driven application is not in the foreground; not clicking")
         for n, name in enumerate(names):
             sel = locator.format({"Name": name, "ControlType": "MenuItem"})
             end = time.monotonic() + 5
@@ -206,7 +254,7 @@ class Driver:
             el = self.control(scope, sel)
             rect = el.CurrentBoundingRectangle
             x, y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
-            if self.win.window_pid(self.win.window_at(x, y)) not in self.pids:
+            if not self._uncovered(x, y):
                 raise DriveError(f"menu item {name!r} is covered by another window; not clicking")
             self.win.mouse_click(x, y)
             self.pause(0.6)

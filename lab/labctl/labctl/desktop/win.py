@@ -756,6 +756,29 @@ def window_at(x: int, y: int) -> int:
     return int(user32.WindowFromPoint(wintypes.POINT(x, y)) or 0)
 
 
+def nudge_input() -> None:
+    """A relative mouse move of zero pixels with SendInput: real input from this process that
+    moves nothing and clicks nothing. Windows lets a process take the foreground only when it sent
+    the last input event (the foreground lock), so a background driver sends this before
+    SetForegroundWindow. A recorder's mouse hook sees at most a move, never a click."""
+
+    class MI(ctypes.Structure):
+        _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long), ("mouseData", wintypes.DWORD),
+                    ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.c_size_t)]  # fmt: skip
+
+    class INPUT(ctypes.Structure):
+        class _U(ctypes.Union):
+            _fields_ = [("mi", MI), ("pad", ctypes.c_byte * 32)]
+
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _U)]
+
+    move = INPUT(type=0)
+    move.mi = MI(0, 0, 0, 0x0001, 0, 0)  # MOUSEEVENTF_MOVE, relative, 0 x 0
+    user32.SendInput(1, ctypes.byref(move), ctypes.sizeof(INPUT))
+
+
 def mouse_click(x: int, y: int) -> None:
     """Left click at a screen point with SendInput, then put the cursor back."""
 

@@ -2,6 +2,19 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-20 — Desktop Driver: waits for the foreground, a covered point and a filling list
+The desktop Driver (`desktop/drive.py`) looked once where a driven application needs a moment,
+which twin-lab2's CaseDesk end to end met three ways: its first click raised "not in the
+foreground" (Windows' foreground lock refuses `SetForegroundWindow` to a process that did not send
+the last input), `choose` raised "item … found 0 time(s)" on a drop-down list still filling, and
+`click`/`click_menu` raised "covered by another window" while a window was still closing. Now
+`click`, `click_menu` and `keys` win the foreground with a zero-pixel mouse move
+(`win.nudge_input`, real input that moves and clicks nothing) before each `SetForegroundWindow`,
+for up to `Driver.FOREGROUND_S`; the covered check waits up to `UNCOVERED_S`; `choose` waits up
+to `ITEMS_S` while the item is not there yet. Each still refuses afterwards rather than click
+another application or pick an ambiguous item. Tests: `tests/test_desktop_drive.py` (a fake
+`win`, every platform; five of its seven fail on the previous Driver).
+
 ## 2026-11-20 — Recorder: isolated collectors, explicit failures, capture preflight
 - Web, desktop and mainframe collectors run in processes of their own under a supervisor
   (`workstation/supervisor.py`): heartbeats with a timeout, a failed collector restarted once
