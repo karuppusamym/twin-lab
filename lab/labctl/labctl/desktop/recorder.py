@@ -341,6 +341,7 @@ class Recorder:
 
     last_user: dict | None = None  # the user's last action: {"desc", "t", "action"}
     effects_unplaced = 0  # selections the application made, their cause already written
+    journal = None  # a workstation session's capture journal (set in __init__)
 
     def __init__(self, out_dir: Path, pids: set[int], *, screenshots: bool = False,
                  settle_ms: int = 400, max_seconds: float = 1800, hooks: bool = True,
@@ -721,6 +722,10 @@ class Recorder:
             return own
         return self.fg if self.fg in self.windows else next(iter(self.windows), 0)
 
+    def _marks(self) -> set[str]:
+        """Event ids captured, not yet written or dropped."""
+        return self.__dict__.setdefault("_marked", set())
+
     def _add(self, action: dict) -> None:
         from labctl.workstation import journal as capture
 
@@ -731,7 +736,7 @@ class Recorder:
             action["event_id"], action["captured_at"] = marker["event_id"], marker["captured_at"]
             if self.journal is not None:
                 self.journal.event(marker, self.out.name)
-        self._marked.add(action["event_id"])
+        self._marks().add(action["event_id"])
         self.pending.append(action)
         self.last_activity = time.monotonic()
 
@@ -1008,9 +1013,10 @@ class Recorder:
             if snap is not None:
                 self.trees[hwnd] = snap
         # Captured but neither written nor waiting: folded into another step, or no step.
-        gone = self._marked - {a.get("event_id") for a in self.pending}
+        marked = self._marks()
+        gone = marked - {a.get("event_id") for a in self.pending}
         if gone:
-            self._marked -= gone
+            marked -= gone
             if self.journal is not None:
                 self.journal.drop(sorted(gone), "not a step of its own")
 
@@ -1240,7 +1246,7 @@ class Recorder:
         self.file.write(json.dumps(step, ensure_ascii=False) + "\n")
         self.file.flush()
         if step.get("event_id"):
-            self._marked.discard(step["event_id"])
+            self._marks().discard(step["event_id"])
             if self.journal is not None:
                 self.journal.step(step, self.out.name)
 

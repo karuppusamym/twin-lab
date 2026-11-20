@@ -317,7 +317,9 @@ def test_recorder_typing_in_a_password_field_without_value_events() -> None:
     step = rec.pending[0]
     assert (step["kind"], step["password"], step["shape"], step["via"]) == (
         "type", True, None, "keyboard-hook")  # fmt: skip
-    assert set(step) == {"kind", "desc", "shape", "t", "password", "via"} and rec.typed_since_focus
+    # no value is held: only the action, its shape and its capture id and time
+    assert set(step) == {"kind", "desc", "shape", "t", "password", "via", "event_id",
+                         "captured_at"} and rec.typed_since_focus  # fmt: skip
     # A toolkit that does raise value events (WinForms): the same one step, said by the event.
     rec._typed({"kind": "value", "desc": box, "password": True, "t": 2.3})
     assert len(rec.pending) == 1 and rec.pending[0]["via"] == "uia-value-event"
