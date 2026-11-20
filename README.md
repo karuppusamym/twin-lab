@@ -126,3 +126,8 @@ record its flows in UAT, ask the DBA for its schema and register its real bots.
 | [docs/07-prod-echo-coverage.md](docs/07-prod-echo-coverage.md) | Every Prod Echo item and ATS feature, and where it lives |
 | [docs/04-plan.md](docs/04-plan.md) | The build plan with a definition of done per item |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | What changed, round by round |
+
+## Contributing and licence
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md) and
+[SECURITY.md](SECURITY.md). Twin Lab is licensed under the [Apache License 2.0](LICENSE).

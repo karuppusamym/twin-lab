@@ -2,6 +2,13 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Open-source licence and community files
+Twin Lab is licensed under the Apache License 2.0 (`LICENSE`, `NOTICE`, `license` in
+`pyproject.toml`). `CONTRIBUTING.md` (ground rules, setup, checks, review and merge),
+`CODE_OF_CONDUCT.md`, `SECURITY.md` (private reporting, leaked data), a pull request template
+and issue templates under `.github/`. Open: private vulnerability reporting must be switched
+on in the repository settings for the Security tab's button to appear.
+
 ## 2026-11-19 — Windows opened across applications keep their link, and how a script opened one
 When application A's button or link opened application B in a new window, splitting the
 recording gave B's part a tab nobody opened and A's part a click that did nothing
