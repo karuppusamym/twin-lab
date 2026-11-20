@@ -16,6 +16,7 @@ and two files are written beside the recording:
   to 2 s after it closed): `covered`, `gaps` (activity, display, time). A gap says what the
   recording missed: a Simulate click, an application that was not a target, a terminal that did
   not go through the proxy.
+  `links` names, for each covered activity, the recorded events by their `event_id`.
 
 Nothing of this goes to the portal except the counts (`timeline.outbox`).
 """
@@ -131,8 +132,8 @@ def read(started: str, ended: str, logs: list[Path] | None = None) -> list[dict]
 
 def coverage(activities: list[dict], recorded: list[dict]) -> dict:
     """Each UI activity, and whether a recorded step of a target fell while it ran."""
-    times = sorted(t for t in (_t(r.get("ts")) for r in recorded) if t is not None)
-    covered, gaps = 0, []
+    timed = [(t, r.get("event_id")) for r in recorded if (t := _t(r.get("ts"))) is not None]
+    covered, gaps, links = 0, [], []
     ui = [a for a in activities if UI_ACTIVITIES.search(a.get("activity") or "")]
     for a in ui:
         start = _t(a.get("ts"))
@@ -140,14 +141,18 @@ def coverage(activities: list[dict], recorded: list[dict]) -> dict:
         if start is None:
             continue
         lo, hi = start - SLACK_BEFORE, (end or start) + SLACK_AFTER
-        if any(lo <= t <= hi for t in times):
+        hits = [eid for t, eid in timed if lo <= t <= hi]
+        if hits:
             covered += 1
+            ids = [e for e in hits if e]
+            if ids:  # the recorded events by their permanent id, never by position
+                links.append({"seq": a.get("seq"), "event_ids": ids})
         else:
             gaps.append(
                 {k: a.get(k) for k in ("seq", "activity", "display", "ts", "surface", "app")}
             )
     return {"activities": len(activities), "ui_activities": len(ui), "covered": covered,
-            "gaps": gaps}  # fmt: skip
+            "gaps": gaps, "links": links}  # fmt: skip
 
 
 def attach(folder: Path, logs: list[Path] | None = None) -> dict | None:

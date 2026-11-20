@@ -86,6 +86,31 @@ def finalize(folder: Path) -> None:
     typer.echo(f"wrote {folder / 'session.jsonl'} and {folder / 'portal-outbox.json'}")
 
 
+@app.command("recover")
+def recover_cmd(
+    folder: Path | None = typer.Argument(None, help="One session folder (default: every one)."),
+    out: Path = typer.Option(Path("recordings"), help="Folder that holds the session folders."),
+) -> None:
+    """Rebuild sessions the recorder left unfinished (it was killed) from their capture journal."""
+    from labctl.workstation import session, timeline
+
+    done = (
+        ([folder.name] if session.recover(folder) else []) if folder else session.recover_all(out)
+    )
+    for name in done:
+        path = (folder if folder else out / name) / "portal-outbox.json"
+        c = timeline.read_references(path).get("completeness") or {}
+        typer.echo(f"recovered {name}: {c.get('overall', 'unknown')}")
+        for ch, st in (c.get("channels") or {}).items():
+            if st["status"] == "not_requested":
+                continue
+            typer.echo(f"  {ch:9} {st['status']}")
+            for g in st["gaps"]:
+                typer.echo(f"    gap {g['from']} - {g['to']}: {g['reason']}")
+    if not done:
+        typer.echo("nothing to recover")
+
+
 @app.command("propose")
 def propose_cmd(
     project: Path,
