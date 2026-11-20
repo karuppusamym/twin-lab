@@ -540,6 +540,10 @@ def windows(ctxs: list) -> list[dict]:
                 row["opened_from"] = trigger.get("screen")
                 row["opened_by"] = {"step": trigger["n"], "action": trigger["action"],
                                     "selector": trigger["selector"]}  # fmt: skip
+            if isinstance(raw.get(s["n"], {}).get("window"), dict):
+                row["window"] = raw[s["n"]]["window"]  # how a script opened it: name, features
+            if raw.get(s["n"], {}).get("opened_by_outside"):
+                row["opened_by_outside"] = raw[s["n"]]["opened_by_outside"]
             inside = [x for x in steps if x.get("tab") == tab and x["n"] > s["n"]]
             close = next((x for x in inside if x["action"] == "tab-close"), None)
             if close:
@@ -551,6 +555,10 @@ def windows(ctxs: list) -> list[dict]:
                                   "note": "closed right after this action: the element closes "
                                           "the window (hypothesis)"} if near and gap == 1
                                  else {"step": close["n"], "note": "closed by the person"})  # fmt: skip
+                if raw.get(close["n"], {}).get("closed_by") == "script":  # seen, not guessed
+                    row["closed"]["note"] = ("a script closed the window (`window.close()`)"
+                                             + (" right after this action" if near and gap == 1
+                                                else ""))  # fmt: skip
                 back = next((x for x in steps if x["n"] > close["n"]
                              and x["action"] == "tab-switch"), None)  # fmt: skip
                 if back:
@@ -558,7 +566,37 @@ def windows(ctxs: list) -> list[dict]:
                         f" (`{row['opened_from']}`)" if row.get("opened_from") else ""
                     )
             out.append(row)
+        # A window opened across applications (a part of a split recording, labctl.split).
+        for s in steps:
+            facts = raw.get(s["n"], {})
+            by = facts.get("opened_by_outside")
+            if (
+                by
+                and s["action"] != "tab-open"
+                and not any(
+                    w.get("tab") == s.get("tab") and w.get("opened_by_outside") for w in out
+                )
+            ):
+                out.append({"kind": "popup window or new tab", "tab": s.get("tab"),
+                            "shows": s.get("then") or s.get("screen"), "opened_at_step": s["n"],
+                            "opened_by_outside": by})  # fmt: skip
+            to = facts.get("opens_outside")
+            if to:
+                out.append({"kind": "popup window or new tab", "tab": to.get("tab"),
+                            "shows": to.get("url"), "application": to.get("app"),
+                            "opened_at_step": s["n"], "opened_from": s.get("screen"),
+                            "opened_by": {"step": s["n"], "action": s["action"],
+                                          "selector": s.get("selector")}})  # fmt: skip
     return out
+
+
+def _window_text(window: dict) -> str:
+    """How a script opened a window, for the build notes."""
+    feats = ",".join(f"{k}={'yes' if v is True else 'no' if v is False else v}"
+                     for k, v in (window.get("features") or {}).items())  # fmt: skip
+    return ("; recorded as a script's `window.open`"
+            + (f", window name `{window['name']}`" if window.get("name") else "")
+            + (f", features `{feats}`" if feats else ""))  # fmt: skip
 
 
 def redirects(ctxs: list) -> list[dict]:
@@ -747,7 +785,8 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
     wins = windows(ctxs)
     for w in wins:  # the element that opened a window, and the one that closed it, say so
         marks = [((w.get("opened_by") or {}).get("step"), "opens",
-                  f"popup window or new tab showing {w.get('shows')}")]  # fmt: skip
+                  f"popup window or new tab showing {w.get('shows')}"
+                  + (f" (application {w['application']})" if w.get("application") else ""))]  # fmt: skip
         closed = w.get("closed") or {}
         if closed.get("after"):
             marks.append((closed["step"] - 1, "closes", "this window"))
@@ -763,8 +802,16 @@ def build(root: Path, app: str, brief, ctxs: list) -> dict:
         row["ways_out"] = [{k: m[k] for k in ("to", "by", "selector", "text", "steps") if k in m}
                            for m in moves if m["from"] == row["path"]]  # fmt: skip
         for w in wins:
-            if w.get("shows") == row["path"]:
+            if w.get("shows") == row["path"] and not w.get("application"):
+                outside = w.get("opened_by_outside") or {}
                 row["kind"] = "shown in a popup window or new tab"
+                if outside:
+                    row["ways_in"].append({
+                        "from": f"application {outside.get('app')} (step {outside.get('step')} of "
+                                "the whole recording)",
+                        "by": "popup window or new tab opened by another application",
+                        "selector": outside.get("element"), "steps": [w["opened_at_step"]]})  # fmt: skip
+                    continue
                 row["ways_in"].append({"from": w.get("opened_from"), "by": "popup window or new tab",
                                        "selector": (w.get("opened_by") or {}).get("selector"),
                                        "steps": [w["opened_at_step"]]})  # fmt: skip
@@ -872,6 +919,10 @@ def brief_sections(app: str, doc: dict | None) -> str:
                            f"(step {by.get('step')}) opens `{v['shows']}` in a popup window or new "
                            "tab (keep how the element opens it: a link's `target`, or a script's "
                            "`window.open`)"
+                           + (_window_text(v["window"]) if v.get("window") else "")
+                           + (f"; that page is application `{v['application']}`, not this one: "
+                              "the element still opens the window, its page is not built here"
+                              if v.get("application") else "")
                            + (f"; {closed.get('note')}"
                               + (f" (`{closed['after']}`)" if closed.get("after") else "")
                               if closed else "")

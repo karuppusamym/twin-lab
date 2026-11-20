@@ -2,6 +2,31 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-19 — Windows opened across applications keep their link, and how a script opened one
+When application A's button or link opened application B in a new window, splitting the
+recording gave B's part a tab nobody opened and A's part a click that did nothing
+(`labctl/split.py`, `behaviour/fidelity.py`, `navmap.py`, `recorder.py`):
+- **Split**: A's action carries `opens_outside` ({app, step, tab, url}) and B's first step in
+  that window (and its `tab-open` step, when the part has one) carries `opened_by_outside`
+  ({app, step, tab, element}); step numbers are the whole recording's. A tab keeps its `opener`
+  only when the part's own application opened it for itself: before, B's replay waited for a
+  popup B never opens when B had also been used in the opening tab.
+- **Replay of a part**: at an `opens_outside` step the replica must open a window (none: the
+  step fails); the window is the other application's, so it is closed and not followed, and its
+  page load at the recorded address is answered with nothing. The whole recording's replay
+  with a source-to-replica map still follows the window, as before.
+- **Build notes**: A's notes name the element, the address and the application its window
+  shows; B's notes say which application and element open it.
+- **Recorder**: a `tab-open` step now says how a script opened the window (`window`:
+  `window.open`, its name and the size and yes/no features it asked for), and a `tab-close`
+  step says `closed_by: script` when the page called `window.close()`; the build notes state
+  both as recorded where they used to guess. A lookup window that writes into the page that
+  opened it and closes itself records and replays clean (`/lookup` in the capability fixtures).
+- Open: what a window writes into its opener is only in the opener's next snapshot, not a step
+  of its own; a window closed from another origin's script reads as closed by the person; the
+  window's size is recorded, not compared; print and file-picker windows of the operating
+  system, and a link that starts another browser or a desktop program, are not captured.
+
 ## 2026-11-19 — Desktop package: the gaps the blind rebuild's builder reported
 The recorder reads the keyboard focus (`focused`) and recognises a message box's icon from its
 pixels (the four system icons drawn in place and compared; `winlook.message_icon`). `rules.json`

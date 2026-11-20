@@ -499,3 +499,89 @@ def test_scope_matching_is_by_element_or_screen_and_never_silent():
     assert (
         scope.which(scope.Scope(exclusions=sc.exclusions), "a#homeLink", "/") is None
     )  # unapproved
+
+
+# =================================================================================================
+# A window one application opens for another: the link is kept in both parts
+# =================================================================================================
+
+
+def test_a_window_opened_across_applications_keeps_its_link_in_both_parts(recorded, tmp_path):
+    from labctl.behaviour import fidelity
+
+    rec = copy_of(recorded, tmp_path / "order-to-invoice")
+    prop = sp.propose(rec)
+    prop.apps[0].id, prop.apps[1].id = "orders", "billing"
+    orders, billing = sp.apply(rec, prop, tmp_path / "repo")
+    opened = next(s for s in steps_of(rec) if s["action"] == "tab-open")
+    click = seq_of(rec, "click", "#openBilling")
+    so, sb = steps_of(orders), steps_of(billing)
+    opener = next(s for s in so if s["global_seq"] == click)
+    assert opener["opens_outside"] == {"app": "billing", "step": sb[0]["global_seq"],
+                                       "tab": opened["tab"], "url": sb[0]["url"]}  # fmt: skip
+    assert sb[0]["opened_by_outside"] == {"app": "orders", "step": click, "tab": opened["opener"],
+                                          "element": opener["selector"]}  # fmt: skip
+    assert not any(s.get("opens_outside") for s in sb)
+    assert not any(s.get("opened_by_outside") for s in so)
+
+    # orders on its own: its replica must open the window; the window is not followed
+    fresh = fixture_apps.serve()
+    try:
+        report = fidelity.replay(orders, fresh.orders, resolve_timeout_ms=4000)
+        step = next(r for r in report.steps if r.seq == opener["seq"])
+        assert step.status == "pass" and "opened a window of billing" in step.target, (
+            report.markdown()
+        )
+        assert not fresh.apps["billing"].invoices.get(NUMBER)  # billing was not used
+    finally:
+        fresh.stop()
+
+    # a replica whose link opens no window fails at that step
+    def no_window(context):
+        context.add_init_script(
+            "document.addEventListener('click', e => { const a = e.target.closest('a[target]');"
+            " if (a) a.removeAttribute('target'); }, true);"
+        )
+
+    fresh = fixture_apps.serve()
+    try:
+        report = fidelity.replay(orders, fresh.orders, resolve_timeout_ms=4000, setup=no_window)
+    finally:
+        fresh.stop()
+    step = next(r for r in report.steps if r.seq == opener["seq"])
+    assert step.status == "fail" and "the replica opened none" in step.differences[0].actual
+    assert report.status != "pass"
+
+
+def test_a_tab_another_application_opened_is_not_expected_from_this_one(tmp_path):
+    """Billing was used in the first tab too, so the opening tab is one of its own: the window
+    is still the other application's doing, and the part's replay opens it itself."""
+    rec = tmp_path / "in" / "shared-tab"
+    (rec / "dom").mkdir(parents=True)
+    a, b = "http://a.example.test", "http://b.example.test"
+    rows = [(a + "/", "goto", None, "t1", {}), (b + "/in", "goto", None, "t1", {}),
+            (a + "/", "goto", None, "t1", {}), (a + "/", "click", "a#open", "t1", {}),
+            ("", "tab-open", None, "t2", {"opener": "t1"}),
+            (b + "/start", "goto", None, "t2", {"opener": "t1"})]  # fmt: skip
+    lines = []
+    for n, (url, action, sel, tab, extra) in enumerate(rows, 1):
+        step = {"seq": n, "ts": f"2026-11-17T10:00:{n:02d}.000Z", "url": url, "action": action,
+                "selector": sel, "dom": None, "tab": tab, **extra}  # fmt: skip
+        if action != "tab-open":
+            step["dom"] = f"dom/{n:04d}.html"
+            (rec / step["dom"]).write_text("<html><body><p>x</p></body></html>", "utf-8")
+        lines.append(json.dumps(step))
+    (rec / "steps.jsonl").write_text("\n".join(lines) + "\n", "utf-8")
+    (rec / "recording.har").write_text(json.dumps({"log": {"entries": []}}), "utf-8")
+    prop = sp.propose(rec)
+    prop.apps[0].id, prop.apps[1].id = "a", "b"
+    pa, pb = sp.apply(rec, prop, tmp_path / "repo")
+    sb = steps_of(pb)
+    assert [s["action"] for s in sb] == ["goto", "tab-open", "goto"]
+    by = {"app": "a", "step": 4, "tab": "t1", "element": "a#open"}
+    assert "opener" not in sb[1] and sb[1]["opened_by_outside"] == by
+    assert sb[2]["opened_by_outside"] == by
+    part = load_rec(pb)
+    assert part.steps[1].opener is None and part.steps[1].opened_by_outside == by
+    assert steps_of(pa)[2]["opens_outside"] == {"app": "b", "step": 6, "tab": "t2",
+                                                "url": b + "/start"}  # fmt: skip

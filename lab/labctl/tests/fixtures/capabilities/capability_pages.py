@@ -71,6 +71,20 @@ PAGES = {
         "<script>document.getElementById('done').onclick = () => {"
         "document.getElementById('msg').textContent = 'done'; };</script>",
     ),
+    "/lookup": page(
+        "Lookup",
+        "<button id='pick' type='button'>Pick</button><p id='picked'></p>"
+        "<button id='after' type='button'>After</button>"
+        "<script>document.getElementById('pick').onclick = () => {"
+        "window.open('/picker', 'picker', 'width=420,height=300,resizable=no'); };</script>",
+    ),
+    "/picker": page(
+        "Picker",
+        "<button id='choose' type='button'>Choose</button>"
+        "<script>document.getElementById('choose').onclick = () => {"
+        "window.opener.document.getElementById('picked').textContent = 'A-1';"
+        " window.close(); };</script>",
+    ),
     "/dialogs": page(
         "Dialogs",
         "<button id='ask' type='button'>Delete</button>"

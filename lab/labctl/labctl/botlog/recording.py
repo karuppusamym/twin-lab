@@ -65,6 +65,9 @@ class RecStep:
     setup: str | None = None  # a setup event (the blank page a browser starts on): why
     after: str | None = None  # "navigation": observed at the page load it caused, not here
     caused_by_outside: dict | None = None  # {app, step}: the cause went to another application
+    # A window opened across applications, in a part of a split recording (labctl.split):
+    opens_outside: dict | None = None  # {app, step, tab, url}: this action opened its window
+    opened_by_outside: dict | None = None  # {app, step, tab, element}: who opened this window
     option_index: int | None = None  # select: the position of the option chosen
     left: bool = False  # type: the field had lost the focus when the snapshot was taken
     # dialog: {kind: confirm|alert|prompt, choice: accept|dismiss, message: masked text}
@@ -325,7 +328,7 @@ def _extra(d: dict) -> dict:
                  "surface", "service_worker"):  # fmt: skip
         if isinstance(d.get(name), str):
             out[name] = d[name]
-    for name in ("caused_by_outside", "dialog", "download"):
+    for name in ("caused_by_outside", "opens_outside", "opened_by_outside", "dialog", "download"):
         if isinstance(d.get(name), dict):
             out[name] = dict(d[name])
     if isinstance(d.get("files"), list):

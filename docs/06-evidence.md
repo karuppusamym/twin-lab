@@ -169,6 +169,12 @@ evidence record-across <name> <url>` records such a flow, and `labctl evidence b
 stopping first for a person to confirm the proposed applications. The portal's Recordings page
 does the same.
 
+A window opened by a script says how on its `tab-open` step (`window`: `window.open`, its name,
+the size and features asked for), and its `tab-close` step says `closed_by: script` when the page
+closed it. When one application opens another in a new window, the split keeps the link in both
+parts: `opens_outside` on the action that opened it, `opened_by_outside` on the first step in the
+window. A part's own replay expects the replica to open that window and does not follow it.
+
 To replay a recording that crosses applications in one run, give each source origin its
 replica: `labctl behaviour fidelity <recording> --map https://real.example=http://localhost:8101`
 (repeat per application), or keep a `replicas.yaml` beside the recording. What is deliberately
