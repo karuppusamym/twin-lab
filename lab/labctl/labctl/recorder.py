@@ -1079,6 +1079,28 @@ def window_facts(opened: dict) -> dict:
     return out
 
 
+def link_events(steps: list[dict]) -> bool:
+    """`caused_by_event` and a record locator's `text_from_event`: the event_id of the step that
+    `caused_by` / `text_from` number, so a reference survives any renumbering. True if added."""
+    by_seq = {s["seq"]: s.get("event_id") for s in steps if isinstance(s.get("seq"), int)}
+    added = False
+    for s in steps:
+        cause = by_seq.get(s.get("caused_by")) if isinstance(s.get("caused_by"), int) else None
+        if cause and s.get("caused_by_event") != cause:
+            s["caused_by_event"] = cause
+            added = True
+        for cand in s.get("locators") or []:
+            ref = cand.get("text_from") if isinstance(cand, dict) else None
+            if (
+                isinstance(ref, int)
+                and by_seq.get(ref)
+                and cand.get("text_from_event") != by_seq[ref]
+            ):
+                cand["text_from_event"] = by_seq[ref]
+                added = True
+    return added
+
+
 def _public(step: dict) -> dict:
     """A step as written: without the recorder's own bookkeeping (keys starting with _)."""
     return {k: v for k, v in step.items() if not k.startswith("_")}
@@ -1360,9 +1382,16 @@ class _Steps:
         screenshots: bool = True,
         origins: set[str] | None = None,
         outside: Callable | None = None,
+        journal=None,
     ):
         self.out_dir = out_dir
         self.seq = 0
+        # A workstation session's capture journal (labctl.workstation.journal): each step's event
+        # line the moment it is numbered, the step once it is written, and what close() folds.
+        self.journal = journal
+        self.recording = Path(out_dir).name
+        self.eid_event: dict[str, str] = {}  # the page's event id -> the step's event_id
+        self.last_event_id: str | None = None
         # A workstation session records only the pages of its target origins: an action, tab
         # step or download elsewhere is not numbered or written; `outside(origin, ts)` hears of it.
         self.origins = {o.lower() for o in origins} if origins is not None else None
@@ -1510,6 +1539,7 @@ class _Steps:
         last = self.tab_last.get(tab or "")
         if last and last[1] in self.LOAD_CAUSES:
             step["caused_by"] = last[2] if isinstance(last[2], int) else last[0]
+        self._captured(step)
         self.waiting.append((step, None))
 
     def _tab_step(self, action: str, info: dict, url: str = "", ts: str | None = None) -> None:
@@ -1522,7 +1552,18 @@ class _Steps:
             step["opener"] = info["opener"]
         if url:
             step["origin"] = _origin(url)
+        self._captured(step)
         self.waiting.append((step, None))
+
+    def _captured(self, step: dict) -> None:
+        """A step just numbered: its permanent id (labctl.workstation.journal.stamp), kept
+        through renumbering, and its event line in the session's journal."""
+        from labctl.workstation import journal as capture
+
+        capture.stamp(step, "web")
+        self.last_event_id = step["event_id"]
+        if self.journal is not None:
+            self.journal.event(step, self.recording)
 
     def on_window(self, source, data: dict) -> None:
         """A script opened a window (`window.open`: its name and features) or closed its own
@@ -1638,6 +1679,8 @@ class _Steps:
             step = self.secrets.clean_step(step)
             self.written.append(step)
             self.file.write(json.dumps(_public(step)) + "\n")
+            if self.journal is not None:
+                self.journal.step(step, self.recording)
         self.file.flush()
 
     BEFORE_ACTION_JS = "m => window.__tlBeforeAction ? window.__tlBeforeAction(m) : false"
@@ -1854,8 +1897,13 @@ class _Steps:
             step["locators"] = locs
         eid = str(event.get("eid") or f"x{self.seq}")
         step["_eid"] = eid
+        self._captured(step)
+        self.eid_event[eid] = step["event_id"]
         if isinstance(event.get("replaces"), list):  # a double click: in place of its clicks
             self.replaced.append((self.seq, [str(e) for e in event["replaces"]]))
+            if self.journal is not None:
+                self.journal.drop([self.eid_event.get(str(e)) for e in event["replaces"]],
+                                  "folded into a double click")  # fmt: skip
         self.open[eid] = (step, page)
 
     def on_flush(self, source, data: dict) -> None:
@@ -1995,6 +2043,7 @@ class _Steps:
         # (a setup event by its address: labctl.botlog.recording.setup_reason; no field of its own)
         if tab:
             step["tab"] = tab
+        self._captured(step)
         self.waiting.append((step, None))
 
     def close(self) -> None:
@@ -2016,6 +2065,8 @@ class _Steps:
         else:  # one tab: no tab steps (a single page's recording reads as it always did)
             steps = [s for s in steps if not str(s.get("action") or "").startswith("tab-")]
         renumbered = self._renumber(steps)
+        if link_events(steps):
+            self.rewrite = True
         if mark_unsettled_pictures(steps):
             self.rewrite = True
         if self.secrets:
@@ -2072,11 +2123,19 @@ class _Steps:
                             "action": "tab-switch", "selector": None, "dom": None,
                             "dom_before": None, "screenshot": None, "tab": tab,
                             "from_tab": current, **({"origin": s["origin"]} if s.get("origin") else {})})  # fmt: skip
+                self._captured_late(out[-1], s)
             if tab:
                 seen.add(tab)
                 current = tab
             out.append(s)
         return out
+
+    def _captured_late(self, step: dict, at: dict) -> None:
+        """A step close() makes (a tab switch): an id of its own, captured when the step it
+        stands before was."""
+        from labctl.workstation import journal as capture
+
+        capture.stamp(step, "web", at.get("captured_at"))
 
     def _renumber(self, steps: list[dict]) -> bool:
         """Number the steps 1, 2, 3 in their final order, renaming their files and changing every
@@ -2138,8 +2197,12 @@ class _Har:
     """A HAR 1.2 log built from network events, for a browser Twin Lab did not start (an
     existing context cannot be told to record a HAR). Bodies are embedded as text or base64."""
 
-    def __init__(self, origins: set[str] | None = None) -> None:
+    def __init__(self, origins: set[str] | None = None, journal=None) -> None:
         self.entries: list[dict] = []
+        # A workstation session's network journal: each entry as it is kept, with the values
+        # typed so far taken out (`steps` holds them), linked to the last web event before it.
+        self.journal = journal
+        self.steps: _Steps | None = None
         self.pages: list[dict] = []  # one HAR page per tab, as Playwright's own HAR has
         # In a workstation session: only requests made by pages of a target origin are kept
         # (their CDN and API calls included); a request with no page (a service worker) is
@@ -2230,6 +2293,11 @@ class _Har:
         if pageref:
             entry["pageref"] = pageref
         self.entries.append(entry)
+        if self.journal is not None:
+            steps = self.steps
+            clean = steps.secrets.scrub(entry) if steps is not None else entry
+            self.journal.har(clean, steps.recording if steps is not None else None,
+                             steps.last_event_id if steps is not None else None)  # fmt: skip
 
     MAX_BODY = 2_000_000  # in a workstation session, a body larger than this keeps its size only
 
@@ -2408,6 +2476,8 @@ def attach(
     outside: Callable | None = None,
     keep_open: bool = False,
     on_ready: Callable[[], None] | None = None,
+    journal=None,
+    network_journal=None,
 ) -> Path:
     """Record a browser that is already running (a robot's Chrome or Edge started with
     `--remote-debugging-port=9222`): pass its address, for example `http://127.0.0.1:9222`.
@@ -2418,14 +2488,17 @@ def attach(
 
     `origins` (a workstation session, labctl.workstation): only pages of these origins are
     recorded; an action elsewhere is not written, `outside(origin, ts)` is told of it, and the
-    HAR keeps only the requests that pages of these origins made.
+    HAR keeps only the requests that pages of these origins made. `journal` and
+    `network_journal` (labctl.workstation.journal.Journal) receive each step and each HAR entry
+    as it is captured, so a session that dies keeps them.
     """
     from playwright.sync_api import sync_playwright
 
     out_dir = Path(out_dir)
     (out_dir / "dom").mkdir(parents=True, exist_ok=True)
-    steps = _Steps(out_dir, screenshots, origins=origins, outside=outside)
-    har = _Har(origins)
+    steps = _Steps(out_dir, screenshots, origins=origins, outside=outside, journal=journal)
+    har = _Har(origins, journal=network_journal)
+    har.steps = steps
     scripts = steps.scripts = _init_scripts(settle_ms)
     try:
         with sync_playwright() as pw:

@@ -2,6 +2,19 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-20 — Recorder: event ids at capture, a durable journal, recovery and completeness
+Every workstation event gets a permanent `event_id` (UUIDv7), `channel` and `captured_at` the
+moment it is captured; `seq` and `global_seq` are display orders only, and references between
+events use the id (`caused_by_event`, `text_from_event`, a HAR entry's `_event_id`, the robot
+coverage's `event_ids`). Each channel appends its events, finished steps and (web) HAR entries to
+`capture/<channel>.jsonl`, flushed per line and fsync'd every 0.5 s: the loss window is 2 s.
+A session killed mid-capture is rebuilt from the journal on the next start or with
+`labctl workstation recover`, HAR included, marked `recovered: true` with a gap per channel
+that did not close. The outbox speaks recorder contract 1.1.0: `contract_version` and the
+`completeness` manifest (and `preflight` when given); a stopped session is complete only when
+every channel it needed closed cleanly with no gap. Open: the collector supervisor's
+`channel_status()` and `preflight.py` plug in through `Session(channel_status=, preflight=)`.
+
 ## 2026-11-20 — Recorder: the robot's log, targets from the workflow, modern Windows apps
 - The UiPath robot's execution log (Verbose) is read beside a session: activities and which UI
   activities left no recorded step (`workstation/robot.py`, `robot/coverage.json`).

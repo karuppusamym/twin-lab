@@ -18,9 +18,21 @@
   attaches to it (labctl.recorder.attach with the target origins); pages of other origins are
   presence rows. The profile is deleted when the session ends.
 
+Every event is written to the session's capture journal as it is captured
+(labctl.workstation.journal: `capture/<channel>.jsonl`, fsync'd every 0.5 s; loss window 2 s),
+with its permanent `event_id`; so are the web recorder's HAR entries (`capture/network.jsonl`).
+`journal.jsonl` (the session's own rows) is fsync'd the same way.
+
 At the end `session.json` says `stopped` and labctl.workstation.timeline writes `session.jsonl`
-and `portal-outbox.json`. A folder left `recording` (the program was killed) is finalised by
-`recover()`; its web HAR is lost then (the web recorder writes it at the end), and it says so.
+and `portal-outbox.json`, with the completeness manifest (labctl.workstation.completeness). A
+folder left `recording` (the program was killed) is rebuilt from its journal by `recover()`
+(labctl.workstation.recovery: the steps, and the web HAR from the network journal), marked
+`recovered: true`, with a gap for the loss window and each channel that did not close.
+
+Two hooks for a collector supervisor: `channel_status` (a callable returning
+`{channel: {"status", "gaps", "notes"}}`, merged into the manifest) and `preflight` (the
+`{"checks": [...], "ready"}` block of labctl.workstation.preflight), both kept in
+`session.json`.
 """
 
 from __future__ import annotations
@@ -38,6 +50,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from labctl.workstation import journal as capture
 from labctl.workstation import levels as lv
 from labctl.workstation import timeline
 
@@ -108,8 +121,16 @@ class Session:
                  pictures: bool = True, recorder: str = "labctl.workstation",
                  browser_profile: Path | None = None, cdp: str | None = None,
                  cdp_port: int | None = None, robot: bool = False,
-                 parent_pid: int | None = None) -> None:  # fmt: skip
+                 parent_pid: int | None = None,
+                 channel_status: Callable[[], dict] | None = None,
+                 preflight: dict | None = None) -> None:  # fmt: skip
         self.id = session_id or new_id()
+        # Hooks for a collector supervisor (labctl.workstation.supervisor): what it knows of
+        # each channel at the end, and the preflight checks run before the session.
+        self.channel_status = channel_status
+        self.preflight = preflight
+        self.capture: dict[str, capture.Journal] = {}  # channel -> its capture journal
+        self.failed: set[str] = set()  # channels whose collector stopped on an error
         # The session's browser: a profile of its own, deleted at the end (the default); a
         # profile that is kept (`browser_profile`: so an extension such as UiPath's, installed
         # once, is there in every session; its cookies stay too); or a browser that is already
@@ -157,12 +178,28 @@ class Session:
     # -- journal ---------------------------------------------------------------------------------
 
     def journal(self, row: dict) -> None:
+        row = dict(row, ts=row.get("ts") or _now())
+        if row.get("kind") in ("presence", "outside"):  # an event of the timeline: its id now
+            capture.stamp(row, "web" if row["kind"] == "outside" else "desktop", _now())
         with self._lock:
             if self._journal is None:
                 return
-            self._journal.write(json.dumps(dict(row, ts=row.get("ts") or _now()),
-                                           ensure_ascii=False) + "\n")  # fmt: skip
-            self._journal.flush()
+            self._journal.write(row)
+
+    def requested_channels(self) -> list[str]:
+        """The channels this session's targets need (labctl.workstation.completeness)."""
+        want = set()
+        if self.targets.origins():
+            want |= {"web", "network"}
+        if self.targets.mainframes():
+            want.add("mainframe")
+        if any(not t.origin and not t.tn3270 for t in self.targets.targets):
+            want.add("desktop")
+        return [c for c in capture.CHANNELS if c in want]
+
+    def _channel_open(self, channel: str) -> None:
+        if channel in self.capture:
+            self.capture[channel].open()
 
     def note(self, text: str) -> None:
         self.notes.append(text)
@@ -180,7 +217,8 @@ class Session:
                 "automation_id": self.automation_id,
                 "portal_session_id": self.portal_session_id,
                 "targets": self.targets.as_list(), "deny_keys": sorted(self.targets.deny_keys),
-                "apps": self.apps, "notes": self.notes}  # fmt: skip
+                "channels": self.requested_channels(), "apps": self.apps, "notes": self.notes,
+                **({"preflight": self.preflight} if self.preflight else {})}  # fmt: skip
 
     # -- stopping ------------------------------------------------------------------------------
 
@@ -335,6 +373,7 @@ class Session:
                 return
         cdp = f"http://127.0.0.1:{port}"
         part = 0
+        gone_at: str | None = None  # when the browser closed, until it records again
         try:
             # The browser lives as long as the session: a robot closing its tab, or the whole
             # browser, does not end the web recording. A browser closed is opened again with the
@@ -363,17 +402,22 @@ class Session:
                     def ready(part=part):
                         # Announced once the recorder listens: a robot or a test that drives the
                         # session's browser starts now. Stays on this PC.
+                        nonlocal gone_at
                         self.cdp = cdp
                         self.journal({"kind": "browser", "cdp": cdp, "part": part})
+                        self._web_ready(gone_at)
+                        gone_at = None
 
                     recorder.attach(cdp, out, max_seconds=self.max_seconds, stop=self.stopping,
                                     origins=self.targets.origins(), outside=self._outside,
-                                    keep_open=True, on_ready=ready)  # fmt: skip
+                                    keep_open=True, on_ready=ready, **self._web_journals())  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 - the desktop part goes on
                     self.note_once(f"web recorder: {type(exc).__name__}: {str(exc)[:200]}")
+                    self.failed |= {"web", "network"}
                 if self.stopping():
                     _close_browser(cdp, proc, profile)
                     break
+                gone_at = gone_at or _now()
                 _end_process_tree(proc)
                 self.note_once("the browser was closed during the session: it was opened again")
                 time.sleep(1.0)
@@ -396,20 +440,36 @@ class Session:
         def ready():
             self.cdp = cdp
             self.journal({"kind": "browser", "cdp": cdp, "attached": True})
+            self._web_ready(None)
 
         try:
             recorder.attach(cdp, self.folder / "web", max_seconds=self.max_seconds,
                             stop=self.stopping, origins=self.targets.origins(),
-                            outside=self._outside, keep_open=True, on_ready=ready)  # fmt: skip
+                            outside=self._outside, keep_open=True, on_ready=ready,
+                            **self._web_journals())  # fmt: skip
         except Exception as exc:  # noqa: BLE001 - the desktop part goes on
             self.note(f"web recorder stopped: {type(exc).__name__}: {str(exc)[:200]}")
+            self.failed |= {"web", "network"}
+
+    def _web_journals(self) -> dict:
+        return {"journal": self.capture.get("web"), "network_journal": self.capture.get("network")}
+
+    def _web_ready(self, gone_at: str | None) -> None:
+        """The web recorder listens: its channels are capturing (again, after `gone_at`)."""
+        for ch in ("web", "network"):
+            self._channel_open(ch)
+            if gone_at and ch in self.capture:
+                self.capture[ch].gap(gone_at, _now(), "the browser was closed during the "
+                                     "session and opened again")  # fmt: skip
 
     # -- run ---------------------------------------------------------------------------------------
 
     def run(self, script: Callable[[Session], None] | None = None) -> Path:
         self.folder.mkdir(parents=True, exist_ok=False)
         self.started = _now()
-        self._journal = (self.folder / "journal.jsonl").open("a", encoding="utf-8")
+        self._journal = capture.Journal(self.folder / "journal.jsonl", ticks=False)
+        self.capture = {ch: capture.Journal(capture.path_of(self.folder, ch), ch)
+                        for ch in self.requested_channels()}  # fmt: skip
         _write_json(self.folder / "session.json", self._meta("recording"))
         threads = []
         desktop_targets = [t for t in self.targets.targets if not t.origin and not t.tn3270]
@@ -463,7 +523,16 @@ class Session:
                 proxy.join(10)
             for p in started_procs:
                 _end_process_tree(p)
-            _write_json(self.folder / "session.json", self._meta("stopped"))
+            for ch, j in self.capture.items():
+                j.close(clean=ch not in self.failed)
+            meta = self._meta("stopped")
+            if self.channel_status is not None:
+                try:
+                    meta["channel_status"] = self.channel_status()
+                except Exception as exc:  # noqa: BLE001 - the recording is kept whatever it says
+                    self.note(f"the collectors' status could not be read: {type(exc).__name__}")
+                    meta["notes"] = self.notes
+            _write_json(self.folder / "session.json", meta)
             with self._lock:
                 self._journal.close()
                 self._journal = None
@@ -501,14 +570,18 @@ class Session:
         for i, t in enumerate(self.targets.mainframes()):
             host, port = t.tn3270.rsplit(":", 1)
             wanted = t.listen if t.listen is not None else 23270 + i
+            journal = self.capture.get("mainframe")
             try:
                 proxy = tn3270.Proxy(host, int(port), self.folder / "mainframe", listen=wanted,
-                                     tls=t.tls, app_key=t.key, stop=self.stopping)  # fmt: skip
+                                     tls=t.tls, app_key=t.key, stop=self.stopping,
+                                     journal=journal)  # fmt: skip
             except OSError:
                 proxy = tn3270.Proxy(host, int(port), self.folder / "mainframe", listen=0,
-                                     tls=t.tls, app_key=t.key, stop=self.stopping)  # fmt: skip
+                                     tls=t.tls, app_key=t.key, stop=self.stopping,
+                                     journal=journal)  # fmt: skip
                 self.note(f"port {wanted} was taken: the terminal connects to {proxy.address}")
             proxy.start()
+            self._channel_open("mainframe")
             self.mainframe.append(proxy)
             facts = {"key": t.key, "surface": "mainframe", "level": lv.FULL,
                      "display": t.name or host}  # fmt: skip
@@ -524,12 +597,19 @@ class Session:
 
         rec = Recorder(self.folder / "desktop", set(), session=True, stop=self.stopping,
                        max_seconds=self.max_seconds, pictures=self.pictures, admit=self.admit,
-                       unfocused_values=self.robot)  # fmt: skip
+                       unfocused_values=self.robot, journal=self.capture.get("desktop"))  # fmt: skip
         for pid, level in self._pending:
             rec.add_process(pid, level)
         self._pending = []
         self.desktop = rec
-        rec.run()
+        self._channel_open("desktop")
+        try:
+            rec.run()
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            self.failed.add("desktop")
+            raise
 
     def _script(self, script, failure: list) -> None:
         try:
@@ -771,12 +851,33 @@ def recover(folder: Path) -> bool:
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     if meta.get("state") != "recording":
         return False
+    from labctl.workstation import recovery
+
     rows = timeline.read_jsonl(folder / "journal.jsonl")
+    done = recovery.rebuild(folder)
     meta["state"] = "recovered"
-    meta["ended"] = rows[-1].get("ts") if rows else meta.get("started")
+    meta["recovered"] = True
+    times = [r.get("ts") for r in rows if r.get("ts")]
+    for ch in capture.CHANNELS:
+        times += [r.get("at") or r.get("captured_at") for r in capture.read(
+            capture.path_of(folder, ch))]  # fmt: skip
+    times = [t for t in times if t]
+    meta["ended"] = max(times, key=timeline._t) if times else meta.get("started")
     notes = list(meta.get("notes") or [])
-    notes.append("recovered after the recorder stopped unexpectedly: what was written until "
-                 "then is kept; a web recording has no HAR")  # fmt: skip
+    if (folder / capture.DIR).is_dir():
+        events = sum(d.get("events", 0) for d in done.values())
+        unfinished = sum(d.get("incomplete", 0) for d in done.values())
+        notes.append(f"recovered after the recorder stopped unexpectedly: {events} event(s) "
+                     "rebuilt from the capture journal"
+                     + (f", {unfinished} of them without their detail" if unfinished else "")
+                     + f"; events in the last {capture.LOSS_WINDOW_S:g} s may be lost")  # fmt: skip
+        net = done.get("network") or {}
+        if net.get("rebuilt"):
+            notes.append(f"the web HAR was rebuilt from the network journal ({net['entries']} "
+                         "request(s)); requests still in flight were lost")  # fmt: skip
+    else:
+        notes.append("recovered after the recorder stopped unexpectedly: what was written until "
+                     "then is kept; a web recording has no HAR")  # fmt: skip
     meta["notes"] = notes
     pictures = folder / "desktop" / "pictures"
     if pictures.is_dir() and not (folder / "desktop" / "pictures.json").is_file():
