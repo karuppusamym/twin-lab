@@ -119,6 +119,7 @@ record its flows in UAT, ask the DBA for its schema and register its real bots.
 | [docs/06-evidence.md](docs/06-evidence.md) | Building without source: kinds of evidence, what a recording captures, privacy |
 | [docs/08-evidence-ablation.md](docs/08-evidence-ablation.md) | What each kind of evidence finds, measured |
 | [docs/10-certification.md](docs/10-certification.md) | Which technologies are proven on a real application: the gates, the matrix, adding one |
+| [docs/11-session-recorder.md](docs/11-session-recorder.md) | Design (not built): one recorder across web, desktop and mainframe applications |
 | [docs/realdata.md](docs/realdata.md) | A masked slice of a real replica in a lab |
 | [docs/devin.md](docs/devin.md) | Building apps with Devin: package and API |
 | [docs/factory-playbook.md](docs/factory-playbook.md) | What the AI builder must do (`AGENTS.md` is the short form) |

@@ -326,7 +326,8 @@ class Recorder:
 
     def __init__(self, out_dir: Path, pids: set[int], *, screenshots: bool = False,
                  settle_ms: int = 400, max_seconds: float = 1800, hooks: bool = True,
-                 stop: Callable[[], bool] | None = None, pictures: bool = True) -> None:  # fmt: skip
+                 stop: Callable[[], bool] | None = None, pictures: bool = True,
+                 session: bool = False, levels: dict[int, str] | None = None) -> None:  # fmt: skip
         require()
         from labctl.desktop import win
 
@@ -334,6 +335,12 @@ class Recorder:
         self.out = Path(out_dir)
         (self.out / "trees").mkdir(parents=True, exist_ok=True)
         self.pids = set(pids)
+        # In a workstation session (labctl.workstation) the recorder starts with the processes
+        # it has (maybe none), is given more by add_process(), and stops only on stop(). A
+        # process at level "steps" gets its steps, without tree files or pictures.
+        self.session = session
+        self.levels: dict[int, str] = dict(levels or {})
+        self.adding: queue.Queue = queue.Queue()
         self.screenshots = screenshots
         # Pictures without data (labctl.desktop.pictures); what data was seen stays in memory.
         self.pictures = pictures
@@ -371,6 +378,24 @@ class Recorder:
         self._handlers: list = []
 
     # -- events from UI Automation (their threads) ------------------------------------------------
+
+    def add_process(self, pid: int, level: str = "full") -> None:
+        """Record this process too, from now on (any thread; the recorder's loop takes it)."""
+        self.adding.put((int(pid), level))
+
+    def _take_added(self) -> None:
+        while True:
+            try:
+                pid, level = self.adding.get_nowait()
+            except queue.Empty:
+                return
+            self.levels[pid] = level
+            if pid not in self.pids:
+                self.pids.add(pid)
+                self._process(pid)
+
+    def _level(self, pid: int | None) -> str:
+        return self.levels.get(pid, "full") if pid is not None else "full"
 
     def _ours(self, el) -> bool:
         try:
@@ -504,7 +529,8 @@ class Recorder:
                         break
                     if now >= next_poll:
                         next_poll = now + POLL_S
-                        if not any(win.alive(p) for p in self.pids):
+                        self._take_added()
+                        if not self.session and not any(win.alive(p) for p in self.pids):
                             break
                         self._poll_windows()
                     self._drain()
@@ -1108,7 +1134,9 @@ class Recorder:
                               for k in ("selector", "title", "props")}  # fmt: skip
             if step["window"].get("selector"):
                 self.last_window = dict(step["window"])  # the window the menu belongs to
-        if tree_snap is not None:
+        if tree_snap is not None and self._level(pid) == "steps":
+            step["level"] = "steps"  # a workstation session's steps-only process: no tree
+        elif tree_snap is not None:
             rel = f"trees/{seq:04d}.json"
             clean = json.loads(json.dumps(tree_snap[1]))
             (self.out / rel).write_text(json.dumps(clean, ensure_ascii=False), encoding="utf-8")
@@ -1232,8 +1260,10 @@ class Recorder:
             tech = detect.detect(sig)
             sig["framework_ids"] = sorted(sig["framework_ids"])
             sig["classes"] = sorted(sig["classes"])
-            procs.append({"process": p["process"], "pid": p["pid"], "technology": tech,
-                          "signals": sig})  # fmt: skip
+            row = {"process": p["process"], "pid": p["pid"], "technology": tech, "signals": sig}
+            if self.session:
+                row["level"] = self._level(p["pid"])
+            procs.append(row)
         if self.effects_unplaced:
             self.notes.append(f"{self.effects_unplaced} selection(s) the application made by "
                               "itself, after the step before them was written: not recorded")  # fmt: skip
