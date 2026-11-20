@@ -124,7 +124,7 @@ Every event has a permanent **`event_id`** (UUIDv7), given the moment it is capt
 `channel` (`web`, `desktop`, `mainframe`, `network`) and `captured_at` (UTC, ms): finalising,
 renumbering, recovery and reordering keep it, and references between events use it
 (`caused_by_event` and a record locator's `text_from_event` beside the web recorder's numbers,
-a HAR entry's `_event_id`, the robot coverage's `event_ids`).
+a HAR entry's `_event_id`, the robot coverage's `links`).
 
 ### The capture journal and the loss window
 

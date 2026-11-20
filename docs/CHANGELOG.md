@@ -6,7 +6,7 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
 Every workstation event gets a permanent `event_id` (UUIDv7), `channel` and `captured_at` the
 moment it is captured; `seq` and `global_seq` are display orders only, and references between
 events use the id (`caused_by_event`, `text_from_event`, a HAR entry's `_event_id`, the robot
-coverage's `event_ids`). Each channel appends its events, finished steps and (web) HAR entries to
+coverage's `links`). Each channel appends its events, finished steps and (web) HAR entries to
 `capture/<channel>.jsonl`, flushed per line and fsync'd every 0.5 s: the loss window is 2 s.
 A session killed mid-capture is rebuilt from the journal on the next start or with
 `labctl workstation recover`, HAR included, marked `recovered: true` with a gap per channel
@@ -14,6 +14,13 @@ that did not close. The outbox speaks recorder contract 1.1.0: `contract_version
 `completeness` manifest (and `preflight` when given); a stopped session is complete only when
 every channel it needed closed cleanly with no gap. Open: the collector supervisor's
 `channel_status()` and `preflight.py` plug in through `Session(channel_status=, preflight=)`.
+
+## 2026-11-20 — Portal: the business outcome is shown for every app
+The session page showed the business outcome only inside the database change check, so a
+browser-only app (no server database) never showed it. The outcome now has its own card
+(`id="outcome"`) after the change check, for every kind of app, once; without outcome checks
+it says "no outcome checks defined". The view already judged the outcome on both paths; only
+the template changed (`portal/templates/session.html`, tests in `test_outcome_portal.py`).
 
 ## 2026-11-20 — Recorder: the robot's log, targets from the workflow, modern Windows apps
 - The UiPath robot's execution log (Verbose) is read beside a session: activities and which UI
