@@ -28,6 +28,7 @@ from labctl.models import KINDS, Automation
 from labctl.realdata import cli as realdata_cli
 from labctl.source import UnsupportedStack
 from labctl.source import sqlalchemy_models as sam
+from labctl.workstation import cli as workstation_cli
 
 app = typer.Typer(no_args_is_help=True, help="Twin Lab: register, build, check and control.")
 automation_app = typer.Typer(no_args_is_help=True, help="Registered automations.")
@@ -291,6 +292,7 @@ app.add_typer(
 )
 app.add_typer(ocp_cli.app, name="ocp")
 app.add_typer(desktop_cli.app, name="desktop")
+app.add_typer(workstation_cli.app, name="workstation")
 app.command("certify")(certify_mod.certify)
 
 

@@ -59,6 +59,7 @@ CLICK_GRACE_S = 0.8
 KEY_GRACE_S = 0.4  # an Invoke event this soon after a key press is what the key did
 MAX_BATCH_S = 3.0
 POLL_S = 0.25
+REHOOK_S = 20.0  # the input hooks are renewed this often (Windows may remove a slow one)
 NAMED_KEYS = {0x0D: "Enter", 0x09: "Tab", 0x1B: "Esc", 0x2E: "Delete", 0x21: "PageUp",
               0x22: "PageDown", 0x24: "Home", 0x23: "End",
               **{0x70 + i: f"F{i + 1}" for i in range(12)}}  # fmt: skip
@@ -158,6 +159,7 @@ class _Hooks(threading.Thread):
         self.thread_id = 0
         self.ready = threading.Event()
         self.failed: str | None = None
+        self.renewed = 0  # how many times the hooks were put in again
         self._last_down = (0.0, 0, 0)
 
     def run(self) -> None:  # noqa: C901 - one Win32 message loop
@@ -272,14 +274,30 @@ class _Hooks(threading.Thread):
             comtypes.CoInitializeEx(0)  # the multi-threaded apartment, as the recorder
         self._procs = (HOOKPROC(on_mouse), HOOKPROC(on_key))
         mod = kernel32.GetModuleHandleW(None)
-        hm = user32.SetWindowsHookExW(14, self._procs[0], mod, 0)
-        hk = user32.SetWindowsHookExW(13, self._procs[1], mod, 0)
+
+        def install():
+            return (user32.SetWindowsHookExW(14, self._procs[0], mod, 0),
+                    user32.SetWindowsHookExW(13, self._procs[1], mod, 0))  # fmt: skip
+
+        hm, hk = install()
         self.thread_id = kernel32.GetCurrentThreadId()
         if not hm or not hk:
             self.failed = f"SetWindowsHookEx failed (error {ctypes.get_last_error()})"
         self.ready.set()
+        # Windows removes a low-level hook, without telling, when one callback took too long (a
+        # busy application answering UI Automation). The hooks are put in again every
+        # REHOOK_S seconds, so a removed hook costs at most that long of input.
+        user32.SetTimer(None, 0, int(REHOOK_S * 1000), None)
         msg = wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if msg.message == 0x0113 and not msg.hWnd and hm and hk:  # WM_TIMER: renew
+                new_m, new_k = install()
+                if new_m and new_k:
+                    user32.UnhookWindowsHookEx(hm)
+                    user32.UnhookWindowsHookEx(hk)
+                    hm, hk = new_m, new_k
+                    self.renewed += 1
+                continue
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
         for h in (hm, hk):
@@ -326,7 +344,10 @@ class Recorder:
 
     def __init__(self, out_dir: Path, pids: set[int], *, screenshots: bool = False,
                  settle_ms: int = 400, max_seconds: float = 1800, hooks: bool = True,
-                 stop: Callable[[], bool] | None = None, pictures: bool = True) -> None:  # fmt: skip
+                 stop: Callable[[], bool] | None = None, pictures: bool = True,
+                 session: bool = False, levels: dict[int, str] | None = None,
+                 admit: Callable[[int], str | None] | None = None,
+                 unfocused_values: bool = False) -> None:  # fmt: skip
         require()
         from labctl.desktop import win
 
@@ -334,6 +355,20 @@ class Recorder:
         self.out = Path(out_dir)
         (self.out / "trees").mkdir(parents=True, exist_ok=True)
         self.pids = set(pids)
+        # In a workstation session (labctl.workstation) the recorder starts with the processes
+        # it has (maybe none), is given more by add_process(), and stops only on stop(). A
+        # process at level "steps" gets its steps, without tree files or pictures.
+        self.session = session
+        self.levels: dict[int, str] = dict(levels or {})
+        self.adding: queue.Queue = queue.Queue()
+        self.frame_pid: dict[int, int] = {}  # a modern application's frame window -> its process
+        # admit(pid) -> "full" | "steps" | None: a process the session records, decided the
+        # moment its first input or event arrives (a robot acts before any poll would see it).
+        self.admit = admit
+        self.refused: set[int] = set()
+        # A robot (UiPath's Simulate input) sets values without the keyboard focus: in a session
+        # recording one, such a change is a step too.
+        self.unfocused_values = unfocused_values
         self.screenshots = screenshots
         # Pictures without data (labctl.desktop.pictures); what data was seen stays in memory.
         self.pictures = pictures
@@ -372,9 +407,45 @@ class Recorder:
 
     # -- events from UI Automation (their threads) ------------------------------------------------
 
+    def add_process(self, pid: int, level: str = "full") -> None:
+        """Record this process too, from now on (any thread; the recorder's loop takes it)."""
+        self.adding.put((int(pid), level))
+
+    def _take_added(self) -> None:
+        while True:
+            try:
+                pid, level = self.adding.get_nowait()
+            except queue.Empty:
+                return
+            self.levels[pid] = level
+            self.pids.add(pid)
+            if pid not in self.processes:
+                self._process(pid)
+
+    def _wanted(self, pid: int) -> bool:
+        """Is this process recorded? Asks the session about one it has not seen yet."""
+        if pid in self.pids:
+            return True
+        if self.admit is None or not pid or pid in self.refused:
+            return False
+        try:
+            level = self.admit(pid)
+        except Exception:  # noqa: BLE001 - the hook must answer at once
+            level = None
+        if level in ("full", "steps"):
+            self.levels[pid] = level
+            self.pids.add(pid)
+            self.adding.put((pid, level))
+            return True
+        self.refused.add(pid)
+        return False
+
+    def _level(self, pid: int | None) -> str:
+        return self.levels.get(pid, "full") if pid is not None else "full"
+
     def _ours(self, el) -> bool:
         try:
-            return el.CurrentProcessId in self.pids
+            return self._wanted(el.CurrentProcessId)
         except Exception:  # noqa: BLE001
             return False
 
@@ -408,7 +479,7 @@ class Recorder:
                         secret = bool(sender.CurrentIsPassword)
                         # Only what the user changes: a value the application fills in (a
                         # dialog loading its record) changes controls without keyboard focus.
-                        if not sender.CurrentHasKeyboardFocus:
+                        if not sender.CurrentHasKeyboardFocus and not rec.unfocused_values:
                             return
                         if sender.CurrentControlType == 50003:
                             return  # a combo box: its selection event says what was chosen
@@ -486,7 +557,7 @@ class Recorder:
                     el = win.click_target(win.element_from_point(x, y))
                     return el, win.describe_now(el, hwnd or 0)
 
-                hooks = _Hooks(self.q, lambda pid: pid in self.pids, resolve)
+                hooks = _Hooks(self.q, self._wanted, resolve)
                 hooks.start()
                 hooks.ready.wait(5)
                 if hooks.failed:
@@ -504,7 +575,8 @@ class Recorder:
                         break
                     if now >= next_poll:
                         next_poll = now + POLL_S
-                        if not any(win.alive(p) for p in self.pids):
+                        self._take_added()
+                        if not self.session and not any(win.alive(p) for p in self.pids):
                             break
                         self._poll_windows()
                     self._drain()
@@ -559,7 +631,11 @@ class Recorder:
 
     def _poll_windows(self) -> None:
         win = self.win
-        now = win.top_windows(self.pids)
+        # A modern application's frame window belongs to ApplicationFrameHost: it is the
+        # application's window all the same (win.frame_windows).
+        frames = win.frame_windows(self.pids)
+        self.frame_pid.update(frames)
+        now = win.top_windows(self.pids) + list(frames)
         current = set(now)
         for hwnd in now:
             if hwnd in self.windows or hwnd in self.popups:
@@ -943,11 +1019,19 @@ class Recorder:
             hwnd = self.popup_owner[hwnd]
         elif hwnd and hwnd not in self.windows and self.win.class_name(hwnd) in ("ComboLBox",):
             hwnd = self.fg
+        elif hwnd and hwnd not in self.windows and self.frame_pid:
+            # inside a modern application: its frame window is the application's window
+            root = self.win.root_window(hwnd)
+            if root in self.frame_pid:
+                hwnd = root
+            else:
+                hwnd = next((f for f, p in self.frame_pid.items()
+                             if p == self.win.window_pid(hwnd) and f in self.windows), hwnd)  # fmt: skip
         return hwnd
 
     def _snapshot(self, hwnd: int) -> tuple[dict, dict] | None:
         win = self.win
-        if not hwnd or win.window_pid(hwnd) not in self.pids:
+        if not hwnd or (self.frame_pid.get(hwnd) or win.window_pid(hwnd)) not in self.pids:
             return None
         raw = win.capture(hwnd)
         if raw is None or not win.user32.IsWindowVisible(hwnd):
@@ -1006,7 +1090,7 @@ class Recorder:
         return dict(self.titles.get(hwnd) or {"selector": None, "title": None, "props": {}})
 
     def _pname(self, hwnd: int) -> str | None:
-        pid = self.win.window_pid(hwnd) if hwnd else 0
+        pid = (self.frame_pid.get(hwnd) or self.win.window_pid(hwnd)) if hwnd else 0
         return (self.processes.get(pid) or {}).get("process")
 
     def _write_step(self, a: dict, after: dict) -> None:
@@ -1018,8 +1102,8 @@ class Recorder:
         self.seq += 1
         seq = self.seq
         pid = win.window_pid(hwnd) if hwnd and win.user32.IsWindow(hwnd) else None
-        if pid is None:
-            pid = (a.get("desc") or {}).get("pid")
+        if pid is None or pid not in self.pids:
+            pid = self.frame_pid.get(hwnd) or (a.get("desc") or {}).get("pid") or pid
         window = self._window_info(hwnd, snap or before)
         if not window.get("selector") and kind not in ("window_open", "menu_open"):
             window = dict(self.last_window)  # gone with the action (a menu that closed the app)
@@ -1109,7 +1193,9 @@ class Recorder:
                               for k in ("selector", "title", "props")}  # fmt: skip
             if step["window"].get("selector"):
                 self.last_window = dict(step["window"])  # the window the menu belongs to
-        if tree_snap is not None:
+        if tree_snap is not None and self._level(pid) == "steps":
+            step["level"] = "steps"  # a workstation session's steps-only process: no tree
+        elif tree_snap is not None:
             rel = f"trees/{seq:04d}.json"
             clean = json.loads(json.dumps(tree_snap[1]))
             (self.out / rel).write_text(json.dumps(clean, ensure_ascii=False), encoding="utf-8")
@@ -1233,8 +1319,10 @@ class Recorder:
             tech = detect.detect(sig)
             sig["framework_ids"] = sorted(sig["framework_ids"])
             sig["classes"] = sorted(sig["classes"])
-            procs.append({"process": p["process"], "pid": p["pid"], "technology": tech,
-                          "signals": sig})  # fmt: skip
+            row = {"process": p["process"], "pid": p["pid"], "technology": tech, "signals": sig}
+            if self.session:
+                row["level"] = self._level(p["pid"])
+            procs.append(row)
         if self.effects_unplaced:
             self.notes.append(f"{self.effects_unplaced} selection(s) the application made by "
                               "itself, after the step before them was written: not recorded")  # fmt: skip
