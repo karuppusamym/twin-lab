@@ -2,6 +2,21 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-20 — Replay: a click that closes its own window
+On newer Playwright a click whose window closes itself (`window.close()` in the handler) can
+be reported as 'target closed' before it returns. Replay now counts that click as done when
+the window is closed and the recording's next step in that tab is its `tab-close`; any other
+error, a window still open, or no recorded close stays a failure
+(`fidelity._closed_its_own_window`). The form fixture's typed dates are now in 1998, so none
+can be the day a package is made.
+
+## 2026-11-19 — Open-source licence and community files
+Twin Lab is licensed under the Apache License 2.0 (`LICENSE`, `NOTICE`, `license` in
+`pyproject.toml`). `CONTRIBUTING.md` (ground rules, setup, checks, review and merge),
+`CODE_OF_CONDUCT.md`, `SECURITY.md` (private reporting, leaked data), a pull request template
+and issue templates under `.github/`. Open: private vulnerability reporting must be switched
+on in the repository settings for the Security tab's button to appear.
+
 ## 2026-11-19 — One recording across applications: the workstation session
 A session records the applications a person or a robot uses on one PC, in one go
 (`labctl/workstation/`, `labctl workstation record`; design and delivery in
@@ -56,6 +71,17 @@ recording gave B's part a tab nobody opened and A's part a click that did nothin
   of its own; a window closed from another origin's script reads as closed by the person; the
   window's size is recorded, not compared; print and file-picker windows of the operating
   system, and a link that starts another browser or a desktop program, are not captured.
+
+## 2026-11-19 — Desktop package: the gaps the blind rebuild's builder reported
+The recorder reads the keyboard focus (`focused`) and recognises a message box's icon from its
+pixels (the four system icons drawn in place and compared; `winlook.message_icon`). `rules.json`
+gains each window's focus on open, grids' behaviour (cells read-only, headers clickable,
+sorting and selection when seen), the icon of each message box in its validation outcome, and
+an `unknown` list the brief prints (default buttons WinForms draws itself, how a search
+matches, sorting). `navigation.json` gives each message box its icon, buttons and owner. A
+combo box's drop-down button is structure, no longer masked as data. The package's `INDEX.md`
+describes desktop files in desktop words. Checked on a fresh recording of CaseDesk (focus on
+`txtUser`, `txtSearch`, `txtCustomer`; both message boxes: warning).
 
 ## 2026-11-19 — Desktop build packages to the web's depth, and a blind WinForms rebuild
 An audit of fresh recordings of the three reference apps found a desktop package held only the

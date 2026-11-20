@@ -1012,6 +1012,7 @@ class Recorder:
 
             try:
                 raw["_pixels"] = winlook.grab(hwnd)
+                winlook.mark_message_icon(raw)  # which standard icon a message box shows
             except (OSError, ValueError):
                 pass
         clean = privacy.clean(raw, self.known, self.structure)

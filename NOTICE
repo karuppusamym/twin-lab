@@ -1,0 +1,7 @@
+Twin Lab
+Copyright 2026 The Twin Lab contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Demo app build packages that Twin Lab generates can carry open-source client libraries and web
+fonts; each package lists them, with their own licences, in its THIRD-PARTY-NOTICES.md.
