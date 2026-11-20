@@ -84,3 +84,29 @@ def finalize(folder: Path) -> None:
     if not session.recover(folder):
         timeline.build(folder)
     typer.echo(f"wrote {folder / 'session.jsonl'} and {folder / 'portal-outbox.json'}")
+
+
+@app.command("propose")
+def propose_cmd(
+    project: Path,
+    out: Path | None = typer.Option(None, help="Write the proposal here (YAML) for --targets."),
+) -> None:
+    """Propose a session's targets from a UiPath project's XAML (nothing is run)."""
+    from labctl.workstation.propose import propose
+
+    try:
+        got = propose(project)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    doc = {"targets": [{k: v for k, v in t.items() if k != "uses"} for t in got["targets"]]}
+    text = yaml.safe_dump(doc, sort_keys=False)
+    if out:
+        out.write_text(text, encoding="utf-8")
+        typer.echo(f"wrote {out}")
+    else:
+        typer.echo(text)
+    if got["browser"]:
+        typer.echo(f"browser: {got['browser']}")
+    for note in got["notes"]:
+        typer.echo(f"note: {note}")

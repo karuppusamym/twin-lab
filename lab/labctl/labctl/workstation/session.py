@@ -121,6 +121,8 @@ class Session:
         self.cdp_port = cdp_port
         # A robot records: values set without the keyboard focus are steps too (UiPath Simulate).
         self.robot = robot
+        # Read the UiPath robot's own log for the session's time (labctl.workstation.robot).
+        self.robot_log = robot
         # The program that started this session (the recorder's window): when it is gone, the
         # session stops instead of recording on for hours.
         self.parent_pid = parent_pid
@@ -249,7 +251,7 @@ class Session:
     ) -> None:
         target = self.targets.target_of(ident)
         facts = {k: ident.get(k) for k in ("key", "surface", "exe", "company", "product",
-                                           "version", "display")}  # fmt: skip
+                                           "version", "display", "description")}  # fmt: skip
         facts["level"] = level
         if target is not None and target.app_id is not None:
             facts["app_id"] = target.app_id
@@ -285,7 +287,8 @@ class Session:
                                     continue
                                 added.add(pid)
                             self._record_process(pid, ident, level)
-                pid = win.window_pid(win.foreground()) if win.foreground() else 0
+                fg = win.foreground()
+                pid = win.app_pid(fg) if fg else 0  # behind a modern app's frame: the app
                 if pid and pid != own and pid != last_pid:
                     ident, level = self._identify(pid, cache)
                     if level in (lv.FULL, lv.STEPS):
@@ -356,12 +359,16 @@ class Session:
                     # A browser can hand itself over to another process when it starts: its
                     # windows belong to whatever process runs with the session's profile.
                     self.browser_pids = set(_profile_pids(profile)) | {proc.pid}
-                    self.cdp = cdp
-                    # For a robot or a test that drives the session's browser; stays on this PC.
-                    self.journal({"kind": "browser", "cdp": cdp, "part": part})
+
+                    def ready(part=part):
+                        # Announced once the recorder listens: a robot or a test that drives the
+                        # session's browser starts now. Stays on this PC.
+                        self.cdp = cdp
+                        self.journal({"kind": "browser", "cdp": cdp, "part": part})
+
                     recorder.attach(cdp, out, max_seconds=self.max_seconds, stop=self.stopping,
                                     origins=self.targets.origins(), outside=self._outside,
-                                    keep_open=True)  # fmt: skip
+                                    keep_open=True, on_ready=ready)  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 - the desktop part goes on
                     self.note_once(f"web recorder: {type(exc).__name__}: {str(exc)[:200]}")
                 if self.stopping():
@@ -385,12 +392,15 @@ class Session:
             self.note(f"no browser answers at {cdp}: web targets not recorded")
             return
         self.browser_pids = set(_port_pids(cdp))
-        self.cdp = cdp
-        self.journal({"kind": "browser", "cdp": cdp, "attached": True})
+
+        def ready():
+            self.cdp = cdp
+            self.journal({"kind": "browser", "cdp": cdp, "attached": True})
+
         try:
             recorder.attach(cdp, self.folder / "web", max_seconds=self.max_seconds,
                             stop=self.stopping, origins=self.targets.origins(),
-                            outside=self._outside, keep_open=True)  # fmt: skip
+                            outside=self._outside, keep_open=True, on_ready=ready)  # fmt: skip
         except Exception as exc:  # noqa: BLE001 - the desktop part goes on
             self.note(f"web recorder stopped: {type(exc).__name__}: {str(exc)[:200]}")
 
@@ -458,7 +468,30 @@ class Session:
                 self._journal.close()
                 self._journal = None
             timeline.build(self.folder)
+            if self.robot_log:
+                self._robot_log()
         return self.folder
+
+    def _robot_log(self) -> None:
+        from labctl.workstation import robot
+
+        try:
+            cov = robot.attach(self.folder)
+        except Exception as exc:  # noqa: BLE001 - the recording is kept whatever the log holds
+            self.note(f"the robot's log could not be read: {type(exc).__name__}")
+            cov = None
+        if cov is None:
+            return
+        gaps = ", ".join(
+            f"{g['activity']} {g.get('display') or ''}".strip() for g in cov["gaps"][:10]
+        )
+        self.note(f"robot log: {cov['activities']} activities, {cov['covered']} of "
+                  f"{cov['ui_activities']} UI activities left a recorded step"
+                  + (f"; not seen: {gaps}" if gaps else ""))  # fmt: skip
+        meta = json.loads((self.folder / "session.json").read_text(encoding="utf-8"))
+        meta["notes"] = self.notes
+        _write_json(self.folder / "session.json", meta)
+        timeline.build(self.folder)
 
     def _start_mainframes(self) -> None:
         """One TN3270 proxy per mainframe target, on its `listen` port (23270, 23271... when not
@@ -547,7 +580,7 @@ def _window_pids(win) -> set[int]:
 
     def cb(hwnd, _):
         if win.user32.IsWindowVisible(hwnd):
-            pids.add(win.window_pid(hwnd))
+            pids.add(win.app_pid(hwnd))
         return True
 
     win.user32.EnumWindows(win.WNDENUMPROC(cb), 0)

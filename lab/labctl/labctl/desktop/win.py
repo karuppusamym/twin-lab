@@ -173,6 +173,42 @@ def top_windows(pids: set[int]) -> list[int]:
     return out
 
 
+def app_pid(hwnd: int) -> int:
+    """The process an application window shows. A modern (UWP / WinUI) application's top-level
+    window belongs to ApplicationFrameHost.exe; the application's own CoreWindow is its child:
+    its process is the application's. Any other window: its own process."""
+    pid = window_pid(hwnd)
+    if not hwnd or class_name(hwnd) != "ApplicationFrameWindow":
+        return pid
+    found: list[int] = []
+
+    def cb(child, _):
+        if class_name(child) == "Windows.UI.Core.CoreWindow":
+            other = window_pid(child)
+            if other and other != pid:
+                found.append(other)
+                return False
+        return True
+
+    user32.EnumChildWindows(hwnd, WNDENUMPROC(cb), 0)
+    return found[0] if found else pid
+
+
+def frame_windows(pids: set[int]) -> dict[int, int]:
+    """Visible ApplicationFrameWindows that show one of these processes: {frame: app pid}."""
+    out: dict[int, int] = {}
+
+    def cb(hwnd, _):
+        if user32.IsWindowVisible(hwnd) and class_name(hwnd) == "ApplicationFrameWindow":
+            pid = app_pid(hwnd)
+            if pid in pids:
+                out[int(hwnd)] = pid
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(cb), 0)
+    return out
+
+
 def root_window(hwnd: int) -> int:
     return int(user32.GetAncestor(hwnd, GA_ROOT) or hwnd)
 
