@@ -286,6 +286,38 @@ robot's own log (`%LOCALAPPDATA%\UiPath\Logs`) as a fourth stream aligned to the
 (`labctl/botlog/robotlog.py` reads it); proposing targets from the workflow's XAML
 (`labctl/analyse/uipath.py`).
 
+### Built after the second review (2026-11-20)
+
+- **The robot's own log** (`workstation/robot.py`): with UiPath's logging level at *Verbose*,
+  `%LOCALAPPDATA%\UiPath\Logs\*_Execution.log` lists every activity as it starts and closes. At
+  the end of a session the activities logged in its time are written to `robot/steps.jsonl`
+  (type, the developer's display name with digits masked, the selector's application, never an
+  argument or a value), and `robot/coverage.json` says which UI activities left no recorded
+  step: the places the recording missed (a Simulate click, an application that was not a
+  target, a terminal not on the proxy). The outbox carries the counts only.
+- **Targets from the workflow** (`workstation/propose.py`, `labctl workstation propose`,
+  `TwinLabRecorder propose`, and a button in the window): window applications, web origins
+  (selectors, arguments, default values written in the XAML), terminal hosts, the browser, and
+  notes for Simulate input and for addresses held in variables (not guessed).
+- **Modern Windows applications** (UWP / WinUI: Calculator, the Store apps): their top-level
+  window belongs to `ApplicationFrameHost.exe`, the application's own window is a child. The
+  watcher, the desktop recorder's windows and its snapshots look behind the frame
+  (`win.app_pid`, `win.frame_windows`). Checked with Windows Calculator.
+- **Browser ready**: the session announces its browser (the journal's `browser` row, the
+  window's "The browser is ready") only once the web recorder listens; a built recorder loads
+  Playwright slowly, and actions before that were lost.
+- **Hooks renewed** every 20 s; **HAR bodies** over 2 MB keep their size only (in a session).
+- **Signing**: `agent/build.py` signs with `TWINLAB_SIGN_CERT` (a certificate's thumbprint);
+  not exercised (no certificate on the build PC).
+
+A real recording with the built program, through the portal (2026-11-20): the public Selenium
+test form (`https://www.selenium.dev/selenium/web/web-form.html`, synthetic text, submitted),
+Windows Calculator (128 × 4 =) and the synthetic mainframe, for an offered session with an
+automation. The portal mapped the three applications and the automation; the flows read
+`my-text-id`, `my-select`, `multiplyButton`, `USERID`, `ACCOUNT NO`, `PF3`; example.com, visited
+in the session's browser, and the other applications were only "used"; no typed text reached
+the portal.
+
 ## Mainframe
 
 A 3270 screen is a grid of fields; the user types into unprotected fields and presses an AID
