@@ -2,6 +2,20 @@
 
 One paragraph per plan item: what exists now, how to run it, what was left open.
 
+## 2026-11-20 — Recorder: isolated collectors, explicit failures, capture preflight
+- Web, desktop and mainframe collectors run in processes of their own under a supervisor
+  (`workstation/supervisor.py`): heartbeats with a timeout, a failed collector restarted once
+  when safe, bounded shutdown, and every failure a journal event, a note and a gap.
+  `Session.channel_status()` / `channels.json`: complete, interrupted, missing or not_requested
+  per channel, with gaps, for the completeness manifest.
+- The recorder-controlled browser is the default (Playwright's Chromium when no Edge or Chrome);
+  attaching over CDP is a qualified mode with a warning at the start and in the notes.
+- Desktop: elevated target windows, the locked desktop, remote desktops and controls with no
+  name or automation id are reported instead of silently missed (documented in
+  docs/11-session-recorder.md).
+- `workstation/preflight.py` and `labctl workstation preflight`: "Ready" only when every check
+  passes. Open: a frozen build must call `multiprocessing.freeze_support()` in its entry point.
+
 ## 2026-11-20 — Recorder: the robot's log, targets from the workflow, modern Windows apps
 - The UiPath robot's execution log (Verbose) is read beside a session: activities and which UI
   activities left no recorded step (`workstation/robot.py`, `robot/coverage.json`).
