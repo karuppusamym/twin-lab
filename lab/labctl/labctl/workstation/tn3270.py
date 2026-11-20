@@ -44,6 +44,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from labctl.workstation import journal as capture
+
 IAC, SE, SB, WILL, WONT, DO, DONT, EOR = 255, 240, 250, 251, 252, 253, 254, 239
 TTYPE, TN3270E = 24, 40
 CODE = [0x40, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E,
@@ -394,8 +396,10 @@ class Connection:
 class Recorder:
     """Writes the steps of every connection to one recording folder."""
 
-    def __init__(self, out_dir: Path, app_key: str, on_step: Callable[[dict], None] | None = None):
+    def __init__(self, out_dir: Path, app_key: str, on_step: Callable[[dict], None] | None = None,
+                 journal=None):  # fmt: skip
         self.out = Path(out_dir)
+        self.journal = journal  # labctl.workstation.journal.Journal of the session, or None
         (self.out / "screens").mkdir(parents=True, exist_ok=True)
         self.app_key = app_key
         self.on_step = on_step
@@ -477,6 +481,7 @@ class Recorder:
             self.seq += 1
             step = {"seq": self.seq, "ts": _now(), "surface": "mainframe", "app": self.app_key,
                     **step, "url": None, "dom": None}  # fmt: skip
+            capture.stamp(step, "mainframe", step["ts"])
             if screen_file is not None:
                 rel = f"screens/{self.seq:04d}.json"
                 (self.out / rel).write_text(
@@ -485,6 +490,9 @@ class Recorder:
                 step["tree"] = rel
             self.file.write(json.dumps(step, ensure_ascii=False) + "\n")
             self.file.flush()
+            if self.journal is not None:
+                self.journal.event(step, self.out.name)
+                self.journal.step(step, self.out.name)
         if self.on_step is not None:
             try:
                 self.on_step(step)
@@ -544,11 +552,11 @@ class Proxy(threading.Thread):
     def __init__(self, host: str, port: int, out_dir: Path, *, listen: int = 0, tls: bool = False,
                  tls_verify: bool = True, app_key: str | None = None,
                  stop: Callable[[], bool] | None = None,
-                 on_step: Callable[[dict], None] | None = None) -> None:  # fmt: skip
+                 on_step: Callable[[dict], None] | None = None, journal=None) -> None:  # fmt: skip
         super().__init__(name="tl-tn3270", daemon=True)
         self.host, self.port, self.tls, self.tls_verify = host, int(port), tls, tls_verify
         self.app_key = app_key or f"mainframe:{host.lower()}:{port}"
-        self.recorder = Recorder(out_dir, self.app_key, on_step)
+        self.recorder = Recorder(out_dir, self.app_key, on_step, journal=journal)
         self.stop_fn = stop or (lambda: False)
         self._stopped = threading.Event()
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

@@ -6,8 +6,9 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
 - Web, desktop and mainframe collectors run in processes of their own under a supervisor
   (`workstation/supervisor.py`): heartbeats with a timeout, a failed collector restarted once
   when safe, bounded shutdown, and every failure a journal event, a note and a gap.
-  `Session.channel_status()` / `channels.json`: complete, interrupted, missing or not_requested
-  per channel, with gaps, for the completeness manifest.
+  The supervisor's status (complete, interrupted, missing or not_requested per channel, with
+  gaps; also `channels.json`) is the session's `channel_status` hook, merged into the
+  completeness manifest; each collector opens and closes its own capture journals.
 - The recorder-controlled browser is the default (Playwright's Chromium when no Edge or Chrome);
   attaching over CDP is a qualified mode with a warning at the start and in the notes.
 - Desktop: elevated target windows, the locked desktop, remote desktops and controls with no
@@ -15,6 +16,19 @@ One paragraph per plan item: what exists now, how to run it, what was left open.
   docs/11-session-recorder.md).
 - `workstation/preflight.py` and `labctl workstation preflight`: "Ready" only when every check
   passes. Open: a frozen build must call `multiprocessing.freeze_support()` in its entry point.
+
+## 2026-11-20 — Recorder: event ids at capture, a durable journal, recovery and completeness
+Every workstation event gets a permanent `event_id` (UUIDv7), `channel` and `captured_at` the
+moment it is captured; `seq` and `global_seq` are display orders only, and references between
+events use the id (`caused_by_event`, `text_from_event`, a HAR entry's `_event_id`, the robot
+coverage's `links`). Each channel appends its events, finished steps and (web) HAR entries to
+`capture/<channel>.jsonl`, flushed per line and fsync'd every 0.5 s: the loss window is 2 s.
+A session killed mid-capture is rebuilt from the journal on the next start or with
+`labctl workstation recover`, HAR included, marked `recovered: true` with a gap per channel
+that did not close. The outbox speaks recorder contract 1.1.0: `contract_version` and the
+`completeness` manifest (and `preflight` when given); a stopped session is complete only when
+every channel it needed closed cleanly with no gap. Open: the collector supervisor's
+`channel_status()` and `preflight.py` plug in through `Session(channel_status=, preflight=)`.
 
 ## 2026-11-20 — Portal: the business outcome is shown for every app
 The session page showed the business outcome only inside the database change check, so a

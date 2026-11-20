@@ -46,7 +46,7 @@ decision per application about how much to record, and one timeline.
  │  foreground watcher (250 ms) ── identity ── level ──┬─ presence row → journal│
  │                                                    ├─ desktop: add pid ──────┼─► desktop/  (today's format)
  │                                                    └─ our Edge window: web ──┼─► web/      (today's format)
- │  journal.jsonl (per event, flushed)                                          │
+ │  journal.jsonl, capture/<channel>.jsonl (per event, fsync'd every 0.5 s)     │
  │  at stop: finalise each recorder → merge by time → session.jsonl, outbox     │
  └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -129,8 +129,12 @@ journal. `TWINLAB_COLLECTORS=threads` runs them in one process as before (for de
 - **Status** (`Session.channel_status()`, also `channels.json` in the session folder, written at
   each change): per channel `{"status": complete|interrupted|missing|not_requested, "gaps":
   [{"from", "to", "reason"}], "notes": [...], "details": {state, ready_at, restarts, failures,
-  mode, inaccessible}}`. `missing`: never ready; `interrupted`: ready, with a gap. The
-  completeness manifest takes it from there.
+  mode, inaccessible}}`. `missing`: never ready; `interrupted`: ready, with a gap. It is the
+  session's `channel_status` hook: `completeness.manifest` merges it with what the capture
+  journals say (the worse status wins). Each collector process opens and closes its own capture
+  journals (`capture/<channel>.jsonl`); a collector that is killed leaves its journal unclosed,
+  which the manifest reads as interrupted with the loss window. The preflight result is passed
+  as the session's `preflight` and goes into `session.json` and the outbox.
 - **Browser modes**: `controlled` (the default and the recommended one): the recorder starts the
   browser with a profile of its own (Edge, else Chrome, else Playwright's Chromium) and attaches
   to it. `attach` (`--cdp`, qualified): a browser already running with a DevTools port;
@@ -169,9 +173,46 @@ desktop recorder writes a step a second after its input), so numbering happens o
 4. `session.json` holds the state (`recording`, `stopped`, `recovered`), the targets, the
    applications seen with their levels and identity facts, and the Twin Lab commit.
 
-**Recovery**: on start, a session folder left `recording` (the program was killed) is
-finalised from what is on disk: the journal, each recording's `steps.jsonl` as far as it was
-flushed. A web recording loses its HAR then (the HAR is written at the end); the session says so.
+`global_seq` and each recording's `seq` are display orders, computed again at every build.
+Every event has a permanent **`event_id`** (UUIDv7), given the moment it is captured, with its
+`channel` (`web`, `desktop`, `mainframe`, `network`) and `captured_at` (UTC, ms): finalising,
+renumbering, recovery and reordering keep it, and references between events use it
+(`caused_by_event` and a record locator's `text_from_event` beside the web recorder's numbers,
+a HAR entry's `_event_id`, the robot coverage's `links`).
+
+### The capture journal and the loss window
+
+Each channel appends to `capture/<channel>.jsonl` as it captures (`labctl/workstation/journal.py`):
+an `event` line when an event arrives (its id, action, times and, on the web, the target origin:
+no selector, no value), a `step` line when the recorder has finished the step (as it writes it to
+`steps.jsonl`, cleaned), `drop` for events folded into another (two clicks into a double click),
+`har` for each HAR entry the web recorder keeps (credential headers removed, values typed so far
+taken out), `gap` for a known interruption (the browser closed and opened again), `tick` while
+idle, `open` and `close` (`clean`). `journal.jsonl` is written the same way.
+
+Every line is flushed when written, so a killed process loses nothing it wrote; lines are
+fsync'd every 0.5 s. **The loss window is 2 s** (`LOSS_WINDOW_S`): an event captured more than
+2 s before the recorder (or the machine) died is on disk. Detail completed later (the desktop
+batch settles within 3 s, the web page up to 15 s) can be lost; the event then stays, with its
+action and times, as `incomplete: true`.
+
+**Recovery**: on start (or `labctl workstation recover [folder]`), a session folder left
+`recording` (the program was killed) is rebuilt from its journal (`workstation/recovery.py`): each
+recording's steps in capture order, and a web recording's `recording.har` from the network
+journal. `session.json` says `recovered: true`; each channel that did not close cleanly is
+`interrupted`, with a gap for the loss window after its last durable line. A folder recorded
+before the journal is finalised from its `steps.jsonl` as before (no HAR; it says so).
+
+### Completeness
+
+The outbox carries `completeness` (recorder contract 1.1.0, `workstation/completeness.py`):
+`overall` (`complete|partial|failed`), per channel `status`
+(`complete|interrupted|missing|not_requested`), `gaps` and `notes`, `network_evidence`
+(`complete|incomplete|none`), `recovered` and `loss_window_seconds` (null before the journal). A
+stopped session is not complete by itself: `overall` is `complete` only when every channel the
+targets need started, closed cleanly and has no gap. A collector supervisor can add what it
+knows through `Session(channel_status=...)` (merged, the worse status wins), and preflight checks
+through `Session(preflight=...)` (the outbox's `preflight` block).
 
 ## What goes to the portal
 
@@ -180,12 +221,17 @@ before the first send of each session, and sends it only if the person agrees ("
 in the recorder; `--no-send` keeps it local).
 
 ```json
-{"session": {"id": "...", "name": "...", "machine": "...", "started": "...", "ended": "...",
+{"contract_version": "1.1.0",
+ "session": {"id": "...", "name": "...", "machine": "...", "started": "...", "ended": "...",
              "location": {"kind": "local", "path": "recordings/<id>"}},
  "apps": [{"key": "desktop:Contoso/CaseDesk", "surface": "desktop", "level": "full",
            "display": "CaseDesk", "exe": "CaseDesk.exe", "toolkit": "WinForms"}],
  "flows": {"desktop:Contoso/CaseDesk": [{"n": 1, "action": "type", "control": "Edit",
-            "label": "txtSearch", "screen": "CaseDesk"}]},
+            "label": "txtSearch", "screen": "CaseDesk", "event_id": "0196...",
+            "channel": "desktop", "captured_at": "2026-11-20T09:00:02.123Z"}]},
+ "completeness": {"overall": "complete", "channels": {"desktop": {"status": "complete",
+                  "gaps": [], "notes": []}, "...": "..."}, "network_evidence": "none",
+                  "recovered": false, "loss_window_seconds": 2.0},
  "timeline": [{"n": 1, "app": "desktop:Contoso/CaseDesk"}, {"n": 2, "app": "presence"}]}
 ```
 

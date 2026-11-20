@@ -64,6 +64,7 @@ def record(
     t = _targets(targets, exe, origin, steps_exe, tn3270)
     if cdp:
         typer.echo(f"warning: {CDP_WARNING}", err=True)
+    got = None
     if preflight:
         from labctl.workstation.preflight import preflight as run_preflight
 
@@ -76,7 +77,7 @@ def record(
     for done in recover_all(out):
         typer.echo(f"recovered an unfinished session: {done}")
     s = Session(out, t, name=name, max_seconds=minutes * 60, browser_profile=browser_profile,
-                cdp=cdp)  # fmt: skip
+                cdp=cdp, preflight=got)  # fmt: skip
     typer.echo(f"recording session {s.id} in {s.folder} (Ctrl+C or a 'stop' file ends it)")
     for i, m in enumerate(t.mainframes()):
         port = m.listen if m.listen is not None else 23270 + i
@@ -90,7 +91,8 @@ def record(
     typer.echo(f"applications recorded: {len(box['apps'])}")
     for a in box["apps"]:
         typer.echo(f"  {a['level']:8} {a['key']}  {len(box['flows'].get(a['key'], []))} step(s)")
-    for name, st in (s.channel_status() or {}).items():
+    completeness = box.get("completeness") or {}
+    for name, st in (completeness.get("channels") or {}).items():
         if st["status"] != "not_requested":
             typer.echo(f"channel {name}: {st['status']}")
             for g in st["gaps"]:
@@ -136,6 +138,31 @@ def finalize(folder: Path) -> None:
     if not session.recover(folder):
         timeline.build(folder)
     typer.echo(f"wrote {folder / 'session.jsonl'} and {folder / 'portal-outbox.json'}")
+
+
+@app.command("recover")
+def recover_cmd(
+    folder: Path | None = typer.Argument(None, help="One session folder (default: every one)."),
+    out: Path = typer.Option(Path("recordings"), help="Folder that holds the session folders."),
+) -> None:
+    """Rebuild sessions the recorder left unfinished (it was killed) from their capture journal."""
+    from labctl.workstation import session, timeline
+
+    done = (
+        ([folder.name] if session.recover(folder) else []) if folder else session.recover_all(out)
+    )
+    for name in done:
+        path = (folder if folder else out / name) / "portal-outbox.json"
+        c = timeline.read_references(path).get("completeness") or {}
+        typer.echo(f"recovered {name}: {c.get('overall', 'unknown')}")
+        for ch, st in (c.get("channels") or {}).items():
+            if st["status"] == "not_requested":
+                continue
+            typer.echo(f"  {ch:9} {st['status']}")
+            for g in st["gaps"]:
+                typer.echo(f"    gap {g['from']} - {g['to']}: {g['reason']}")
+    if not done:
+        typer.echo("nothing to recover")
 
 
 @app.command("propose")

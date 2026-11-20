@@ -8,12 +8,19 @@ step after its batch settles), so the session numbers nothing while it runs: `bu
 the three by time, each recording keeping its own order, and writes:
 
 - `session.jsonl`: one row per step: `{"global_seq", "ts", "app", "surface", "level",
-  "recording", "seq", "action"}`; an `app-switch` row between rows of two applications
-  (`from`, `to`: identity keys, or `presence`); consecutive presence rows are one row;
-- `portal-outbox.json`: the references (`outbox()`): the session, the applications recorded at
-  full or steps level, each one's flow of filtered labels (labctl.workstation.flow), and the
-  timeline as runs of applications. No value, title, tree, picture, time of a presence row or
-  name of a presence application.
+  "recording", "seq", "action", "event_id", "channel", "captured_at"}`; an `app-switch` row
+  between rows of two applications (`from`, `to`: identity keys, or `presence`); consecutive
+  presence rows are one row;
+- `portal-outbox.json`: the references (`outbox()`), recorder contract `CONTRACT_VERSION`: the
+  session, the applications recorded at full or steps level, each one's flow of filtered labels
+  (labctl.workstation.flow), the timeline as runs of applications, the completeness manifest
+  (labctl.workstation.completeness) and the preflight checks when there were some. No value,
+  title, tree, picture, time of a presence row or name of a presence application.
+
+`event_id` (a UUIDv7 given when the event was captured, labctl.workstation.journal) is how an
+event is referred to: `global_seq` and `seq` are display orders, computed again at every build
+(a recovered or re-merged session numbers differently), and nothing refers to an event by them.
+A step recorded before event ids (contract 1.0) has none, and its rows and labels carry none.
 """
 
 from __future__ import annotations
@@ -27,6 +34,13 @@ from labctl.workstation import flow
 from labctl.workstation.levels import FULL, PRESENCE, STEPS, origin_of
 
 FORMAT = "twinlab-workstation-session/1"
+# The recorder contract the references follow (twin-lab2 RECORDER-CONTRACT.md).
+CONTRACT_VERSION = "1.1.0"
+EVENT_FIELDS = ("event_id", "channel", "captured_at")
+
+
+def _event(source: dict) -> dict:
+    return {k: source[k] for k in EVENT_FIELDS if source.get(k)}
 
 
 def _t(ts: object) -> float:
@@ -76,7 +90,7 @@ def _streams(folder: Path) -> tuple[list[dict], dict]:
             rows[0].append((_t(j.get("ts")), 0, i, {"ts": j.get("ts"), "app": PRESENCE,
                                                     "surface": None, "level": PRESENCE,
                                                     "recording": None, "seq": None,
-                                                    "action": "presence"}))  # fmt: skip
+                                                    "action": "presence", **_event(j)}))  # fmt: skip
     last_desk = None
     by_exe = {
         str(a.get("exe") or "").lower(): k for k, a in apps.items() if a.get("surface") == "desktop"
@@ -93,14 +107,14 @@ def _streams(folder: Path) -> tuple[list[dict], dict]:
         rows[1].append((_t(s.get("ts")), 1, k, {"ts": s.get("ts"), "app": key, "surface": "desktop",
                                                 "level": level, "recording": "desktop",
                                                 "seq": s.get("seq"), "action": s.get("action"),
-                                                "_step": s}))  # fmt: skip
+                                                **_event(s), "_step": s}))  # fmt: skip
     last_web = None
     parts = [folder / "web"] + sorted(
         (p for p in folder.glob("web-*") if p.name[4:].isdigit()), key=lambda p: int(p.name[4:])
     )
     web_steps = [dict(s, _part=p.name) for p in parts for s in read_jsonl(p / "steps.jsonl")]
     for k, s in enumerate(web_steps):
-        origin = origin_of(str(s.get("url") or ""))
+        origin = origin_of(str(s.get("url") or "")) or origin_of(str(s.get("origin") or ""))
         if not origin:
             if str(s.get("action") or "").startswith("tab-") and last_web:
                 origin = last_web
@@ -118,7 +132,7 @@ def _streams(folder: Path) -> tuple[list[dict], dict]:
         rows[2].append((_t(s.get("ts")), 2, k, {"ts": s.get("ts"), "app": key, "surface": "web",
                                                 "level": level, "recording": s["_part"],
                                                 "seq": s.get("seq"), "action": s.get("action"),
-                                                "_step": dict(s, surface="web")}))  # fmt: skip
+                                                **_event(s), "_step": dict(s, surface="web")}))  # fmt: skip
     for k, s in enumerate(read_jsonl(folder / "mainframe" / "steps.jsonl")):
         key = s.get("app")
         if not key:
@@ -127,7 +141,7 @@ def _streams(folder: Path) -> tuple[list[dict], dict]:
             apps[key] = {"key": key, "surface": "mainframe", "level": FULL, "display": key[10:]}
         row = {"ts": s.get("ts"), "app": key, "surface": "mainframe",
                "level": apps[key].get("level") or FULL, "recording": "mainframe",
-               "seq": s.get("seq"), "action": s.get("action"), "_step": s}  # fmt: skip
+               "seq": s.get("seq"), "action": s.get("action"), **_event(s), "_step": s}  # fmt: skip
         rows[3].append((_t(s.get("ts")), 3, k, row))
     merged = [r[3] for r in heapq.merge(*rows, key=lambda r: (r[0], r[1], r[2]))]
     meta["apps"] = apps
@@ -154,6 +168,12 @@ def build(folder: Path) -> dict:
             f.write(json.dumps({k: v for k, v in row.items() if not k.startswith("_")},
                                ensure_ascii=False) + "\n")  # fmt: skip
     box = outbox(meta, out)
+    from labctl.workstation import completeness
+
+    box["completeness"] = completeness.manifest(folder, meta)
+    pre = completeness.preflight(meta)
+    if pre is not None:
+        box["preflight"] = pre
     cov = folder / "robot" / "coverage.json"
     if cov.is_file():  # the robot's own log was read beside the session: its counts only
         c = json.loads(cov.read_text(encoding="utf-8"))
@@ -161,6 +181,15 @@ def build(folder: Path) -> dict:
                         "covered": c.get("covered", 0), "gaps": len(c.get("gaps") or [])}  # fmt: skip
     (folder / "portal-outbox.json").write_text(json.dumps(box, indent=1, ensure_ascii=False),
                                                encoding="utf-8")  # fmt: skip
+    return box
+
+
+def read_references(path: Path) -> dict:
+    """A `portal-outbox.json` of any contract 1.x: one written before 1.1.0 reads as
+    `contract_version` 1.0.0 with no completeness manifest (what it missed is not known)."""
+    box = json.loads(Path(path).read_text(encoding="utf-8"))
+    box.setdefault("contract_version", "1.0.0")
+    box.setdefault("completeness", None)
     return box
 
 
@@ -174,9 +203,8 @@ def outbox(meta: dict, rows: list[dict]) -> dict:
         step = row.get("_step")
         if step is None or row.get("level") not in (FULL, STEPS):
             continue
-        flows.setdefault(row["app"], []).append(
-            flow.label_step(step, row["global_seq"], (meta.get("apps") or {}).get(row["app"]))
-        )
+        label = flow.label_step(step, row["global_seq"], (meta.get("apps") or {}).get(row["app"]))
+        flows.setdefault(row["app"], []).append(label | _event(row))
     apps = []
     for key, facts in (meta.get("apps") or {}).items():
         if facts.get("level") not in (FULL, STEPS) or key not in flows:
@@ -198,5 +226,5 @@ def outbox(meta: dict, rows: list[dict]) -> dict:
     session["location"] = {"kind": "local", "path": f"recordings/{meta.get('id')}"}
     session["targets"] = [{k: t[k] for k in ("key", "exe", "origin", "level", "app_id") if k in t}
                           for t in meta.get("targets") or []]  # fmt: skip
-    return {"format": "twinlab-references/1", "session": session, "apps": apps, "flows": flows,
-            "timeline": timeline}  # fmt: skip
+    return {"contract_version": CONTRACT_VERSION, "format": "twinlab-references/1",
+            "session": session, "apps": apps, "flows": flows, "timeline": timeline}  # fmt: skip

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from labctl.workstation import journal as capture
 from labctl.workstation import preflight as pf
 from labctl.workstation import supervisor as sv
 from labctl.workstation.levels import Targets
@@ -75,13 +76,11 @@ def _session(tmp_path: Path, cdp: str | None = None) -> Session:
     s = Session(tmp_path / "rec", Targets.from_list([]), name="sup", cdp=cdp)
     s.folder.mkdir(parents=True)
     s.started = _now()
-    s._journal = (s.folder / "journal.jsonl").open("a", encoding="utf-8")
+    s._journal = capture.Journal(s.folder / "journal.jsonl", ticks=False)
     return s
 
 
 def _rows(s: Session) -> list[dict]:
-    with s._lock:
-        s._journal.flush()
     text = (s.folder / "journal.jsonl").read_text(encoding="utf-8")
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
@@ -380,7 +379,7 @@ def test_preflight_attach_mode_needs_a_chromium_browser_that_answers():
 
 def test_preflight_fails_on_a_contract_the_portal_does_not_take():
     assert pf.check_recorder(None)["ok"]
-    assert not pf.check_recorder("1.0.0", contract=None)["ok"]
+    assert not pf.check_recorder("1.0.0", contract="")["ok"]  # a recorder stating none
     assert not pf.check_recorder("2.0.0", contract="1.1.0")["ok"]
     assert not pf.check_recorder("1.2.0", contract="1.1.0")["ok"]
     assert pf.check_recorder("1.0.0", contract="1.1.0")["ok"]

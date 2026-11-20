@@ -341,13 +341,15 @@ class Recorder:
 
     last_user: dict | None = None  # the user's last action: {"desc", "t", "action"}
     effects_unplaced = 0  # selections the application made, their cause already written
+    journal = None  # a workstation session's capture journal (set in __init__)
 
     def __init__(self, out_dir: Path, pids: set[int], *, screenshots: bool = False,
                  settle_ms: int = 400, max_seconds: float = 1800, hooks: bool = True,
                  stop: Callable[[], bool] | None = None, pictures: bool = True,
                  session: bool = False, levels: dict[int, str] | None = None,
                  admit: Callable[[int], str | None] | None = None,
-                 unfocused_values: bool = False, resume: bool = False) -> None:  # fmt: skip
+                 unfocused_values: bool = False, journal=None,
+                 resume: bool = False) -> None:  # fmt: skip
         require()
         from labctl.desktop import win
 
@@ -414,6 +416,10 @@ class Recorder:
         self.file = steps_file.open("a" if resume else "w", encoding="utf-8")
         self.started = _now()
         self._handlers: list = []
+        # A workstation session's capture journal (labctl.workstation.journal): an action's
+        # event line when it is captured, its step when the batch settles.
+        self.journal = journal
+        self._marked: set[str] = set()  # event ids captured, not yet written or dropped
 
     # -- events from UI Automation (their threads) ------------------------------------------------
 
@@ -727,7 +733,21 @@ class Recorder:
             return own
         return self.fg if self.fg in self.windows else next(iter(self.windows), 0)
 
+    def _marks(self) -> set[str]:
+        """Event ids captured, not yet written or dropped."""
+        return self.__dict__.setdefault("_marked", set())
+
     def _add(self, action: dict) -> None:
+        from labctl.workstation import journal as capture
+
+        if "event_id" not in action:  # captured now: its id is permanent from here on
+            when = datetime.fromtimestamp(action.get("t") or time.time(), UTC)
+            marker = capture.stamp({"action": action.get("kind"), "ts": when.isoformat(
+                timespec="milliseconds").replace("+00:00", "Z")}, SURFACE)  # fmt: skip
+            action["event_id"], action["captured_at"] = marker["event_id"], marker["captured_at"]
+            if self.journal is not None:
+                self.journal.event(marker, self.out.name)
+        self._marks().add(action["event_id"])
         self.pending.append(action)
         self.last_activity = time.monotonic()
 
@@ -840,6 +860,9 @@ class Recorder:
                 "raw_kind": kind, "state": state}  # fmt: skip
         if clicks:
             base["mouse"] = True
+            first = min(clicks, key=lambda c: c["t"])  # the click it was: the same event
+            if first.get("event_id"):
+                base["event_id"], base["captured_at"] = first["event_id"], first.get("captured_at")
             if any(c.get("injected") for c in clicks):
                 base["injected"] = True
             for c in clicks:
@@ -1000,6 +1023,13 @@ class Recorder:
         for hwnd, snap in after.items():
             if snap is not None:
                 self.trees[hwnd] = snap
+        # Captured but neither written nor waiting: folded into another step, or no step.
+        marked = self._marks()
+        gone = marked - {a.get("event_id") for a in self.pending}
+        if gone:
+            marked -= gone
+            if self.journal is not None:
+                self.journal.drop(sorted(gone), "not a step of its own")
 
     def _unchanged(self, a: dict, after: dict) -> bool:
         """A value event whose value is the one the window showed before (or when it opened):
@@ -1125,6 +1155,8 @@ class Recorder:
             "window": {k: window.get(k) for k in ("selector", "title", "props")},
             "target": None, "selector": None, "via": a.get("via", "poll"), "tree": None,
             "screenshot": None, "url": None, "dom": None}  # fmt: skip
+        if a.get("event_id"):
+            step.update(event_id=a["event_id"], channel=SURFACE, captured_at=a.get("captured_at"))
         if a.get("injected"):
             step["injected"] = True  # synthetic input (a script), not a person's hand
         desc = a.get("desc")
@@ -1218,8 +1250,16 @@ class Recorder:
                 pic = self._picture(hwnd if kind != "menu_open" else a["hwnd"], tree_snap, seq)
                 if pic:
                     step["picture"] = pic
+        self._emit(step)
+
+    def _emit(self, step: dict) -> None:
+        """Write a finished step to steps.jsonl and to the session's journal."""
         self.file.write(json.dumps(step, ensure_ascii=False) + "\n")
         self.file.flush()
+        if step.get("event_id"):
+            self._marks().discard(step["event_id"])
+            if self.journal is not None:
+                self.journal.step(step, self.out.name)
 
     def _picture(self, hwnd: int, snap: tuple[dict, dict], seq: int) -> str | None:
         """A picture of the window without data (labctl.desktop.pictures), or None."""

@@ -61,6 +61,7 @@ NOT_RESTARTABLE = {
     "mainframe": "restarting the TN3270 proxy would drop the terminal's connection and "
     "renumber its screens",
 }
+CAPTURE = {"web": ("web", "network"), "desktop": ("desktop",), "mainframe": ("mainframe",)}
 RUNNERS = {
     "web": "labctl.workstation.supervisor:run_web",
     "desktop": "labctl.workstation.supervisor:run_desktop",
@@ -256,6 +257,7 @@ class Supervisor:
         ch.state = "starting"
         ch.started_at = ch.started_at or _now()
         ch.proc.start()
+        _bind_to_job(ch.proc.pid)
         self._event(ch, "started", pid=ch.proc.pid, restart=resume)
 
     # -- the loop: messages and heartbeats -----------------------------------------------------
@@ -607,6 +609,51 @@ def _web_parts(folder: Path) -> int:
     return n
 
 
+_JOB = None
+
+
+def _bind_to_job(pid: int) -> None:
+    """Windows: put a collector in a job that ends with this process (kill on close), so a
+    session killed outright never leaves its collectors recording."""
+    global _JOB
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    k = ctypes.windll.kernel32
+    k.CreateJobObjectW.restype = wintypes.HANDLE
+    k.OpenProcess.restype = wintypes.HANDLE
+    k.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                          wintypes.DWORD]  # fmt: skip
+    k.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    if _JOB is None:
+
+        class Basic(ctypes.Structure):
+            _fields_ = [("a", ctypes.c_int64), ("b", ctypes.c_int64), ("LimitFlags", wintypes.DWORD),
+                        ("c", ctypes.c_size_t), ("d", ctypes.c_size_t), ("e", wintypes.DWORD),
+                        ("f", ctypes.c_size_t), ("g", wintypes.DWORD), ("h", wintypes.DWORD)]  # fmt: skip
+
+        class Extended(ctypes.Structure):
+            _fields_ = [("basic", Basic), ("io", ctypes.c_uint64 * 6), ("p", ctypes.c_size_t),
+                        ("j", ctypes.c_size_t), ("pp", ctypes.c_size_t), ("pj", ctypes.c_size_t)]  # fmt: skip
+
+        job = k.CreateJobObjectW(None, None)
+        if not job:
+            return
+        info = Extended()
+        info.basic.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            k.CloseHandle(job)
+            return
+        _JOB = job  # kept open for the life of this process
+    h = k.OpenProcess(0x0101, False, pid)  # PROCESS_SET_QUOTA | PROCESS_TERMINATE
+    if h:
+        k.AssignProcessToJobObject(_JOB, h)
+        k.CloseHandle(h)
+
+
 def _kill_tree(pid: int) -> None:
     if sys.platform == "win32":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
@@ -672,8 +719,12 @@ class ChildContext:
         parent = mp.parent_process()
         if parent is None:
             return
-        parent.join()  # returns when the session's process is gone: stop, do not record on
+        parent.join()  # returns when the session's process is gone
+        # The session was killed: so is this collector, at once (its capture journals stay
+        # unclosed, which recovery reads as interrupted, with the loss window). Recording on
+        # would hold the session's files while the next start recovers them.
         self.local_stop.set()
+        os._exit(70)
 
     def _read_inbox(self) -> None:
         while True:
@@ -734,6 +785,16 @@ def channel_session(ctx: ChildContext, spec: dict):
             self.isolated = False
             self._main = threading.get_ident()
             self._seen_remote: set[str] = set()
+            # This collector's capture journals (labctl.workstation.journal), on the session's
+            # files: a restarted collector appends to them; a killed one leaves them unclosed.
+            from labctl.workstation import journal as capture
+
+            self.capture = {c: capture.Journal(capture.path_of(self.folder, c), c)
+                            for c in CAPTURE.get(ctx.channel, ())}  # fmt: skip
+
+        def close_capture(self) -> None:
+            for c, j in self.capture.items():
+                j.close(clean=c not in self.failed)
 
         def journal(self, row: dict) -> None:
             row = dict(row, ts=row.get("ts") or _now())
@@ -785,14 +846,19 @@ def channel_session(ctx: ChildContext, spec: dict):
             rec = Recorder(self.folder / "desktop", set(), session=True, stop=self.stopping,
                            max_seconds=self.max_seconds, pictures=self.pictures,
                            admit=self.admit, unfocused_values=self.robot,
-                           resume=self.resume)  # fmt: skip
+                           journal=self.capture.get("desktop"), resume=self.resume)  # fmt: skip
             self.first_seq = rec.seq
             for pid, lvl in self._pending:
                 rec.add_process(pid, lvl)
             self._pending = []
             self.desktop = rec
+            self._channel_open("desktop")
             ctx.ready()
-            rec.run()
+            try:
+                rec.run()
+            except Exception:
+                self.failed.add("desktop")
+                raise
 
     return ChannelSession()
 
@@ -817,7 +883,10 @@ def run_web(ctx: ChildContext, spec: dict) -> None:
         if exe:
             s.browser = exe
             s.note("no Edge or Chrome installed: the session browser is Playwright's Chromium")
-    s._web()
+    try:
+        s._web()
+    finally:
+        s.close_capture()
 
 
 def run_mainframe(ctx: ChildContext, spec: dict) -> None:
@@ -832,6 +901,7 @@ def run_mainframe(ctx: ChildContext, spec: dict) -> None:
             proxy.stop()
         for proxy in s.mainframe:
             proxy.join(10)
+        s.close_capture()
 
 
 def desktop_locked() -> bool | None:
@@ -932,6 +1002,7 @@ def run_desktop(ctx: ChildContext, spec: dict) -> None:
     finally:
         done.set()
         s.stop()
+        s.close_capture()
     rows = timeline.read_jsonl(s.folder / "desktop" / "steps.jsonl")
     found = inaccessible_steps(rows, getattr(s, "first_seq", 0))
     if found:
